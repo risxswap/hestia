@@ -4,7 +4,7 @@
 
 ## 目标
 
-本文档定义个人 AI 形象顾问 Agent 的第一版项目模块设计。项目包含一个 Go 服务端、一个管理端、一个微信小程序、一个简单的终端用户 Web 端。
+本文档定义个人 AI 形象顾问 Agent 的第一版项目模块设计。项目包含两个 Go 服务端、一个管理端、一个微信小程序、一个简单的终端用户 Web 端。
 
 第一版技术选型：
 
@@ -15,21 +15,28 @@
 - 管理端：`admin`
 - 小程序：`miniapp`
 - 用户 Web：`user`
-- 服务端：`server`
+- 用户侧服务端：`user-server`
+- 管理侧服务端：`admin-server`
 
 ## 总体架构
 
-项目采用一个 Go server 服务，不做微服务拆分。server 内部同时包含 HTTP API 和异步任务模块。
+项目采用两个 Go 服务端入口：
 
-异步任务模块先作为同一个 Go 服务内的 goroutine/worker 运行，后续如果 AI 分析、报告生成、图片处理压力变大，可以平滑拆为独立 worker 进程。业务代码边界需要从第一版开始保留这种拆分可能。
+- `user-server`：服务微信小程序和终端用户 Web。
+- `admin-server`：只服务管理端。
+
+这不是按业务域拆微服务。两个服务端仍然在同一个 Go 项目中，共享领域模型、用例代码、基础设施适配、MySQL、Redis 和七牛云配置。运行时将用户侧 API 和管理侧 API 隔离，避免管理端能力暴露在用户侧服务中。
+
+异步任务模块第一版优先随 `user-server` 运行，用于处理图片分析、AI 结构化抽取、报告生成、建议生成、七牛云资源清理等用户侧任务。`admin-server` 可以查看任务、触发重试、管理 AI 配置和风格库，但不承载小程序或用户 Web API。后续如果任务压力变大，可以将 worker 独立为单独进程。
 
 整体结构：
 
 ```text
-admin      管理端，用于运营配置、必要审核、任务监控
+admin      管理端，用于运营配置、任务监控、用户运营支持
 miniapp    微信小程序，承载主要用户体验
 user       终端用户 Web，承载报告查看、历史建议、反馈和分享入口
-server     Go 服务端，提供三端 API、业务编排、AI Gateway、异步任务
+user-server   Go 用户侧服务端，提供 miniapp/user API、用户业务编排、AI Gateway、异步任务
+admin-server  Go 管理侧服务端，提供 admin API、运营配置、任务监控、用户运营支持
 mysql      持久化业务数据
 redis      缓存、限流、队列、短期任务锁
 qiniu      图片和资源存储
@@ -51,18 +58,18 @@ qiniu      图片和资源存储
 
 ### admin
 
-`admin` 是管理端，第一版重点是运营配置、必要审核与任务监控：
+`admin` 是管理端，第一版重点是运营配置、任务监控和用户运营支持：
 
 - 明星风格库维护。
 - 风格标签维护。
 - 报告模板和提示词配置。
 - 推荐规则配置。
 - 用户基础信息查看。
-- 图片、反馈、敏感内容的必要审核。
-- 用户删除请求处理。
+- 任务状态查看和失败重试。
+- 用户运营支持。
 - 异步任务状态查看和失败重试。
 
-第一版不做复杂数据看板和精细权限体系，但需要保留角色和权限扩展能力。
+第一版不做独立审核模块、复杂数据看板和精细权限体系。必要复核能力放在对应模块内，例如风格库发布前检查、AI 配置测试、任务异常查看和用户运营支持。
 
 ### user
 
@@ -78,29 +85,32 @@ qiniu      图片和资源存储
 
 ## 用户身份体系
 
-三端共用同一套用户身份体系：
+小程序和用户 Web 共用同一套终端用户身份体系：
 
 - 小程序通过微信登录建立主账号。
 - 用户 Web 可以通过手机号验证码、微信授权或安全访问链接进入同一账号。
 - 用户画像、衣橱、报告、推荐、反馈和记忆全部归属同一用户。
 - 分享页可以支持临时访问 token，但只能访问被授权的有限内容，不能暴露敏感照片和完整个人档案。
 
-管理端使用独立管理员身份体系，并通过角色控制管理能力。
+管理端使用独立管理员身份体系。第一版管理端权限保持极简，不设计独立角色表。
 
 ## 服务端架构
 
-服务端采用单体 Go server 和轻量领域分层架构。
+服务端采用同仓库双服务入口和轻量领域分层架构。
 
-不采用重型 DDD，也不做微服务拆分。第一版重点是让领域边界清楚、业务编排可读、基础设施可替换、异步 worker 可拆分。
+不采用重型 DDD，也不按业务域拆微服务。第一版重点是让用户侧入口和管理侧入口运行时隔离，同时保持领域边界清楚、业务编排可读、基础设施可替换、异步 worker 可拆分。
 
 推荐目录：
 
 ```text
 server/
   cmd/
-    server/                 # 服务启动入口
+    user-server/            # 小程序和用户 Web 服务启动入口
+    admin-server/           # 管理端服务启动入口
   internal/
-    app/                    # 路由注册、依赖装配、任务消费者启动
+    app/                    # 服务装配
+      user/                 # user-server 路由、依赖、任务消费者启动
+      admin/                # admin-server 路由、依赖
     domain/                 # 领域模型和领域规则
       account/
       profile/
@@ -139,20 +149,23 @@ server/
 - `domain` 存放业务概念、领域模型、核心规则。
 - `application` 负责编排业务流程，例如 onboarding、报告生成、每日建议。
 - `infrastructure` 负责 MySQL、Redis、七牛云、AI 模型、微信登录、短信等外部依赖。
-- `interfaces` 负责三端 HTTP API、DTO、鉴权中间件和响应格式。
+- `interfaces` 负责各端 HTTP API、DTO、鉴权中间件和响应格式。
 - `pkg` 只放不含业务语义的通用工具。
 
 业务模块不应直接调用第三方模型、七牛云或 Redis。外部依赖需要通过 infrastructure 封装。
 
 ## HTTP API 边界
 
-三端按入口拆 API，底层复用 application 和 domain。
+用户侧和管理侧按服务拆 API，底层复用 application 和 domain。
 
 ```text
-/api/miniapp/*    小程序主体验 API
-/api/user/*       用户 Web API
-/api/admin/*      管理端 API
-/api/internal/*   内部任务、回调或诊断 API，默认不对前端暴露
+user-server:
+  /api/miniapp/*    小程序主体验 API
+  /api/user/*       用户 Web API
+  /api/internal/*   用户侧内部任务、回调或诊断 API，默认不对前端暴露
+
+admin-server:
+  /api/admin/*      管理端 API
 ```
 
 ### miniapp API
@@ -168,7 +181,7 @@ server/
 - 报告生成和查看。
 - 每日场景建议。
 - 反馈提交。
-- 用户数据删除请求。
+- 用户数据删除入口。
 
 ### user API
 
@@ -189,8 +202,6 @@ server/
 - 风格标签管理。
 - 提示词和报告模板管理。
 - 用户基础信息查询。
-- 内容审核。
-- 用户删除请求处理。
 - 异步任务查询和重试。
 - AI 调用记录和成本摘要查看。
 
@@ -207,8 +218,8 @@ server/
 - Web 登录。
 - 分享 token。
 - 管理员登录。
-- 管理端角色和权限。
-- 用户注销和删除请求入口。
+- 管理端账号。
+- 用户注销入口。
 
 ### profile
 
@@ -288,7 +299,8 @@ server/
 
 - Redis 负责排队、消费、重试触发和短期任务锁。
 - MySQL 记录任务类型、状态、输入摘要、输出结果、失败原因、重试次数和关联对象。
-- Go server 内部启动 worker goroutine 消费任务。
+- `user-server` 内部启动 worker goroutine 消费用户侧任务。
+- `admin-server` 可以查看任务和触发重试，但不承载用户侧任务消费。
 
 核心任务类型：
 
@@ -389,9 +401,7 @@ server/
 - 用户账号。
 - 微信 openid 和 unionid。
 - 手机号。
-- 会话 token。
 - 管理员账号。
-- 角色和权限。
 - Web 分享 token。
 - 分享访问范围。
 
@@ -493,11 +503,9 @@ server/
 - Redis 队列状态。
 - MySQL 持久化任务状态。
 
-### 运营与审核
+### 运营与管理
 
 - 管理端操作日志。
-- 内容审核结果。
-- 用户删除请求。
 - 风格库发布状态。
 - 提示词版本。
 - 模板版本。
@@ -537,7 +545,7 @@ Redis 不作为关键业务数据的唯一存储。
 
 ### AI Gateway
 
-所有 AI 调用必须通过 server 内部 AI Gateway。AI Gateway 统一处理：
+所有 AI 调用必须通过 server 内部 AI Gateway。`user-server` 和 `admin-server` 共享同一套 AI Gateway 代码，但运行时按服务分别调用。AI Gateway 统一处理：
 
 - 模型选择。
 - Prompt 版本。
@@ -551,11 +559,13 @@ Redis 不作为关键业务数据的唯一存储。
 
 模块设计满足第一版开发条件，当且仅当：
 
-- 四个项目入口命名清楚：`server`、`admin`、`miniapp`、`user`。
-- server 是单体 Go 服务，不做微服务拆分。
-- server 内部具备异步任务模块，并预留 worker 独立部署边界。
+- 项目入口命名清楚：`server`、`admin`、`miniapp`、`user`。
+- 服务端包含两个 Go 服务入口：`user-server` 和 `admin-server`。
+- `user-server` 服务小程序和用户 Web；`admin-server` 只服务管理端。
+- 两个服务端共享 domain、application、infrastructure，但运行时隔离。
+- `user-server` 内部具备异步任务模块，并预留 worker 独立部署边界。
 - server 采用轻量领域分层，而不是大平层 CRUD。
-- 三端 API 按入口拆分，底层复用 application 和 domain。
+- 用户侧 API 和管理侧 API 按服务拆分，底层复用 application 和 domain。
 - MySQL、Redis、七牛云和 AI Gateway 的职责边界明确。
 - 明星风格库被定义为风格参考层，而不是相貌对比系统。
 - 用户反馈和长期记忆是推荐系统的核心输入。
