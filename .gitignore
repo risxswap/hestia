@@ -1,5 +1,6 @@
 # Local agent files
 .codex/
+.superpowers/
 
 # Environment and secrets
 .env
