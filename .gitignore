@@ -1,0 +1,48 @@
+# Local agent files
+.codex/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Go
+bin/
+dist/
+coverage.out
+*.coverprofile
+*.test
+
+# Node and frontend builds
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.vite/
+.next/
+.nuxt/
+coverage/
+build/
+
+# WeChat mini program
+miniprogram_npm/
+project.private.config.json
+
+# IDE
+.idea/
+.vscode/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
