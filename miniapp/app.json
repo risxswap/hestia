@@ -1,0 +1,40 @@
+{
+  "pages": [
+    "pages/advisor/advisor",
+    "pages/report/report",
+    "pages/wardrobe/wardrobe",
+    "pages/profile/profile",
+    "pages/onboarding/onboarding"
+  ],
+  "window": {
+    "navigationBarTitleText": "Hestia",
+    "navigationBarBackgroundColor": "#F7F3EB",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#F7F3EB"
+  },
+  "tabBar": {
+    "color": "#71695D",
+    "selectedColor": "#245D4F",
+    "backgroundColor": "#FFFDF8",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/advisor/advisor",
+        "text": "顾问"
+      },
+      {
+        "pagePath": "pages/report/report",
+        "text": "报告"
+      },
+      {
+        "pagePath": "pages/wardrobe/wardrobe",
+        "text": "衣橱"
+      },
+      {
+        "pagePath": "pages/profile/profile",
+        "text": "我的"
+      }
+    ]
+  },
+  "sitemapLocation": "sitemap.json"
+}

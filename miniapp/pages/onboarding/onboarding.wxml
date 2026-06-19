@@ -1,0 +1,12 @@
+<view class="page">
+  <view class="card block">
+    <text class="title">8 分钟建立初始形象档案</text>
+    <text class="muted">照片只用于生成个人建议，你可以随时删除。</text>
+    <l-button type="primary">开始</l-button>
+  </view>
+  <view class="card steps">
+    <block wx:for="{{steps}}" wx:key="*this">
+      <text class="step">{{index + 1}}. {{item}}</text>
+    </block>
+  </view>
+</view>

@@ -1,0 +1,25 @@
+.block,
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+  padding: 28rpx;
+}
+
+.title {
+  font-size: 40rpx;
+  font-weight: 700;
+}
+
+.steps {
+  margin-top: 24rpx;
+}
+
+.step {
+  padding: 16rpx 0;
+  border-top: 1rpx solid #e6ded0;
+}
+
+.step:first-child {
+  border-top: 0;
+}

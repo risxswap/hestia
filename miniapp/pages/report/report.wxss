@@ -1,0 +1,36 @@
+.report-head {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  padding: 28rpx;
+}
+
+.title {
+  font-size: 44rpx;
+  font-weight: 700;
+}
+
+.list {
+  margin-top: 24rpx;
+  padding: 8rpx 28rpx;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  padding: 24rpx 0;
+  border-top: 1rpx solid #e6ded0;
+}
+
+.item:first-child {
+  border-top: 0;
+}
+
+.item-title {
+  font-weight: 700;
+}
+
+.avoid {
+  color: #a9783a;
+}

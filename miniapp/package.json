@@ -1,0 +1,14 @@
+{
+  "name": "@hestia/miniapp",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "lin-ui:load": "lin-ui-cli load"
+  },
+  "dependencies": {
+    "lin-ui": "^1.1.9"
+  },
+  "devDependencies": {
+    "lin-ui-cli": "^0.1.0-beta.6"
+  }
+}

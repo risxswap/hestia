@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "AI 形象顾问",
+  "usingComponents": {
+    "l-button": "/miniprogram_npm/lin-ui/button/index",
+    "l-tag": "/miniprogram_npm/lin-ui/tag/index"
+  }
+}

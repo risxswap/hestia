@@ -1,0 +1,12 @@
+<view class="page">
+  <view class="card block">
+    <text class="title">核心衣橱</text>
+    <text class="muted">第一版只维护推荐所需的高频核心单品和关键缺口。</text>
+  </view>
+  <view class="card block">
+    <text class="subtitle">关键缺口</text>
+    <block wx:for="{{gaps}}" wx:key="*this">
+      <text class="gap">{{item}}</text>
+    </block>
+  </view>
+</view>

@@ -1,0 +1,16 @@
+{
+  "appid": "touristappid",
+  "projectname": "hestia-miniapp",
+  "miniprogramRoot": "./",
+  "compileType": "miniprogram",
+  "setting": {
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "packNpmManually": false
+  },
+  "scripts": {
+    "beforeUpload": "npx lin-ui-cli load"
+  }
+}

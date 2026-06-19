@@ -1,0 +1,27 @@
+<view class="page advisor-page">
+  <view class="chat card">
+    <block wx:for="{{messages}}" wx:key="text">
+      <view class="bubble {{item.role}}">
+        <text>{{item.text}}</text>
+      </view>
+    </block>
+  </view>
+
+  <view class="chips">
+    <l-tag
+      wx:for="{{quickScenes}}"
+      wx:key="*this"
+      shape="circle"
+      data-scene="{{item}}"
+      bind:tap="handleSceneTap"
+    >
+      {{item}}
+    </l-tag>
+  </view>
+
+  <view class="composer card">
+    <text class="placeholder">输入场景、衣服或今天想呈现的感觉</text>
+    <l-button size="mini" type="default">拍照</l-button>
+    <l-button size="mini" type="primary">发送</l-button>
+  </view>
+</view>

@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "个人报告",
+  "usingComponents": {
+    "l-button": "/miniprogram_npm/lin-ui/button/index"
+  }
+}

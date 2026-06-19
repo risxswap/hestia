@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "建立形象档案",
+  "usingComponents": {
+    "l-button": "/miniprogram_npm/lin-ui/button/index"
+  }
+}

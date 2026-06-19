@@ -1,0 +1,50 @@
+.advisor-page {
+  display: flex;
+  min-height: calc(100vh - 64rpx);
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.chat {
+  flex: 1;
+  padding: 28rpx;
+}
+
+.bubble {
+  max-width: 86%;
+  margin-bottom: 20rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 12rpx;
+  line-height: 1.7;
+}
+
+.advisor {
+  color: #27231f;
+  background: #f1ebe0;
+}
+
+.user {
+  margin-left: auto;
+  color: #fffdf8;
+  background: #245d4f;
+}
+
+.chips {
+  display: flex;
+  gap: 16rpx;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12rpx;
+  align-items: center;
+  padding: 16rpx;
+}
+
+.placeholder {
+  color: #71695d;
+  font-size: 26rpx;
+}
