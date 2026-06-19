@@ -3,7 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "build:npm": "echo \"请在微信开发者工具中执行：工具 -> 构建 npm\""
+    "build:npm": "echo \"请在微信开发者工具中执行：工具 -> 构建 npm\"",
+    "verify:today-ui": "node scripts/verify-today-ui.js"
   },
   "dependencies": {
     "tdesign-miniprogram": "^1.15.1",

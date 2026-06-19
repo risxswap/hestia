@@ -1,17 +1,62 @@
-<view class="page home-page">
-  <view class="card home-head">
-    <text class="muted">报告更新时间：{{updatedAt}}</text>
-    <text class="title">你的下一步</text>
-    <button class="primary-button">按这个生成明天搭配</button>
+<view class="page home-page today-page">
+  <view class="today-hero">
+    <view class="today-topline">
+      <text class="today-brand">Hestia</text>
+      <text class="today-context">{{todayRecommendation.context}}</text>
+    </view>
+
+    <view class="today-label">{{todayRecommendation.label}}</view>
+    <text class="today-title">{{todayRecommendation.title}}</text>
+    <text class="today-summary">{{todayRecommendation.summary}}</text>
+
+    <view class="today-visual" aria-label="{{todayRecommendation.visualTitle}}">
+      <view class="visual-swatch visual-swatch--light"></view>
+      <view class="visual-swatch visual-swatch--green"></view>
+      <view class="visual-swatch visual-swatch--gold"></view>
+      <view class="visual-copy">
+        <text class="visual-title">{{todayRecommendation.visualTitle}}</text>
+        <text class="visual-meta">{{todayRecommendation.visualMeta}}</text>
+      </view>
+    </view>
+
+    <view class="today-actions">
+      <button class="primary-button today-button" bind:tap="handlePrimaryAction">
+        {{todayRecommendation.primaryAction}}
+      </button>
+      <button class="secondary-button today-button" bind:tap="handleSceneChange">
+        {{todayRecommendation.secondaryAction}}
+      </button>
+    </view>
   </view>
 
-  <view class="card list">
-    <block wx:for="{{actionItems}}" wx:key="title">
-      <view class="item">
-        <text class="item-title">{{index + 1}}. {{item.title}}</text>
-        <text class="muted">{{item.reason}}</text>
-        <text class="avoid">{{item.avoid}}</text>
+  <view class="today-section">
+    <view class="section-head">
+      <text class="section-kicker">顾问方案</text>
+      <text class="section-title">为什么适合今天</text>
+    </view>
+
+    <block wx:for="{{todayPlanSections}}" wx:key="title">
+      <view class="plan-item">
+        <text class="plan-title">{{item.title}}</text>
+        <text class="plan-body">{{item.body}}</text>
       </view>
     </block>
+  </view>
+
+  <view class="today-section feedback-section">
+    <view class="section-head">
+      <text class="section-kicker">让建议进化</text>
+      <text class="section-title">你的反馈我会记住</text>
+    </view>
+
+    <view class="feedback-grid">
+      <block wx:for="{{feedbackOptions}}" wx:key="*this">
+        <button class="feedback-chip" data-value="{{item}}" bind:tap="handleFeedback">
+          {{item}}
+        </button>
+      </block>
+    </view>
+
+    <text wx:if="{{memoryToast}}" class="memory-toast">{{memoryToast}}</text>
   </view>
 </view>
