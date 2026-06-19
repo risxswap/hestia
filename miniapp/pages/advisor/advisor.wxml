@@ -1,27 +1,42 @@
-<view class="page advisor-page">
-  <view class="chat card">
-    <block wx:for="{{messages}}" wx:key="text">
-      <view class="bubble {{item.role}}">
-        <text>{{item.text}}</text>
-      </view>
-    </block>
-  </view>
+<view class="page advisor-page advisor-chat">
+  <t-chat-list
+    id="advisor-chat-list"
+    class="advisor-chat__list"
+    data="{{chatItems}}"
+    layout="both"
+    animation="moving"
+    reverse="{{false}}"
+  >
+    <view slot="footer" class="advisor-chat__footer" style="{{footerStyle}}">
+      <scroll-view class="advisor-chat__scenes" scroll-x enable-flex>
+        <view
+          wx:for="{{quickScenes}}"
+          wx:key="*this"
+          class="scene-chip"
+          data-scene="{{item}}"
+          bind:tap="handleScene"
+        >
+          {{item}}
+        </view>
+      </scroll-view>
 
-  <view class="chips">
-    <l-tag
-      wx:for="{{quickScenes}}"
-      wx:key="*this"
-      shape="circle"
-      data-scene="{{item}}"
-      bind:tap="handleSceneTap"
-    >
-      {{item}}
-    </l-tag>
-  </view>
-
-  <view class="composer card">
-    <text class="placeholder">输入场景、衣服或今天想呈现的感觉</text>
-    <l-button size="mini" type="default">拍照</l-button>
-    <l-button size="mini" type="primary">发送</l-button>
-  </view>
+      <t-config-provider global-config="{{tdesignConfig}}">
+        <view class="composer">
+          <t-chat-sender
+            value="{{inputValue}}"
+            placeholder="输入场景、衣服或今天想呈现的感觉"
+            loading="{{thinking}}"
+            adjust-position="{{false}}"
+            render-presets="{{renderPresets}}"
+            textarea-props="{{textareaProps}}"
+            bind:change="handleInputChange"
+            bind:send="handleSend"
+            bind:stop="handleStop"
+            bind:fileSelect="handleFileSelect"
+            bind:keyboardheightchange="handleKeyboardHeightChange"
+          />
+        </view>
+      </t-config-provider>
+    </view>
+  </t-chat-list>
 </view>

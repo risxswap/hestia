@@ -1,9 +1,10 @@
 {
   "pages": [
+    "pages/home/home",
     "pages/advisor/advisor",
-    "pages/report/report",
     "pages/wardrobe/wardrobe",
     "pages/profile/profile",
+    "pages/report/report",
     "pages/onboarding/onboarding"
   ],
   "window": {
@@ -19,20 +20,28 @@
     "borderStyle": "white",
     "list": [
       {
-        "pagePath": "pages/advisor/advisor",
-        "text": "顾问"
+        "pagePath": "pages/home/home",
+        "text": "首页",
+        "iconPath": "assets/tabbar/home.png",
+        "selectedIconPath": "assets/tabbar/home-active.png"
       },
       {
-        "pagePath": "pages/report/report",
-        "text": "报告"
+        "pagePath": "pages/advisor/advisor",
+        "text": "顾问",
+        "iconPath": "assets/tabbar/advisor.png",
+        "selectedIconPath": "assets/tabbar/advisor-active.png"
       },
       {
         "pagePath": "pages/wardrobe/wardrobe",
-        "text": "衣橱"
+        "text": "衣橱",
+        "iconPath": "assets/tabbar/wardrobe.png",
+        "selectedIconPath": "assets/tabbar/wardrobe-active.png"
       },
       {
         "pagePath": "pages/profile/profile",
-        "text": "我的"
+        "text": "我的",
+        "iconPath": "assets/tabbar/profile.png",
+        "selectedIconPath": "assets/tabbar/profile-active.png"
       }
     ]
   },

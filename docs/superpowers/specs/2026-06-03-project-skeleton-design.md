@@ -8,7 +8,7 @@
 
 ## 技术选型
 
-- 小程序：微信原生小程序 + Lin UI。
+- 小程序：微信原生小程序 + TDesign MiniProgram。
 - 用户 Web：Vue 3 + Vite + Naive UI。
 - 管理端：Vue 3 + Vite + Element Plus。
 - 包管理：三个前端项目各自独立维护 `package.json` 和 `package-lock.json`，不使用根目录 npm workspaces。
@@ -31,15 +31,16 @@ server/
 
 ## 小程序骨架
 
-`miniapp` 作为微信开发者工具项目根目录，保留 `app.json`、`project.config.json`、`lin-ui.config.json` 和核心页面：
+`miniapp` 作为微信开发者工具项目根目录，保留 `app.json`、`project.config.json` 和核心页面：
 
 - 顾问。
-- 报告。
+- 首页。
 - 衣橱。
 - 我的。
+- 报告。
 - Onboarding。
 
-Lin UI 使用 npm 依赖，组件引用指向微信开发者工具构建后的 `miniprogram_npm/lin-ui`。该目录是构建产物，不提交。
+TDesign MiniProgram 使用 npm 依赖，组件引用由微信开发者工具构建后的 `miniprogram_npm` 承载。该目录是构建产物，不提交。顾问页直接使用 TDesign 的 `chat-list` 和 `chat-sender` 官方 AI Chat 组件。
 
 ## 用户 Web 骨架
 

@@ -1,27 +1,42 @@
-.block,
-.steps {
+.home-page {
+  min-height: calc(100vh - 64rpx);
+}
+
+.home-head {
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
+  gap: 20rpx;
   padding: 28rpx;
 }
 
 .title {
-  font-size: 40rpx;
+  font-size: 44rpx;
   font-weight: 700;
 }
 
-.steps {
+.list {
   margin-top: 24rpx;
+  padding: 8rpx 28rpx;
 }
 
-.step {
-  padding: 16rpx 0;
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  padding: 24rpx 0;
   border-top: 1rpx solid #e6ded0;
 }
 
-.step:first-child {
+.item:first-child {
   border-top: 0;
+}
+
+.item-title {
+  font-weight: 700;
+}
+
+.avoid {
+  color: #a9783a;
 }
 
 .primary-button {

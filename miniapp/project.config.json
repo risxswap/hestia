@@ -1,5 +1,5 @@
 {
-  "appid": "touristappid",
+  "appid": "wx313157d9659455cf",
   "projectname": "hestia-miniapp",
   "miniprogramRoot": "./",
   "compileType": "miniprogram",
@@ -8,9 +8,30 @@
     "enhance": true,
     "postcss": true,
     "minified": true,
-    "packNpmManually": false
+    "packNpmManually": false,
+    "compileWorklet": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false,
+    "swc": false,
+    "disableSWC": true,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
   },
-  "scripts": {
-    "beforeUpload": "npx lin-ui-cli load"
-  }
+  "scripts": {},
+  "simulatorPluginLibVersion": {},
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "editorSetting": {}
 }

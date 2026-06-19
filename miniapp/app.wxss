@@ -7,7 +7,7 @@ page {
 
 .page {
   min-height: 100vh;
-  padding: 32rpx;
+  padding: 32rpx 32rpx 168rpx;
 }
 
 .card {

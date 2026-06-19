@@ -1,7 +1,8 @@
 {
   "navigationBarTitleText": "AI 形象顾问",
   "usingComponents": {
-    "l-button": "/miniprogram_npm/lin-ui/button/index",
-    "l-tag": "/miniprogram_npm/lin-ui/tag/index"
+    "t-config-provider": "/miniprogram_npm/tdesign-miniprogram/config-provider/config-provider",
+    "t-chat-list": "/miniprogram_npm/tdesign-miniprogram/chat-list/chat-list",
+    "t-chat-sender": "/miniprogram_npm/tdesign-miniprogram/chat-sender/chat-sender"
   }
 }
