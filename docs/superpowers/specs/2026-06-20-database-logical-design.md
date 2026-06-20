@@ -141,7 +141,9 @@ admin_users
 
 画像
 profiles
-profile_attrs
+profile_facts
+profile_inferences
+profile_prefs
 
 资产与衣橱
 assets
@@ -326,27 +328,20 @@ JSON 字段：
 说明：
 
 - `profiles` 只存稳定摘要，不再保存画像摘要冗余字段。
-- 用户事实、AI 推断、明确偏好和禁忌统一放入 `profile_attrs`，通过 `attr_type` 区分。
+- 不把用户事实、AI 推断、明确偏好混在同一张明细表里。详细内容分别放入 `profile_facts`、`profile_inferences`、`profile_prefs`。
 
-### profile_attrs
+### profile_facts
 
-用途：统一存储用户画像属性，包括用户明确事实、AI 推断、用户偏好和禁忌。
+用途：用户明确提供或确认过的档案事实。
 
 关键字段：
 
 - `id`
 - `user_id`
 - `profile_id`
-- `attr_type`
-- `attr_key`
-- `attr_value`
-- `polarity`
-- `confidence`
+- `fact_key`
+- `fact_value`
 - `source`
-- `source_asset_id`
-- `source_job_id`
-- `status`
-- `confirmed_by_user`
 - `confirmed_at`
 - `created_at`
 - `updated_at`
@@ -354,37 +349,112 @@ JSON 字段：
 
 字段说明：
 
-- `attr_type`：属性类型，可为 `fact`、`inference`、`pref`。
-- `attr_key`：属性键名，例如 `occupation`、`hair_texture`、`face_shape_tendency`、`low_heels`。
-- `attr_value`：属性值 JSON。
-- `polarity`：偏好方向，仅偏好类常用，可为 `like`、`dislike`、`prefer`、`avoid`、`neutral`。
-- `confidence`：置信度；用户确认事实通常最高，AI 推断需带不确定性。
-- `source_asset_id`：支撑该属性的图片资源 ID，可为空。
-- `source_job_id`：产生该属性的任务 ID，可为空。
-- `confirmed_by_user`：用户是否确认过该推断。
-- `confirmed_at`：用户确认该属性的时间。
+- `fact_key`：事实键名，例如 `height_cm`、`occupation`、`hair_texture`。
+- `fact_value`：事实值 JSON，记录用户明确陈述或确认的信息。
+- `confirmed_at`：用户确认该事实的时间。
 
 索引建议：
 
-- `idx_profile_attrs_user_type_key`
-- `idx_profile_attrs_profile`
-- `idx_profile_attrs_status`
-- `idx_profile_attrs_polarity`
-- `idx_profile_attrs_source_asset`
-- `idx_profile_attrs_source_job`
+- `idx_profile_facts_user_key`
+- `idx_profile_facts_profile`
 
 JSON 字段：
 
-- `attr_value`
+- `fact_value`
 
 说明：
 
-- `attr_type=fact` 存用户明确说过或确认过的事实，例如职业、发质自述、常见场景。
-- `attr_type=inference` 存脸型倾向、肤色倾向、体型比例线索、发量发质等 AI 推断。
-- `attr_type=pref` 存用户明确偏好和禁忌，例如颜色、版型、成熟度、露肤度、场景偏好。
+- 存用户明确说的内容，例如身高、职业、发质自述、常见场景。
+- `source` 可为 `onboarding`、`chat`、`feedback`、`user_correction`。
+
+### profile_inferences
+
+用途：AI 推断的画像信息，带置信度和可修正状态。
+
+关键字段：
+
+- `id`
+- `user_id`
+- `profile_id`
+- `inference_key`
+- `inference_value`
+- `confidence`
+- `source_asset_id`
+- `source_job_id`
+- `status`
+- `confirmed_by_user`
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+字段说明：
+
+- `inference_key`：推断键名，例如 `face_shape_tendency`、`skin_undertone`、`hair_volume`。
+- `inference_value`：推断值 JSON。
+- `confidence`：AI 推断置信度。
+- `source_asset_id`：支撑该推断的图片资源 ID。
+- `source_job_id`：产生该推断的任务 ID。
+- `confirmed_by_user`：用户是否确认过该推断。
+
+索引建议：
+
+- `idx_profile_inferences_user_key`
+- `idx_profile_inferences_status`
+- `idx_profile_inferences_source_asset`
+- `idx_profile_inferences_source_job`
+
+JSON 字段：
+
+- `inference_value`
+
+说明：
+
+- 存脸型倾向、肤色倾向、体型比例线索、发量发质等 AI 推断。
 - `status` 可为 `active`、`rejected`、`superseded`。
-- 用户否定 AI 推断或偏好后标记 `rejected`，避免反复使用同样结论。
-- `profile_attrs` 是画像层属性；`memories` 是顾问从反馈中沉淀出的长期记忆和策略规则。
+- 用户否定后标记 `rejected`，避免反复使用同样结论。
+
+### profile_prefs
+
+用途：用户明确表达或确认的偏好和禁忌。
+
+关键字段：
+
+- `id`
+- `user_id`
+- `profile_id`
+- `pref_type`
+- `pref_key`
+- `pref_value`
+- `polarity`
+- `source`
+- `confidence`
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+字段说明：
+
+- `pref_type`：偏好类别，例如 `style`、`color`、`silhouette`、`makeup`、`hair`、`scene`。
+- `pref_key`：偏好键名，例如 `high_saturation_color`、`soft_knit`、`low_heels`。
+- `pref_value`：偏好值 JSON。
+- `polarity`：偏好方向，例如 `like`、`dislike`、`prefer`、`avoid`。
+- `confidence`：偏好置信度；真实反馈沉淀出的偏好权重更高。
+
+索引建议：
+
+- `idx_profile_prefs_user_type`
+- `idx_profile_prefs_key`
+- `idx_profile_prefs_polarity`
+
+JSON 字段：
+
+- `pref_value`
+
+说明：
+
+- `polarity` 可为 `like`、`dislike`、`prefer`、`avoid`。
+- 用于记录风格、颜色、版型、成熟度、露肤度、场景偏好等。
+- `profile_prefs` 是用户明确偏好；`memories` 是顾问从反馈中沉淀出的长期记忆和策略规则。
 
 ## 资产与衣橱
 
@@ -1195,7 +1265,7 @@ JSON 字段：
 
 说明：
 
-- `target_type` 可为 `image_route`、`rec`、`report`、`wardrobe_item`、`memory`、`profile_attr`。
+- `target_type` 可为 `image_route`、`rec`、`report`、`wardrobe_item`、`memory`、`profile_fact`、`profile_inference`、`profile_pref`。
 - `feedback_type` 可为 `accepted`、`rejected`、`modified`、`worn_good`、`worn_bad`、`external_positive`、`external_negative`、`correction`。
 - 真实穿着反馈优先级高于初始 AI 判断。
 
@@ -1270,7 +1340,7 @@ JSON 字段：
 字段说明：
 
 - `memory_id`：长期记忆 ID。
-- `source_type`：记忆来源类型，例如 `feedback`、`rec`、`profile_attr`。
+- `source_type`：记忆来源类型，例如 `feedback`、`rec`、`profile_fact`。
 - `source_id`：来源对象内部 ID。
 - `source_public_id`：来源对象外部 ID 快照。
 - `weight`：该来源对记忆的贡献权重。
@@ -1282,7 +1352,7 @@ JSON 字段：
 
 说明：
 
-- `source_type` 可为 `feedback`、`rec`、`profile_attr`、`onboarding`、`chat`。
+- `source_type` 可为 `feedback`、`rec`、`profile_fact`、`profile_inference`、`profile_pref`、`onboarding`、`chat`。
 - 一个记忆可以来自多次反馈。
 - 真实穿着反馈权重大于初始 onboarding。
 
@@ -1533,7 +1603,9 @@ JSON 字段：
 
 - `users`
 - `profiles`
-- `profile_attrs`
+- `profile_facts`
+- `profile_inferences`
+- `profile_prefs`
 - `assets`
 - `wardrobe_items`
 - `wardrobe_gaps`
@@ -1655,7 +1727,7 @@ ai_calls(job_id)
 ### Onboarding 后生成路线和报告
 
 ```text
-1. 写入 users / profiles / profile_attrs
+1. 写入 users / profiles / profile_facts / profile_inferences / profile_prefs
 2. 上传图片写入 assets，并建立必要 asset_links
 3. AI 生成候选路线，写入 image_routes
 4. 路线引用风格样本，写入 image_route_styles
@@ -1693,7 +1765,7 @@ ai_calls(job_id)
 2. 记忆任务读取 feedbacks 和上下文
 3. 新增或更新 memories
 4. 写入 memory_sources
-5. 必要时更新 image_routes.weight 或 profile_attrs
+5. 必要时更新 image_routes.weight 或 profile_prefs
 ```
 
 真实穿着反馈优先级高于初始 AI 推断和参考风格匹配。
@@ -1709,7 +1781,7 @@ ai_calls(job_id)
 - 账号域不包含 `user_auth_bindings` 和 `admin_roles`。
 - 敏感和核心业务表支持软删除。
 - 任务、AI 调用用于审计和排障，不普通软删。
-- 用户画像属性通过 profile_attrs 区分事实、AI 推断和明确偏好。
+- 用户画像区分事实、AI 推断和明确偏好。
 - 资产统一由 `assets` 管理对象存储元数据。
 - 衣橱只建核心单品和缺口，不做完整库存。
 - 风格库支持可迁移元素和不可迁移风险。
