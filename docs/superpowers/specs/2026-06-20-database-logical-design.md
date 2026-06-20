@@ -43,6 +43,24 @@
 - `public_id` 可使用 ULID、NanoID 或类似短 ID。
 - 分享 token、上传 token、会话 token 使用安全随机值，不使用自增 ID。
 
+通用字段含义：
+
+- `id`：数据库内部主键。
+- `public_id`：对前端、分享链接或外部 API 暴露的稳定 ID。
+- `created_at`：记录创建时间。
+- `updated_at`：记录最后更新时间。
+- `deleted_at`：软删除时间；为空表示未删除。
+- `status`：当前业务状态，不同表的状态枚举不同。
+- `source`：数据来源，例如 `onboarding`、`chat`、`feedback`、`system`、`admin`。
+- `user_id`：终端用户内部 ID。
+- `profile_id`：用户当前画像内部 ID。
+- `target_type`：被操作、关联或反馈的对象类型。
+- `target_id`：被操作、关联或反馈对象的内部 ID。
+- `target_public_id`：被操作、关联或反馈对象的外部 ID 快照。
+- `sort_order`：展示或处理排序，数值越小越靠前。
+- `created_by_admin_id`：创建记录的管理员 ID。
+- `updated_by_admin_id`：最近更新记录的管理员 ID。
+
 ### 建模策略
 
 数据库采用：
@@ -205,6 +223,16 @@ metrics_events
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `wechat_openid`：微信小程序用户在当前小程序下的 openid。
+- `wechat_unionid`：微信开放平台 unionid，可为空。
+- `phone`：用户手机号，可为空。
+- `nickname`：用户昵称。
+- `avatar_asset_id`：用户头像资源 ID，关联 `assets.id`。
+- `onboarding_status`：onboarding 进度状态。
+- `last_active_at`：用户最近活跃时间。
+
 索引建议：
 
 - `uk_users_public_id`
@@ -236,6 +264,14 @@ metrics_events
 - `created_at`
 - `updated_at`
 
+字段说明：
+
+- `username`：管理端登录用户名。
+- `password_hash`：管理端密码哈希，不保存明文。
+- `display_name`：管理端显示名称。
+- `is_super_admin`：是否为超级管理员。
+- `last_login_at`：最近登录时间。
+
 索引建议：
 
 - `uk_admin_users_public_id`
@@ -265,6 +301,16 @@ metrics_events
 - `ip`
 - `user_agent`
 - `created_at`
+
+字段说明：
+
+- `operator_type`：操作者类型，可为 `admin_user`、`system`、`user`。
+- `operator_id`：操作者内部 ID；系统操作可为空或使用约定值。
+- `module`：操作所属模块，例如 `style_library`、`system_config`、`job`。
+- `action`：操作动作，例如 `publish`、`update`、`retry`、`view_sensitive_data`。
+- `summary`：操作摘要，不保存敏感原文。
+- `ip`：操作来源 IP。
+- `user_agent`：操作来源客户端信息。
 
 索引建议：
 
@@ -303,6 +349,17 @@ metrics_events
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `gender`：用户性别或表达倾向，可为空。
+- `height_cm`：用户身高，单位厘米。
+- `body_notes`：用户或系统记录的身形相关中性描述。
+- `skin_tone_notes`：用户或系统记录的肤色、明度、冷暖倾向描述。
+- `hair_notes`：发量、发质、长度、日常打理等摘要。
+- `lifestyle_scenarios`：常见生活、职业和社交场景 JSON。
+- `style_goal_summary`：用户想呈现的整体形象目标摘要。
+- `profile_summary`：当前画像摘要 JSON，供报告和推荐读取。
+
 索引建议：
 
 - `uk_profiles_public_id`
@@ -334,6 +391,12 @@ JSON 字段：
 - `created_at`
 - `updated_at`
 - `deleted_at`
+
+字段说明：
+
+- `fact_key`：事实键名，例如 `height_cm`、`occupation`、`hair_texture`。
+- `fact_value`：事实值 JSON，记录用户明确陈述或确认的信息。
+- `confirmed_at`：用户确认该事实的时间。
 
 索引建议：
 
@@ -368,6 +431,15 @@ JSON 字段：
 - `created_at`
 - `updated_at`
 - `deleted_at`
+
+字段说明：
+
+- `inference_key`：推断键名，例如 `face_shape_tendency`、`skin_undertone`、`hair_volume`。
+- `inference_value`：推断值 JSON。
+- `confidence`：AI 推断置信度。
+- `source_asset_id`：支撑该推断的图片资源 ID。
+- `source_job_id`：产生该推断的任务 ID。
+- `confirmed_by_user`：用户是否确认过该推断。
 
 索引建议：
 
@@ -404,6 +476,14 @@ JSON 字段：
 - `created_at`
 - `updated_at`
 - `deleted_at`
+
+字段说明：
+
+- `pref_type`：偏好类别，例如 `style`、`color`、`silhouette`、`makeup`、`hair`、`scene`。
+- `pref_key`：偏好键名，例如 `high_saturation_color`、`soft_knit`、`low_heels`。
+- `pref_value`：偏好值 JSON。
+- `polarity`：偏好方向，例如 `like`、`dislike`、`prefer`、`avoid`。
+- `confidence`：偏好置信度；真实反馈沉淀出的偏好权重更高。
 
 索引建议：
 
@@ -446,6 +526,18 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `owner_user_id`：资源所属用户；系统或管理端资源可为空。
+- `bucket`：对象存储 bucket。
+- `object_key`：对象存储 key，不是完整访问 URL。
+- `mime_type`：文件 MIME 类型。
+- `file_size`：文件大小，单位字节。
+- `width`：图片宽度，非图片可为空。
+- `height`：图片高度，非图片可为空。
+- `asset_type`：资源类型，例如自拍、半身照、衣橱单品图、参考图。
+- `review_status`：内容审核状态。
+
 索引建议：
 
 - `uk_assets_public_id`
@@ -473,6 +565,11 @@ JSON 字段：
 - `usage_type`
 - `sort_order`
 - `created_at`
+
+字段说明：
+
+- `asset_id`：被关联的资源 ID。
+- `usage_type`：资源在目标对象上的用途，例如 `primary`、`reference`、`analysis_source`。
 
 索引建议：
 
@@ -511,6 +608,22 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `name`：用户或系统给单品取的名称。
+- `category`：单品类别，例如外套、上衣、下装、鞋、包。
+- `color`：主色或颜色描述。
+- `silhouette`：廓形，例如直筒、修身、宽松、短款。
+- `material`：材质描述。
+- `thickness`：厚薄程度。
+- `pattern`：图案，例如纯色、条纹、格纹。
+- `season`：适合季节。
+- `formality`：正式度。
+- `scene_tags`：适合场景标签 JSON。
+- `ai_attrs`：AI 识别出的单品属性 JSON。
+- `user_notes`：用户补充说明。
+- `is_core`：是否为核心高频单品。
+
 索引建议：
 
 - `uk_wardrobe_items_public_id`
@@ -539,6 +652,12 @@ JSON 字段：
 - `is_primary`
 - `sort_order`
 - `created_at`
+
+字段说明：
+
+- `wardrobe_item_id`：衣橱单品 ID。
+- `asset_id`：单品图片资源 ID。
+- `is_primary`：是否为该单品主图。
 
 索引建议：
 
@@ -571,6 +690,16 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `gap_type`：缺口类型，例如 `item`、`color`、`shoe`、`outerwear`。
+- `title`：缺口标题。
+- `description`：缺口描述。
+- `reason`：为什么需要这个缺口单品。
+- `priority`：优先级。
+- `source_report_id`：产生该缺口的报告 ID。
+- `source_rec_id`：产生该缺口的推荐 ID。
+
 索引建议：
 
 - `uk_wardrobe_gaps_public_id`
@@ -602,6 +731,13 @@ JSON 字段：
 - `created_at`
 - `updated_at`
 - `deleted_at`
+
+字段说明：
+
+- `name`：参考对象名称，例如明星、博主、内部风格对象名称。
+- `subject_type`：参考对象类型，例如 `celebrity`、`blogger`、`internal`、`user_reference`。
+- `gender`：参考对象性别或表达倾向，可为空。
+- `description`：参考对象说明。
 
 索引建议：
 
@@ -641,6 +777,20 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `subject_id`：所属参考对象 ID。
+- `name`：风格样本名称。
+- `style_keywords`：风格关键词 JSON。
+- `suitable_scenes`：适合场景 JSON。
+- `clothing_structure`：服装结构和单品组合逻辑。
+- `color_logic`：色彩逻辑。
+- `hair_makeup_points`：发型和妆容要点。
+- `transferable_elements`：可迁移元素 JSON，例如比例、廓形、色彩、发型方向。
+- `non_transferable_risks`：不可迁移风险 JSON。
+- `suitable_profile_notes`：适合哪些画像特征的说明。
+- `published_at`：发布时间。
+
 索引建议：
 
 - `uk_style_samples_public_id`
@@ -677,6 +827,12 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `name`：标签名称。
+- `tag_type`：标签类型，例如 `style`、`scene`、`color`、`silhouette`、`hair`、`makeup`。
+- `description`：标签说明。
+
 索引建议：
 
 - `uk_style_tags_public_id`
@@ -698,6 +854,11 @@ JSON 字段：
 - `style_tag_id`
 - `created_at`
 
+字段说明：
+
+- `style_sample_id`：风格样本 ID。
+- `style_tag_id`：风格标签 ID。
+
 索引建议：
 
 - `uk_style_sample_tags_sample_tag`
@@ -715,6 +876,12 @@ JSON 字段：
 - `usage_type`
 - `sort_order`
 - `created_at`
+
+字段说明：
+
+- `style_sample_id`：风格样本 ID。
+- `asset_id`：样本图片资源 ID。
+- `usage_type`：图片用途，例如 `cover`、`detail`、`reference`。
 
 索引建议：
 
@@ -757,6 +924,22 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `name`：形象路线名称，例如利落亲和、轻熟松弛。
+- `route_role`：路线角色，可为主路线、场景路线、探索路线。
+- `weight`：路线推荐权重，用于排序和选择。
+- `target_impression`：目标形象感受 JSON。
+- `suitable_scenes`：适合场景 JSON。
+- `hair_strategy`：发型策略 JSON。
+- `makeup_strategy`：妆容或气色策略 JSON。
+- `outfit_strategy`：穿搭策略 JSON。
+- `avoid_points`：避雷项 JSON。
+- `reason`：生成或保留该路线的原因 JSON。
+- `created_from_report_id`：生成该路线的报告 ID。
+- `created_from_job_id`：生成该路线的任务 ID。
+- `activated_at`：路线被用户确认并激活的时间。
+
 索引建议：
 
 - `uk_image_routes_public_id`
@@ -798,6 +981,16 @@ JSON 字段：
 - `created_by`
 - `created_at`
 
+字段说明：
+
+- `image_route_id`：形象路线 ID。
+- `event_type`：路线事件类型，例如 `generated`、`liked`、`adjust_requested`。
+- `event_value`：事件详情 JSON。
+- `source_feedback_id`：触发事件的反馈 ID。
+- `source_rec_id`：触发事件的推荐 ID。
+- `source_report_id`：触发事件的报告 ID。
+- `created_by`：事件创建方，例如 `user`、`system`、`admin`。
+
 索引建议：
 
 - `idx_image_route_events_route`
@@ -828,6 +1021,15 @@ JSON 字段：
 - `risk_snapshot`
 - `weight`
 - `created_at`
+
+字段说明：
+
+- `image_route_id`：形象路线 ID。
+- `style_sample_id`：被引用的风格样本 ID。
+- `reason`：引用该样本的原因。
+- `transfer_snapshot`：引用时可迁移元素快照 JSON。
+- `risk_snapshot`：引用时不可迁移风险快照 JSON。
+- `weight`：该风格样本对路线的参考权重。
 
 索引建议：
 
@@ -870,6 +1072,18 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `report_type`：报告类型，例如初版路线报告、阶段复盘。
+- `title`：报告标题。
+- `summary`：报告摘要。
+- `content_json`：报告正文 JSON。
+- `context_snapshot`：生成报告时使用的画像、路线、衣橱、记忆等上下文快照。
+- `style_refs_json`：报告引用的风格样本摘要 JSON。
+- `ai_call_id`：生成报告的 AI 调用 ID。
+- `job_id`：生成报告的任务 ID。
+- `generated_at`：报告生成完成时间。
+
 索引建议：
 
 - `uk_reports_public_id`
@@ -903,6 +1117,13 @@ JSON 字段：
 - `sort_order`
 - `route_snapshot`
 - `created_at`
+
+字段说明：
+
+- `report_id`：报告 ID。
+- `image_route_id`：报告引用的形象路线 ID。
+- `route_role`：该路线在报告中的角色。
+- `route_snapshot`：报告生成时的路线快照 JSON。
 
 索引建议：
 
@@ -940,6 +1161,16 @@ JSON 字段：
 - `created_at`
 - `updated_at`
 - `deleted_at`
+
+字段说明：
+
+- `source`：请求来源，例如今日页自动生成、聊天文本、拍照问搭配。
+- `input_text`：用户输入原文或系统触发说明。
+- `input_assets`：输入图片或文件资源引用 JSON。
+- `scenario`：结构化场景 JSON，例如天气、日期、正式度、地点类型。
+- `trigger_context`：触发上下文 JSON，例如点击“更正式一点”。
+- `parent_request_id`：上一条相关请求 ID。
+- `parent_rec_id`：基于哪条推荐继续调整。
 
 索引建议：
 
@@ -991,6 +1222,26 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `request_id`：对应的推荐请求 ID。
+- `adopted_route_id`：本次推荐采用的形象路线 ID。
+- `report_id`：本次推荐关联的报告 ID，可为空。
+- `rec_date`：推荐归属日期，用于今日页查询。
+- `scene_key`：主场景键名，例如 `commute`、`date`、`client_meeting`。
+- `title`：推荐标题。
+- `summary`：推荐摘要。
+- `outfit_advice`：穿搭主方案 JSON。
+- `hair_advice`：发型建议 JSON。
+- `makeup_advice`：妆容或气色建议 JSON。
+- `avoid_notes`：今天不优先或需要避开的内容 JSON。
+- `alternatives`：可替换方案 JSON。
+- `wardrobe_item_refs`：本次推荐使用的衣橱单品引用 JSON。
+- `wardrobe_gap_refs`：本次推荐提到的衣橱缺口引用 JSON。
+- `context_snapshot`：生成推荐时使用的路线、画像、衣橱、记忆上下文快照。
+- `ai_call_id`：生成推荐的 AI 调用 ID。
+- `job_id`：生成推荐的任务 ID。
+
 索引建议：
 
 - `uk_recs_public_id`
@@ -1040,6 +1291,12 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `feedback_type`：反馈类型，例如采纳、拒绝、实际穿了感觉不错。
+- `feedback_text`：用户自由文本反馈。
+- `feedback_value`：结构化反馈 JSON。
+
 索引建议：
 
 - `uk_feedbacks_public_id`
@@ -1080,6 +1337,18 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `memory_type`：记忆类型，可为事实、偏好、反馈、策略。
+- `memory_key`：记忆键名，例如 `client_meeting_outerwear_preference`。
+- `memory_value`：记忆内容 JSON。
+- `polarity`：记忆方向，例如 `like`、`dislike`、`prefer`、`avoid`、`neutral`。
+- `confidence`：记忆置信度。
+- `visibility`：用户是否可见。
+- `last_reinforced_at`：最近一次被反馈强化的时间。
+- `user_corrected_at`：用户修正该记忆的时间。
+- `correction_note`：用户修正说明。
+
 索引建议：
 
 - `uk_memories_public_id`
@@ -1113,6 +1382,14 @@ JSON 字段：
 - `weight`
 - `created_at`
 
+字段说明：
+
+- `memory_id`：长期记忆 ID。
+- `source_type`：记忆来源类型，例如 `feedback`、`rec`、`profile_fact`。
+- `source_id`：来源对象内部 ID。
+- `source_public_id`：来源对象外部 ID 快照。
+- `weight`：该来源对记忆的贡献权重。
+
 索引建议：
 
 - `idx_memory_sources_memory`
@@ -1142,6 +1419,15 @@ JSON 字段：
 - `updated_by_admin_id`
 - `created_at`
 - `updated_at`
+
+字段说明：
+
+- `group`：配置分组，例如 `ai`、`upload`、`feature`、`onboarding`。
+- `key`：分组内配置键名。
+- `value`：配置值。
+- `value_type`：配置值类型，例如 `string`、`number`、`bool`、`json`。
+- `description`：配置说明。
+- `updated_by_admin_id`：最近更新配置的管理员 ID。
 
 索引建议：
 
@@ -1178,6 +1464,19 @@ JSON 字段：
 - `status`
 - `error_message`
 - `created_at`
+
+字段说明：
+
+- `job_id`：关联任务 ID。
+- `provider`：AI 服务提供方。
+- `model`：模型名称。
+- `call_type`：调用类型，例如 `extraction`、`route_generation`、`recommendation`、`memory_summary`。
+- `input_summary`：输入摘要 JSON，不保存完整敏感原文。
+- `output_summary`：输出摘要 JSON，不保存完整敏感原文。
+- `token_usage`：token 用量 JSON。
+- `cost_amount`：调用成本。
+- `latency_ms`：调用耗时，单位毫秒。
+- `error_message`：失败原因摘要。
 
 索引建议：
 
@@ -1221,6 +1520,20 @@ JSON 字段：
 - `created_at`
 - `updated_at`
 
+字段说明：
+
+- `job_type`：任务类型，例如 `image_analysis`、`report_generation`、`rec_generation`、`memory_update`。
+- `queue_name`：队列名称。
+- `related_type`：任务关联对象类型。
+- `related_id`：任务关联对象 ID。
+- `input_summary`：任务输入摘要 JSON。
+- `output_summary`：任务输出摘要 JSON。
+- `error_message`：任务失败原因摘要。
+- `retry_count`：已重试次数。
+- `next_retry_at`：下次重试时间。
+- `started_at`：任务开始时间。
+- `finished_at`：任务结束时间。
+
 索引建议：
 
 - `uk_jobs_public_id`
@@ -1262,6 +1575,14 @@ JSON 字段：
 - `updated_at`
 - `deleted_at`
 
+字段说明：
+
+- `token`：安全随机分享 token。
+- `owner_user_id`：分享所有者用户 ID。
+- `scope`：分享范围 JSON，例如可见模块、脱敏级别。
+- `expires_at`：过期时间。
+- `revoked_at`：撤销时间。
+
 索引建议：
 
 - `uk_share_tokens_public_id`
@@ -1295,6 +1616,13 @@ JSON 字段：
 - `properties`
 - `occurred_at`
 - `created_at`
+
+字段说明：
+
+- `event_name`：事件名称。
+- `event_source`：事件来源，例如 `miniapp`、`admin`、`server`。
+- `properties`：事件属性 JSON，不写入敏感原文。
+- `occurred_at`：事件发生时间。
 
 索引建议：
 
@@ -1510,353 +1838,3 @@ ai_calls(job_id)
 - 用户可查看、修正、删除长期记忆。
 - 分享 token 只暴露脱敏范围。
 - 系统配置通过 `system_configs` K-V 管理。
-
-## 字段含义字典
-
-本节补充关键字段含义。通用字段含义如下：
-
-- `id`：数据库内部主键。
-- `public_id`：对前端、分享链接或外部 API 暴露的稳定 ID。
-- `created_at`：记录创建时间。
-- `updated_at`：记录最后更新时间。
-- `deleted_at`：软删除时间；为空表示未删除。
-- `status`：当前业务状态，不同表的状态枚举不同。
-- `source`：数据来源，例如 `onboarding`、`chat`、`feedback`、`system`、`admin`。
-- `user_id`：终端用户内部 ID。
-- `profile_id`：用户当前画像内部 ID。
-- `target_type`：被操作、关联或反馈的对象类型。
-- `target_id`：被操作、关联或反馈对象的内部 ID。
-- `target_public_id`：被操作、关联或反馈对象的外部 ID 快照。
-- `sort_order`：展示或处理排序，数值越小越靠前。
-- `created_by_admin_id`：创建记录的管理员 ID。
-- `updated_by_admin_id`：最近更新记录的管理员 ID。
-
-### 账号与管理
-
-`users` 字段含义：
-
-- `wechat_openid`：微信小程序用户在当前小程序下的 openid。
-- `wechat_unionid`：微信开放平台 unionid，可为空。
-- `phone`：用户手机号，可为空。
-- `nickname`：用户昵称。
-- `avatar_asset_id`：用户头像资源 ID，关联 `assets.id`。
-- `onboarding_status`：onboarding 进度状态。
-- `last_active_at`：用户最近活跃时间。
-
-`admin_users` 字段含义：
-
-- `username`：管理端登录用户名。
-- `password_hash`：管理端密码哈希，不保存明文。
-- `display_name`：管理端显示名称。
-- `is_super_admin`：是否为超级管理员。
-- `last_login_at`：最近登录时间。
-
-`operate_logs` 字段含义：
-
-- `operator_type`：操作者类型，可为 `admin_user`、`system`、`user`。
-- `operator_id`：操作者内部 ID；系统操作可为空或使用约定值。
-- `module`：操作所属模块，例如 `style_library`、`system_config`、`job`。
-- `action`：操作动作，例如 `publish`、`update`、`retry`、`view_sensitive_data`。
-- `summary`：操作摘要，不保存敏感原文。
-- `ip`：操作来源 IP。
-- `user_agent`：操作来源客户端信息。
-
-### 画像
-
-`profiles` 字段含义：
-
-- `gender`：用户性别或表达倾向，可为空。
-- `height_cm`：用户身高，单位厘米。
-- `body_notes`：用户或系统记录的身形相关中性描述。
-- `skin_tone_notes`：用户或系统记录的肤色、明度、冷暖倾向描述。
-- `hair_notes`：发量、发质、长度、日常打理等摘要。
-- `lifestyle_scenarios`：常见生活、职业和社交场景 JSON。
-- `style_goal_summary`：用户想呈现的整体形象目标摘要。
-- `profile_summary`：当前画像摘要 JSON，供报告和推荐读取。
-
-`profile_facts` 字段含义：
-
-- `fact_key`：事实键名，例如 `height_cm`、`occupation`、`hair_texture`。
-- `fact_value`：事实值 JSON，记录用户明确陈述或确认的信息。
-- `confirmed_at`：用户确认该事实的时间。
-
-`profile_inferences` 字段含义：
-
-- `inference_key`：推断键名，例如 `face_shape_tendency`、`skin_undertone`、`hair_volume`。
-- `inference_value`：推断值 JSON。
-- `confidence`：AI 推断置信度。
-- `source_asset_id`：支撑该推断的图片资源 ID。
-- `source_job_id`：产生该推断的任务 ID。
-- `confirmed_by_user`：用户是否确认过该推断。
-
-`profile_prefs` 字段含义：
-
-- `pref_type`：偏好类别，例如 `style`、`color`、`silhouette`、`makeup`、`hair`、`scene`。
-- `pref_key`：偏好键名，例如 `high_saturation_color`、`soft_knit`、`low_heels`。
-- `pref_value`：偏好值 JSON。
-- `polarity`：偏好方向，例如 `like`、`dislike`、`prefer`、`avoid`。
-- `confidence`：偏好置信度；真实反馈沉淀出的偏好权重更高。
-
-### 资产与衣橱
-
-`assets` 字段含义：
-
-- `owner_user_id`：资源所属用户；系统或管理端资源可为空。
-- `bucket`：对象存储 bucket。
-- `object_key`：对象存储 key，不是完整访问 URL。
-- `mime_type`：文件 MIME 类型。
-- `file_size`：文件大小，单位字节。
-- `width`：图片宽度，非图片可为空。
-- `height`：图片高度，非图片可为空。
-- `asset_type`：资源类型，例如自拍、半身照、衣橱单品图、参考图。
-- `review_status`：内容审核状态。
-
-`asset_links` 字段含义：
-
-- `asset_id`：被关联的资源 ID。
-- `usage_type`：资源在目标对象上的用途，例如 `primary`、`reference`、`analysis_source`。
-
-`wardrobe_items` 字段含义：
-
-- `name`：用户或系统给单品取的名称。
-- `category`：单品类别，例如外套、上衣、下装、鞋、包。
-- `color`：主色或颜色描述。
-- `silhouette`：廓形，例如直筒、修身、宽松、短款。
-- `material`：材质描述。
-- `thickness`：厚薄程度。
-- `pattern`：图案，例如纯色、条纹、格纹。
-- `season`：适合季节。
-- `formality`：正式度。
-- `scene_tags`：适合场景标签 JSON。
-- `ai_attrs`：AI 识别出的单品属性 JSON。
-- `user_notes`：用户补充说明。
-- `is_core`：是否为核心高频单品。
-
-`wardrobe_item_assets` 字段含义：
-
-- `wardrobe_item_id`：衣橱单品 ID。
-- `asset_id`：单品图片资源 ID。
-- `is_primary`：是否为该单品主图。
-
-`wardrobe_gaps` 字段含义：
-
-- `gap_type`：缺口类型，例如 `item`、`color`、`shoe`、`outerwear`。
-- `title`：缺口标题。
-- `description`：缺口描述。
-- `reason`：为什么需要这个缺口单品。
-- `priority`：优先级。
-- `source_report_id`：产生该缺口的报告 ID。
-- `source_rec_id`：产生该缺口的推荐 ID。
-
-### 风格库
-
-`style_subjects` 字段含义：
-
-- `name`：参考对象名称，例如明星、博主、内部风格对象名称。
-- `subject_type`：参考对象类型，例如 `celebrity`、`blogger`、`internal`、`user_reference`。
-- `gender`：参考对象性别或表达倾向，可为空。
-- `description`：参考对象说明。
-
-`style_samples` 字段含义：
-
-- `subject_id`：所属参考对象 ID。
-- `name`：风格样本名称。
-- `style_keywords`：风格关键词 JSON。
-- `suitable_scenes`：适合场景 JSON。
-- `clothing_structure`：服装结构和单品组合逻辑。
-- `color_logic`：色彩逻辑。
-- `hair_makeup_points`：发型和妆容要点。
-- `transferable_elements`：可迁移元素 JSON，例如比例、廓形、色彩、发型方向。
-- `non_transferable_risks`：不可迁移风险 JSON。
-- `suitable_profile_notes`：适合哪些画像特征的说明。
-- `published_at`：发布时间。
-
-`style_tags` 字段含义：
-
-- `name`：标签名称。
-- `tag_type`：标签类型，例如 `style`、`scene`、`color`、`silhouette`、`hair`、`makeup`。
-- `description`：标签说明。
-
-`style_sample_tags` 字段含义：
-
-- `style_sample_id`：风格样本 ID。
-- `style_tag_id`：风格标签 ID。
-
-`style_sample_assets` 字段含义：
-
-- `style_sample_id`：风格样本 ID。
-- `asset_id`：样本图片资源 ID。
-- `usage_type`：图片用途，例如 `cover`、`detail`、`reference`。
-
-### 形象路线
-
-`image_routes` 字段含义：
-
-- `name`：形象路线名称，例如利落亲和、轻熟松弛。
-- `route_role`：路线角色，可为主路线、场景路线、探索路线。
-- `weight`：路线推荐权重，用于排序和选择。
-- `target_impression`：目标形象感受 JSON。
-- `suitable_scenes`：适合场景 JSON。
-- `hair_strategy`：发型策略 JSON。
-- `makeup_strategy`：妆容或气色策略 JSON。
-- `outfit_strategy`：穿搭策略 JSON。
-- `avoid_points`：避雷项 JSON。
-- `reason`：生成或保留该路线的原因 JSON。
-- `created_from_report_id`：生成该路线的报告 ID。
-- `created_from_job_id`：生成该路线的任务 ID。
-- `activated_at`：路线被用户确认并激活的时间。
-
-`image_route_events` 字段含义：
-
-- `image_route_id`：形象路线 ID。
-- `event_type`：路线事件类型，例如 `generated`、`liked`、`adjust_requested`。
-- `event_value`：事件详情 JSON。
-- `source_feedback_id`：触发事件的反馈 ID。
-- `source_rec_id`：触发事件的推荐 ID。
-- `source_report_id`：触发事件的报告 ID。
-- `created_by`：事件创建方，例如 `user`、`system`、`admin`。
-
-`image_route_styles` 字段含义：
-
-- `image_route_id`：形象路线 ID。
-- `style_sample_id`：被引用的风格样本 ID。
-- `reason`：引用该样本的原因。
-- `transfer_snapshot`：引用时可迁移元素快照 JSON。
-- `risk_snapshot`：引用时不可迁移风险快照 JSON。
-- `weight`：该风格样本对路线的参考权重。
-
-### 报告
-
-`reports` 字段含义：
-
-- `report_type`：报告类型，例如初版路线报告、阶段复盘。
-- `title`：报告标题。
-- `summary`：报告摘要。
-- `content_json`：报告正文 JSON。
-- `context_snapshot`：生成报告时使用的画像、路线、衣橱、记忆等上下文快照。
-- `style_refs_json`：报告引用的风格样本摘要 JSON。
-- `ai_call_id`：生成报告的 AI 调用 ID。
-- `job_id`：生成报告的任务 ID。
-- `generated_at`：报告生成完成时间。
-
-`report_image_routes` 字段含义：
-
-- `report_id`：报告 ID。
-- `image_route_id`：报告引用的形象路线 ID。
-- `route_role`：该路线在报告中的角色。
-- `route_snapshot`：报告生成时的路线快照 JSON。
-
-### 推荐
-
-`rec_requests` 字段含义：
-
-- `source`：请求来源，例如今日页自动生成、聊天文本、拍照问搭配。
-- `input_text`：用户输入原文或系统触发说明。
-- `input_assets`：输入图片或文件资源引用 JSON。
-- `scenario`：结构化场景 JSON，例如天气、日期、正式度、地点类型。
-- `trigger_context`：触发上下文 JSON，例如点击“更正式一点”。
-- `parent_request_id`：上一条相关请求 ID。
-- `parent_rec_id`：基于哪条推荐继续调整。
-
-`recs` 字段含义：
-
-- `request_id`：对应的推荐请求 ID。
-- `adopted_route_id`：本次推荐采用的形象路线 ID。
-- `report_id`：本次推荐关联的报告 ID，可为空。
-- `rec_date`：推荐归属日期，用于今日页查询。
-- `scene_key`：主场景键名，例如 `commute`、`date`、`client_meeting`。
-- `title`：推荐标题。
-- `summary`：推荐摘要。
-- `outfit_advice`：穿搭主方案 JSON。
-- `hair_advice`：发型建议 JSON。
-- `makeup_advice`：妆容或气色建议 JSON。
-- `avoid_notes`：今天不优先或需要避开的内容 JSON。
-- `alternatives`：可替换方案 JSON。
-- `wardrobe_item_refs`：本次推荐使用的衣橱单品引用 JSON。
-- `wardrobe_gap_refs`：本次推荐提到的衣橱缺口引用 JSON。
-- `context_snapshot`：生成推荐时使用的路线、画像、衣橱、记忆上下文快照。
-- `ai_call_id`：生成推荐的 AI 调用 ID。
-- `job_id`：生成推荐的任务 ID。
-
-### 反馈与记忆
-
-`feedbacks` 字段含义：
-
-- `feedback_type`：反馈类型，例如采纳、拒绝、实际穿了感觉不错。
-- `feedback_text`：用户自由文本反馈。
-- `feedback_value`：结构化反馈 JSON。
-
-`memories` 字段含义：
-
-- `memory_type`：记忆类型，可为事实、偏好、反馈、策略。
-- `memory_key`：记忆键名，例如 `client_meeting_outerwear_preference`。
-- `memory_value`：记忆内容 JSON。
-- `polarity`：记忆方向，例如 `like`、`dislike`、`prefer`、`avoid`、`neutral`。
-- `confidence`：记忆置信度。
-- `visibility`：用户是否可见。
-- `last_reinforced_at`：最近一次被反馈强化的时间。
-- `user_corrected_at`：用户修正该记忆的时间。
-- `correction_note`：用户修正说明。
-
-`memory_sources` 字段含义：
-
-- `memory_id`：长期记忆 ID。
-- `source_type`：记忆来源类型，例如 `feedback`、`rec`、`profile_fact`。
-- `source_id`：来源对象内部 ID。
-- `source_public_id`：来源对象外部 ID 快照。
-- `weight`：该来源对记忆的贡献权重。
-
-### 系统配置、AI 与任务
-
-`system_configs` 字段含义：
-
-- `group`：配置分组，例如 `ai`、`upload`、`feature`、`onboarding`。
-- `key`：分组内配置键名。
-- `value`：配置值。
-- `value_type`：配置值类型，例如 `string`、`number`、`bool`、`json`。
-- `description`：配置说明。
-- `updated_by_admin_id`：最近更新配置的管理员 ID。
-
-`ai_calls` 字段含义：
-
-- `job_id`：关联任务 ID。
-- `provider`：AI 服务提供方。
-- `model`：模型名称。
-- `call_type`：调用类型，例如 `extraction`、`route_generation`、`recommendation`、`memory_summary`。
-- `input_summary`：输入摘要 JSON，不保存完整敏感原文。
-- `output_summary`：输出摘要 JSON，不保存完整敏感原文。
-- `token_usage`：token 用量 JSON。
-- `cost_amount`：调用成本。
-- `latency_ms`：调用耗时，单位毫秒。
-- `error_message`：失败原因摘要。
-
-`jobs` 字段含义：
-
-- `job_type`：任务类型，例如 `image_analysis`、`report_generation`、`rec_generation`、`memory_update`。
-- `queue_name`：队列名称。
-- `related_type`：任务关联对象类型。
-- `related_id`：任务关联对象 ID。
-- `input_summary`：任务输入摘要 JSON。
-- `output_summary`：任务输出摘要 JSON。
-- `error_message`：任务失败原因摘要。
-- `retry_count`：已重试次数。
-- `next_retry_at`：下次重试时间。
-- `started_at`：任务开始时间。
-- `finished_at`：任务结束时间。
-
-### 分享与指标
-
-`share_tokens` 字段含义：
-
-- `token`：安全随机分享 token。
-- `owner_user_id`：分享所有者用户 ID。
-- `scope`：分享范围 JSON，例如可见模块、脱敏级别。
-- `expires_at`：过期时间。
-- `revoked_at`：撤销时间。
-
-`metrics_events` 字段含义：
-
-- `event_name`：事件名称。
-- `event_source`：事件来源，例如 `miniapp`、`admin`、`server`。
-- `properties`：事件属性 JSON，不写入敏感原文。
-- `occurred_at`：事件发生时间。
