@@ -147,7 +147,6 @@ profile_prefs
 
 资产与衣橱
 assets
-asset_links
 wardrobe_items
 wardrobe_item_assets
 wardrobe_gaps
@@ -504,37 +503,9 @@ JSON 字段：
 
 - `asset_type` 可为 `selfie`、`body_photo`、`wardrobe_item`、`reference_image`、`style_sample`。
 - 用户资产用 `owner_user_id`，管理端风格样本图可以为空或用系统归属。
+- 第一版不建通用 `asset_links`。自拍、半身照等通过 `owner_user_id + asset_type` 查询；明确业务关系使用 `wardrobe_item_assets`、`style_sample_assets` 或业务表 JSON 引用。
 - 删除资产时先软删，再创建资源清理任务。
 - 业务表不要直接存对象存储完整 URL。
-
-### asset_links
-
-用途：通用资源关联表。
-
-关键字段：
-
-- `id`
-- `asset_id`
-- `target_type`
-- `target_id`
-- `usage_type`
-- `sort_order`
-- `created_at`
-
-字段说明：
-
-- `asset_id`：被关联的资源 ID。
-- `usage_type`：资源在目标对象上的用途，例如 `primary`、`reference`、`analysis_source`。
-
-索引建议：
-
-- `idx_asset_links_asset`
-- `idx_asset_links_target`
-
-说明：
-
-- 适合自拍关联画像、参考图关联风格解析等通用关系。
-- 强关系可以用专表，例如 `wardrobe_item_assets`、`style_sample_assets`。
 
 ### wardrobe_items
 
@@ -1624,7 +1595,6 @@ JSON 字段：
 
 关联表通常不暴露普通删除，但应用层删除用户数据时要一起处理：
 
-- `asset_links`
 - `wardrobe_item_assets`
 - `style_sample_tags`
 - `style_sample_assets`
@@ -1728,7 +1698,7 @@ ai_calls(job_id)
 
 ```text
 1. 写入 users / profiles / profile_facts / profile_inferences / profile_prefs
-2. 上传图片写入 assets，并建立必要 asset_links
+2. 上传图片写入 assets；自拍/半身照按 owner_user_id + asset_type 查询，明确业务关系使用专表或 JSON 引用
 3. AI 生成候选路线，写入 image_routes
 4. 路线引用风格样本，写入 image_route_styles
 5. 记录 image_route_events: generated
