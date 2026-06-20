@@ -27,7 +27,7 @@
       },
       {
         "pagePath": "pages/advisor/advisor",
-        "text": "顾问",
+        "text": "聊聊",
         "iconPath": "assets/tabbar/advisor.png",
         "selectedIconPath": "assets/tabbar/advisor-active.png"
       },

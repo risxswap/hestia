@@ -60,6 +60,6 @@ cd miniapp
 npm install
 ```
 
-`miniprogram_npm/` 是微信开发者工具生成产物，不提交到仓库。当前顾问页直接使用 TDesign 的 `chat-list` 和 `chat-sender` 官方 AI Chat 组件。
+`miniprogram_npm/` 是微信开发者工具生成产物，不提交到仓库。当前聊聊页直接使用 TDesign 的 `chat-list` 和 `chat-sender` 官方 AI Chat 组件。
 
 TDesign MiniProgram 1.15 的组件运行依赖 `tslib`，小程序目录已在 `dependencies` 中显式声明。若微信开发者工具报 `miniprogram_npm/tdesign-miniprogram/... module is not defined`，先删除本地生成的 `miniapp/miniprogram_npm/`，再在微信开发者工具中重新执行“工具 -> 构建 npm”。`app.json` 不要配置 `"style": "v2"`，否则会影响 TDesign 组件样式。

@@ -1,5 +1,5 @@
 {
-  "navigationBarTitleText": "AI 形象顾问",
+  "navigationBarTitleText": "聊聊",
   "usingComponents": {
     "t-config-provider": "/miniprogram_npm/tdesign-miniprogram/config-provider/config-provider",
     "t-chat-list": "/miniprogram_npm/tdesign-miniprogram/chat-list/chat-list",

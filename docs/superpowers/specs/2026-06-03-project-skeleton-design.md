@@ -33,14 +33,14 @@ server/
 
 `miniapp` 作为微信开发者工具项目根目录，保留 `app.json`、`project.config.json` 和核心页面：
 
-- 顾问。
+- 聊聊。
 - 首页。
 - 衣橱。
 - 我的。
 - 报告。
 - Onboarding。
 
-TDesign MiniProgram 使用 npm 依赖，组件引用由微信开发者工具构建后的 `miniprogram_npm` 承载。该目录是构建产物，不提交。顾问页直接使用 TDesign 的 `chat-list` 和 `chat-sender` 官方 AI Chat 组件。
+TDesign MiniProgram 使用 npm 依赖，组件引用由微信开发者工具构建后的 `miniprogram_npm` 承载。该目录是构建产物，不提交。聊聊页直接使用 TDesign 的 `chat-list` 和 `chat-sender` 官方 AI Chat 组件。
 
 ## 用户 Web 骨架
 
