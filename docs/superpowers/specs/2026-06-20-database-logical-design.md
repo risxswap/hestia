@@ -23,7 +23,7 @@
 → 下一次建议变准
 ```
 
-第一版主数据对象是 `image_routes`。用户画像、衣橱、风格库、报告、推荐、反馈和记忆都围绕个人形象路线协同工作。
+第一版主数据对象是 `image_routes`。用户画像、衣橱、风格库、报告、建议、反馈和记忆都围绕个人形象路线协同工作。
 
 ## 总体策略
 
@@ -78,7 +78,7 @@
 - 形象路线。
 - 报告。
 - Agent 对话消息。
-- 推荐请求与推荐结果。
+- 建议请求与建议结果。
 - 反馈。
 - 长期记忆。
 - 订阅、积分和存储权益。
@@ -88,8 +88,8 @@
 JSON 快照存储：
 
 - 报告正文。
-- 推荐正文。
-- 推荐生成上下文。
+- 建议正文。
+- 建议生成上下文。
 - 报告生成上下文。
 - AI 输入输出摘要。
 - 形象路线策略字段。
@@ -132,7 +132,7 @@ JSON 快照存储：
 
 - 使用 `image_routes`，因为这里的 `image` 表示个人形象，不是图片资源。
 - 图片、照片和文件统一使用 `assets`。
-- 推荐请求和推荐结果使用短名：`rec_requests`、`recs`。
+- 建议请求和建议结果使用：`advice_requests`、`advices`。
 
 ## 表域总览
 
@@ -174,9 +174,9 @@ report_image_routes
 对话
 chat_msgs
 
-推荐
-rec_requests
-recs
+建议
+advice_requests
+advices
 
 反馈与记忆
 feedbacks
@@ -202,7 +202,7 @@ jobs
 - `admin_roles`：第一版管理权限保持极简。
 - `image_route_versions`：路线历史先由 `image_route_events` 解释。
 - `memory_events`：记忆当前态 + 来源足够。
-- `rec_options`：第一版一条请求默认最多一条推荐结果，替代方案放 JSON。
+- `advice_options`：第一版一条请求默认最多一条建议结果，替代方案放 JSON。
 - `report_versions`：报告生成后作为快照；更新时新增一条 `reports`。
 - `chats`：第一版只有一个“聊聊”入口，不做会话分类和咨询线程列表。
 - `ai_config_versions`：系统配置第一版用 `system_configs`。
@@ -623,7 +623,7 @@ JSON 字段：
 - `reason`
 - `priority`
 - `source_report_id`
-- `source_rec_id`
+- `source_advice_id`
 - `status`
 - `created_at`
 - `updated_at`
@@ -637,14 +637,14 @@ JSON 字段：
 - `reason`：为什么需要这个缺口单品。
 - `priority`：优先级。
 - `source_report_id`：产生该缺口的报告 ID。
-- `source_rec_id`：产生该缺口的推荐 ID。
+- `source_advice_id`：产生该缺口的建议 ID。
 
 索引建议：
 
 - `uk_wardrobe_gaps_public_id`
 - `idx_wardrobe_gaps_user_status`
 - `idx_wardrobe_gaps_source_report`
-- `idx_wardrobe_gaps_source_rec`
+- `idx_wardrobe_gaps_source_advice`
 
 说明：
 
@@ -836,7 +836,7 @@ JSON 字段：
 
 ### image_routes
 
-用途：当前可用于推荐的个人形象路线，是第一版的业务中枢对象。
+用途：当前可用于生成建议的个人形象路线，是第一版的业务中枢对象。
 
 关键字段：
 
@@ -867,7 +867,7 @@ JSON 字段：
 
 - `name`：形象路线名称，例如利落亲和、轻熟松弛。
 - `route_role`：路线角色，可为主路线、场景路线、探索路线。
-- `weight`：路线推荐权重，用于排序和选择。
+- `weight`：路线选择权重，用于排序和选择。
 - `target_impression`：目标形象感受 JSON。
 - `suitable_scenes`：适合场景 JSON。
 - `hair_strategy`：发型策略 JSON。
@@ -915,7 +915,7 @@ JSON 字段：
 - `event_value`
 - `source`
 - `source_feedback_id`
-- `source_rec_id`
+- `source_advice_id`
 - `source_report_id`
 - `created_by`
 - `created_at`
@@ -926,7 +926,7 @@ JSON 字段：
 - `event_type`：路线事件类型，例如 `generated`、`liked`、`adjust_requested`。
 - `event_value`：事件详情 JSON。
 - `source_feedback_id`：触发事件的反馈 ID。
-- `source_rec_id`：触发事件的推荐 ID。
+- `source_advice_id`：触发事件的建议 ID。
 - `source_report_id`：触发事件的报告 ID。
 - `created_by`：事件创建方，例如 `user`、`system`、`admin`。
 
@@ -1104,11 +1104,11 @@ JSON 字段：
 字段说明：
 
 - `role`：消息角色，例如 `user`、`assistant`、`system`。
-- `msg_type`：消息类型，例如 `text`、`image`、`mixed`、`action`、`rec_card`、`report_card`、`memory_card`。
+- `msg_type`：消息类型，例如 `text`、`image`、`mixed`、`action`、`advice_card`、`report_card`、`memory_card`。
 - `content_text`：消息文本正文；敏感删除时可清空。
 - `content_json`：结构化消息内容 JSON，例如按钮动作、卡片摘要、上下文对象引用。
 - `asset_refs`：消息关联图片或文件资源引用 JSON。
-- `related_type`：消息关联或产出的业务对象类型，例如 `rec`、`report`、`feedback`、`memory`。
+- `related_type`：消息关联或产出的业务对象类型，例如 `advice`、`report`、`feedback`、`memory`。
 - `related_id`：消息关联或产出的业务对象内部 ID。
 - `related_public_id`：消息关联或产出对象的外部 ID 快照。
 - `job_id`：生成该消息的 AI 任务 ID。
@@ -1130,15 +1130,15 @@ JSON 字段：
 说明：
 
 - 第一版不建 `chats`，所有对话消息都属于唯一“聊聊”入口。
-- 聊聊中涉及报告、推荐、记忆等上下文时，对象引用写入 `content_json`。
-- 用户消息触发推荐时，`rec_requests.source_msg_id` 指向该消息。
+- 聊聊中涉及报告、建议、记忆等上下文时，对象引用写入 `content_json`。
+- 用户消息触发建议时，`advice_requests.source_msg_id` 指向该消息。
 - 用户消息触发反馈、修正或偏好更新时，`feedbacks.source_msg_id` 指向该消息。
-- Agent 回复推荐卡、报告卡或记忆卡时，使用 `related_type`、`related_id` 关联业务对象。
+- Agent 回复建议卡、报告卡或记忆卡时，使用 `related_type`、`related_id` 关联业务对象。
 - 聊天消息是敏感个人数据，支持软删除和正文脱敏。
 
-## 推荐
+## 建议
 
-### rec_requests
+### advice_requests
 
 用途：用户或系统提出的一次建议需求。
 
@@ -1155,7 +1155,7 @@ JSON 字段：
 - `scenario`
 - `trigger_context`
 - `parent_request_id`
-- `parent_rec_id`
+- `parent_advice_id`
 - `created_at`
 - `updated_at`
 - `deleted_at`
@@ -1169,15 +1169,15 @@ JSON 字段：
 - `scenario`：结构化场景 JSON，例如天气、日期、正式度、地点类型。
 - `trigger_context`：触发上下文 JSON，例如点击“更正式一点”。
 - `parent_request_id`：上一条相关请求 ID。
-- `parent_rec_id`：基于哪条推荐继续调整。
+- `parent_advice_id`：基于哪条建议继续调整。
 
 索引建议：
 
-- `uk_rec_requests_public_id`
-- `idx_rec_requests_user_status`
-- `idx_rec_requests_user_created`
-- `idx_rec_requests_source_msg`
-- `idx_rec_requests_parent_rec`
+- `uk_advice_requests_public_id`
+- `idx_advice_requests_user_status`
+- `idx_advice_requests_user_created`
+- `idx_advice_requests_source_msg`
+- `idx_advice_requests_parent_advice`
 
 JSON 字段：
 
@@ -1189,9 +1189,9 @@ JSON 字段：
 
 - `source` 可为 `today_auto`、`today_scene_change`、`today_adjustment`、`chat_text`、`chat_photo`、`report_action`、`onboarding_initial`。
 - `status` 可为 `pending`、`processing`、`completed`、`failed`、`cancelled`。
-- 第一版一条请求默认最多生成一条 `recs`。
+- 第一版一条请求默认最多生成一条 `advices` 记录。
 
-### recs
+### advices
 
 用途：系统针对某次请求生成的一套完整建议。
 
@@ -1199,12 +1199,12 @@ JSON 字段：
 
 - `id`
 - `public_id`
-- `request_id`
+- `advice_request_id`
 - `user_id`
 - `adopted_route_id`
 - `report_id`
 - `status`
-- `rec_date`
+- `advice_date`
 - `scene_key`
 - `title`
 - `summary`
@@ -1223,31 +1223,31 @@ JSON 字段：
 
 字段说明：
 
-- `request_id`：对应的推荐请求 ID。
-- `adopted_route_id`：本次推荐采用的形象路线 ID。
-- `report_id`：本次推荐关联的报告 ID，可为空。
-- `rec_date`：推荐归属日期，用于今日页查询。
+- `advice_request_id`：对应的建议请求 ID。
+- `adopted_route_id`：本次建议采用的形象路线 ID。
+- `report_id`：本次建议关联的报告 ID，可为空。
+- `advice_date`：建议归属日期，用于今日页查询。
 - `scene_key`：主场景键名，例如 `commute`、`date`、`client_meeting`。
-- `title`：推荐标题。
-- `summary`：推荐摘要。
+- `title`：建议标题。
+- `summary`：建议摘要。
 - `outfit_advice`：穿搭主方案 JSON。
 - `hair_advice`：发型建议 JSON。
 - `makeup_advice`：妆容或气色建议 JSON。
 - `avoid_notes`：今天不优先或需要避开的内容 JSON。
 - `alternatives`：可替换方案 JSON。
-- `wardrobe_item_refs`：本次推荐使用的衣橱单品引用 JSON。
-- `wardrobe_gap_refs`：本次推荐提到的衣橱缺口引用 JSON。
-- `context_snapshot`：生成推荐时使用的路线、画像、衣橱、记忆上下文快照。
-- `job_id`：生成推荐的任务 ID。
+- `wardrobe_item_refs`：本次建议使用的衣橱单品引用 JSON。
+- `wardrobe_gap_refs`：本次建议提到的衣橱缺口引用 JSON。
+- `context_snapshot`：生成建议时使用的路线、画像、衣橱、记忆上下文快照。
+- `job_id`：生成建议的任务 ID。
 
 索引建议：
 
-- `uk_recs_public_id`
-- `idx_recs_request`
-- `idx_recs_user_status`
-- `idx_recs_user_date_scene`
-- `idx_recs_adopted_route`
-- `idx_recs_report`
+- `uk_advices_public_id`
+- `idx_advices_advice_request`
+- `idx_advices_user_status`
+- `idx_advices_user_date_scene`
+- `idx_advices_adopted_route`
+- `idx_advices_report`
 
 JSON 字段：
 
@@ -1263,9 +1263,9 @@ JSON 字段：
 说明：
 
 - `status` 可为 `generating`、`ready`、`failed`、`expired`、`hidden`。
-- 今日页查询同一 `user_id + rec_date + scene_key` 下最新 ready 推荐。
-- 用户换场景、点击调整、聊天追问或拍照问搭配时，新建 request 和 rec。
-- 第一版不建 `rec_options`；替代方案放 `alternatives`。
+- 今日页查询同一 `user_id + advice_date + scene_key` 下最新 ready 建议。
+- 用户换场景、点击调整、聊天追问或拍照问搭配时，新建 `advice_requests` 和 `advices` 记录。
+- 第一版不建 `advice_options`；替代方案放 `alternatives`。
 
 ## 反馈与记忆
 
@@ -1295,7 +1295,7 @@ JSON 字段：
 - `feedback_type`：反馈类型，例如采纳、拒绝、实际穿了感觉不错。
 - `feedback_text`：用户自由文本反馈。
 - `feedback_value`：结构化反馈 JSON。
-- `source`：反馈来源，例如 `chat`、`rec_detail`、`memory_edit`。
+- `source`：反馈来源，例如 `chat`、`advice_detail`、`memory_edit`。
 - `source_msg_id`：触发本次反馈或修正的聊天消息 ID，可为空。
 
 索引建议：
@@ -1312,13 +1312,13 @@ JSON 字段：
 
 说明：
 
-- `target_type` 可为 `image_route`、`rec`、`report`、`wardrobe_item`、`memory`、`profile_fact`、`profile_inference`、`profile_pref`、`chat_msg`。
+- `target_type` 可为 `image_route`、`advice`、`report`、`wardrobe_item`、`memory`、`profile_fact`、`profile_inference`、`profile_pref`、`chat_msg`。
 - `feedback_type` 可为 `accepted`、`rejected`、`modified`、`worn_good`、`worn_bad`、`external_positive`、`external_negative`、`correction`。
 - 真实穿着反馈优先级高于初始 AI 判断。
 
 ### memories
 
-用途：当前可用于推荐的长期记忆，用户可见、可修正、可删除。
+用途：当前可用于生成建议的长期记忆，用户可见、可修正、可删除。
 
 关键字段：
 
@@ -1387,7 +1387,7 @@ JSON 字段：
 字段说明：
 
 - `memory_id`：长期记忆 ID。
-- `source_type`：记忆来源类型，例如 `feedback`、`rec`、`profile_fact`、`chat_msg`。
+- `source_type`：记忆来源类型，例如 `feedback`、`advice`、`profile_fact`、`chat_msg`。
 - `source_id`：来源对象内部 ID。
 - `source_public_id`：来源对象外部 ID 快照。
 - `weight`：该来源对记忆的贡献权重。
@@ -1399,7 +1399,7 @@ JSON 字段：
 
 说明：
 
-- `source_type` 可为 `feedback`、`rec`、`profile_fact`、`profile_inference`、`profile_pref`、`onboarding`、`chat_msg`。
+- `source_type` 可为 `feedback`、`advice`、`profile_fact`、`profile_inference`、`profile_pref`、`onboarding`、`chat_msg`。
 - 一个记忆可以来自多次反馈。
 - 真实穿着反馈权重大于初始 onboarding。
 
@@ -1725,7 +1725,7 @@ JSON 字段：
 
 字段说明：
 
-- `job_type`：任务类型，例如 `image_analysis`、`report_generation`、`rec_generation`、`memory_update`。
+- `job_type`：任务类型，例如 `image_analysis`、`report_generation`、`advice_generation`、`memory_update`。
 - `queue_name`：队列名称。
 - `related_type`：任务关联对象类型。
 - `related_id`：任务关联对象 ID。
@@ -1777,8 +1777,8 @@ JSON 字段：
 - `image_routes`
 - `reports`
 - `chat_msgs`
-- `rec_requests`
-- `recs`
+- `advice_requests`
+- `advices`
 - `feedbacks`
 - `memories`
 - `plans`
@@ -1834,7 +1834,7 @@ JSON 字段：
 - 画像属性。
 - 偏好、反馈和记忆。
 - 聊天消息正文、图片引用和结构化上下文。
-- 推荐和报告快照中的敏感摘要。
+- 建议和报告快照中的敏感摘要。
 - AI 任务摘要中的敏感内容。
 - 账务记录中的非必要个人展示信息。
 
@@ -1853,10 +1853,10 @@ unique(public_id)
 (user_id, created_at)
 ```
 
-今日推荐查询：
+今日建议查询：
 
 ```text
-recs(user_id, rec_date, scene_key, status)
+advices(user_id, advice_date, scene_key, status)
 ```
 
 形象路线查询：
@@ -1917,7 +1917,7 @@ benefit_txns(user_id, created_at)
 benefit_txns(job_id)
 ```
 
-## 推荐生成与数据写入流程
+## 建议生成与数据写入流程
 
 ### Onboarding 后生成路线和报告
 
@@ -1944,16 +1944,16 @@ benefit_txns(job_id)
 ### 生成今日建议
 
 ```text
-1. 创建 rec_requests，记录来源、场景和输入
-2. 创建 jobs 处理推荐生成
+1. 创建 advice_requests，记录来源、场景和输入
+2. 创建 jobs 处理建议生成
 3. 预检查用户可用积分是否足够覆盖本次预估 AI 任务
 4. 调用 AI，更新 jobs.output_summary
 5. 按实际计费写入 benefit_txns，并更新 benefits.remaining_amount
-6. 生成 recs，关联 adopted_route_id
-7. 更新 rec_requests.status
+6. 生成 advices，关联 adopted_route_id
+7. 更新 advice_requests.status
 ```
 
-今日页同一用户、同一日期、同一场景优先复用最新 ready `recs`。用户换场景、点击调整、聊天追问或拍照问搭配时，新建 `rec_requests` 和 `recs`。
+今日页同一用户、同一日期、同一场景优先复用最新 ready `advices`。用户换场景、点击调整、聊天追问或拍照问搭配时，新建 `advice_requests` 和 `advices`。
 
 AI 任务扣积分时优先消耗即将过期的限时积分，再消耗永久积分。一次 AI 任务扣多个批次时，`benefit_txns` 记录每个批次的扣减明细，并通过 `job_id` 追溯任务摘要。
 
@@ -1961,15 +1961,15 @@ AI 任务扣积分时优先消耗即将过期的限时积分，再消耗永久�
 
 ```text
 1. 用户发送文本或图片，写入 chat_msgs，role=user
-2. 识别需要生成形象建议时，创建 rec_requests，并写入 source_msg_id
-3. 创建 jobs 处理推荐生成
+2. 识别需要生成形象建议时，创建 advice_requests，并写入 source_msg_id
+3. 创建 jobs 处理建议生成
 4. 调用 AI，更新 jobs.output_summary
 5. 按实际计费写入 benefit_txns，并更新 benefits.remaining_amount
-6. 生成 recs
-7. 写入 chat_msgs，role=assistant，msg_type=rec_card，related_type=rec
+6. 生成 advices
+7. 写入 chat_msgs，role=assistant，msg_type=advice_card，related_type=advice
 ```
 
-如果用户只是闲聊、补充偏好或修正记忆，不一定生成 `rec_requests`；可直接写入 `feedbacks`、`profile_prefs` 或等待记忆任务归纳。
+如果用户只是闲聊、补充偏好或修正记忆，不一定生成 `advice_requests`；可直接写入 `feedbacks`、`profile_prefs` 或等待记忆任务归纳。
 
 ### 订阅开通或续费
 
@@ -2034,7 +2034,7 @@ AI 任务扣积分时优先消耗即将过期的限时积分，再消耗永久�
 - 风格库支持可迁移元素和不可迁移风险。
 - `image_routes` 是形象路线中枢对象。
 - 报告作为不可编辑快照，更新时新增 `reports`。
-- 推荐请求和推荐结果分为 `rec_requests` 与 `recs`。
+- 建议请求和建议结果分为 `advice_requests` 与 `advices`。
 - “聊聊”入口消息统一存入 `chat_msgs`，第一版不建 `chats`。
 - 反馈和记忆支持来源追溯。
 - 用户可查看、修正、删除长期记忆。
