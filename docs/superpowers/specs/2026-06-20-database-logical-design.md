@@ -82,7 +82,7 @@
 - 长期记忆。
 - 订阅、积分和存储权益。
 - 系统配置。
-- AI 调用和任务。
+- AI 任务。
 
 JSON 快照存储：
 
@@ -121,7 +121,7 @@ JSON 快照存储：
 
 - 用户 session 存 Redis。
 - 管理端 session 也优先存 Redis。
-- MySQL 只存用户账号、管理员账号、任务记录和 AI 调用摘要。
+- MySQL 只存用户账号、管理员账号、任务记录和 AI 任务摘要。
 
 ### 表命名策略
 
@@ -186,7 +186,6 @@ benefit_txns
 
 系统配置、AI 与任务
 system_configs
-ai_calls
 jobs
 ```
 
@@ -200,6 +199,7 @@ jobs
 - `rec_options`：第一版一条请求默认最多一条推荐结果，替代方案放 JSON。
 - `report_versions`：报告生成后作为快照；更新时新增一条 `reports`。
 - `ai_config_versions`：系统配置第一版用 `system_configs`。
+- `ai_calls`：第一版 AI 任务摘要放 `jobs`，积分扣减放 `benefit_txns`，不单独建 AI 调用表。
 - `operate_logs`：前期不建，减少首版后台复杂度。
 - `share_tokens`：第一期不做分享能力。
 - `metrics_events`：第一期不做埋点事件表。
@@ -997,7 +997,6 @@ JSON 字段：
 - `content_json`
 - `context_snapshot`
 - `style_refs_json`
-- `ai_call_id`
 - `job_id`
 - `generated_at`
 - `created_at`
@@ -1012,7 +1011,6 @@ JSON 字段：
 - `content_json`：报告正文 JSON。
 - `context_snapshot`：生成报告时使用的画像、路线、衣橱、记忆等上下文快照。
 - `style_refs_json`：报告引用的风格样本摘要 JSON。
-- `ai_call_id`：生成报告的 AI 调用 ID。
 - `job_id`：生成报告的任务 ID。
 - `generated_at`：报告生成完成时间。
 
@@ -1148,7 +1146,6 @@ JSON 字段：
 - `wardrobe_item_refs`
 - `wardrobe_gap_refs`
 - `context_snapshot`
-- `ai_call_id`
 - `job_id`
 - `created_at`
 - `updated_at`
@@ -1171,7 +1168,6 @@ JSON 字段：
 - `wardrobe_item_refs`：本次推荐使用的衣橱单品引用 JSON。
 - `wardrobe_gap_refs`：本次推荐提到的衣橱缺口引用 JSON。
 - `context_snapshot`：生成推荐时使用的路线、画像、衣橱、记忆上下文快照。
-- `ai_call_id`：生成推荐的 AI 调用 ID。
 - `job_id`：生成推荐的任务 ID。
 
 索引建议：
@@ -1531,7 +1527,7 @@ JSON 字段：
 - 充值积分写入 `benefit_type=credit`、`benefit_kind=permanent`，`expires_at` 为空。
 - 订阅赠送存储空间写入 `benefit_type=storage`、`benefit_kind=expiring`。
 - 永久积分购买的存储空间写入 `benefit_type=storage`、`benefit_kind=permanent`，`expires_at` 为空。
-- AI 调用扣积分时，优先扣即将过期的限时积分，再扣永久积分。
+- AI 任务扣积分时，优先扣即将过期的限时积分，再扣永久积分。
 - 购买存储空间只能扣 `benefit_type=credit`、`benefit_kind=permanent` 的积分权益批次。
 - 当前可用存储空间等于用户有效 `benefit_type=storage` 的 `total_amount` 之和。
 - 当前已用存储空间按用户未删除 `assets.file_size` 汇总。
@@ -1552,7 +1548,7 @@ JSON 字段：
 - `target_type`
 - `target_id`
 - `order_id`
-- `ai_call_id`
+- `job_id`
 - `related_benefit_id`
 - `reason`
 - `created_at`
@@ -1566,7 +1562,7 @@ JSON 字段：
 - `target_type`：关联业务对象类型。
 - `target_id`：关联业务对象内部 ID。
 - `order_id`：订阅、积分充值或退款相关订单 ID。
-- `ai_call_id`：AI 调用扣费时关联的调用记录 ID。
+- `job_id`：AI 任务扣费时关联的任务 ID。
 - `related_benefit_id`：关联权益批次 ID，例如永久积分购买存储空间时指向新生成的存储权益。
 - `reason`：流水原因摘要。
 
@@ -1577,12 +1573,12 @@ JSON 字段：
 - `idx_benefit_txns_benefit`
 - `idx_benefit_txns_type`
 - `idx_benefit_txns_order`
-- `idx_benefit_txns_ai_call`
+- `idx_benefit_txns_job`
 - `idx_benefit_txns_related_benefit`
 
 说明：
 
-- 一次 AI 调用可能扣多个积分权益批次，因此一个 `ai_calls` 可以对应多条 `benefit_txns`。
+- 一次 AI 任务可能扣多个积分权益批次，因此一个 `jobs` 可以对应多条 `benefit_txns`。
 - 购买存储空间会产生两类记录：扣减永久积分的 `benefit_txns`，以及新增存储空间的 `benefits`。
 - 购买存储空间的 `benefit_txns.txn_type=buy_storage`，只能引用永久积分权益批次。
 - 权益余额以 `benefits.remaining_amount` 为当前态，`benefit_txns` 为可追溯流水。
@@ -1629,62 +1625,6 @@ JSON 字段：
 - `group` 和 `key` 是 SQL 关键字风险词；实际 DDL 需使用反引号，或实现时改为 `config_group`、`config_key`。逻辑设计按产品确认使用 `group`、`key`。
 - 配置历史第一版不建版本表，后续如需审计再补专门的操作日志能力。
 
-### ai_calls
-
-用途：AI 调用审计、成本摘要和积分扣费锚点。
-
-关键字段：
-
-- `id`
-- `public_id`
-- `user_id`
-- `job_id`
-- `provider`
-- `model`
-- `call_type`
-- `input_summary`
-- `output_summary`
-- `token_usage`
-- `cost_amount`
-- `credits_charged`
-- `latency_ms`
-- `status`
-- `error_message`
-- `created_at`
-
-字段说明：
-
-- `job_id`：关联任务 ID。
-- `provider`：AI 服务提供方。
-- `model`：模型名称。
-- `call_type`：调用类型，例如 `extraction`、`route_generation`、`recommendation`、`memory_summary`。
-- `input_summary`：输入摘要 JSON，不保存完整敏感原文。
-- `output_summary`：输出摘要 JSON，不保存完整敏感原文。
-- `token_usage`：token 用量 JSON。
-- `cost_amount`：调用成本。
-- `credits_charged`：本次 AI 调用最终扣减的积分总数。
-- `latency_ms`：调用耗时，单位毫秒。
-- `error_message`：失败原因摘要。
-
-索引建议：
-
-- `uk_ai_calls_public_id`
-- `idx_ai_calls_user_created`
-- `idx_ai_calls_job`
-- `idx_ai_calls_status`
-
-JSON 字段：
-
-- `input_summary`
-- `output_summary`
-- `token_usage`
-
-说明：
-
-- 不保存完整敏感原文和完整图片地址。
-- 不普通软删，作为审计和排障记录。
-- 积分扣减明细不直接塞进 `ai_calls`，而是通过 `benefit_txns.ai_call_id` 追溯。
-
 ### jobs
 
 用途：异步任务持久化记录。
@@ -1716,7 +1656,7 @@ JSON 字段：
 - `related_type`：任务关联对象类型。
 - `related_id`：任务关联对象 ID。
 - `input_summary`：任务输入摘要 JSON。
-- `output_summary`：任务输出摘要 JSON。
+- `output_summary`：任务输出摘要 JSON；AI 任务可包含模型、token 用量、成本、耗时和生成质量摘要。
 - `error_message`：任务失败原因摘要。
 - `retry_count`：已重试次数。
 - `next_retry_at`：下次重试时间。
@@ -1741,6 +1681,7 @@ JSON 字段：
 - Redis 负责队列和锁，MySQL 记录状态。
 - 不普通软删，作为排障记录。
 - 隐私删除后，摘要字段不能保留敏感原文。
+- 第一版不单独建 `ai_calls`；AI 任务排障摘要放 `jobs`，积分扣减明细放 `benefit_txns`。
 
 ## 删除与隐私策略
 
@@ -1785,7 +1726,6 @@ JSON 字段：
 以下表不普通软删，但隐私删除后必须脱敏摘要：
 
 - `jobs`
-- `ai_calls`
 
 ### 账务记录
 
@@ -1819,7 +1759,7 @@ JSON 字段：
 - 画像属性。
 - 偏好、反馈和记忆。
 - 推荐和报告快照中的敏感摘要。
-- AI 调用和任务摘要中的敏感内容。
+- AI 任务摘要中的敏感内容。
 - 账务记录中的非必要个人展示信息。
 
 ## 查询与索引原则
@@ -1873,13 +1813,11 @@ style_samples(subject_id, status)
 style_sample_tags(style_tag_id)
 ```
 
-AI 和任务查询：
+AI 任务查询：
 
 ```text
 jobs(status, next_retry_at)
 jobs(related_type, related_id)
-ai_calls(user_id, created_at)
-ai_calls(job_id)
 ```
 
 订阅、积分与存储查询：
@@ -1892,7 +1830,7 @@ orders(order_no) unique
 benefits(user_id, benefit_type, benefit_kind, status)
 benefits(user_id, expires_at)
 benefit_txns(user_id, created_at)
-benefit_txns(ai_call_id)
+benefit_txns(job_id)
 ```
 
 ## 推荐生成与数据写入流程
@@ -1924,8 +1862,8 @@ benefit_txns(ai_call_id)
 ```text
 1. 创建 rec_requests，记录来源、场景和输入
 2. 创建 jobs 处理推荐生成
-3. 预检查用户可用积分是否足够覆盖本次预估 AI 调用
-4. 调用 AI，写入 ai_calls
+3. 预检查用户可用积分是否足够覆盖本次预估 AI 任务
+4. 调用 AI，更新 jobs.output_summary
 5. 按实际计费写入 benefit_txns，并更新 benefits.remaining_amount
 6. 生成 recs，关联 adopted_route_id
 7. 更新 rec_requests.status
@@ -1933,7 +1871,7 @@ benefit_txns(ai_call_id)
 
 今日页同一用户、同一日期、同一场景优先复用最新 ready `recs`。用户换场景、点击调整、聊天追问或拍照问搭配时，新建 `rec_requests` 和 `recs`。
 
-AI 调用扣积分时优先消耗即将过期的限时积分，再消耗永久积分。一次 AI 调用扣多个批次时，`ai_calls.credits_charged` 记录总扣减，`benefit_txns` 记录每个批次的扣减明细。
+AI 任务扣积分时优先消耗即将过期的限时积分，再消耗永久积分。一次 AI 任务扣多个批次时，`benefit_txns` 记录每个批次的扣减明细，并通过 `job_id` 追溯任务摘要。
 
 ### 订阅开通或续费
 
@@ -1991,7 +1929,7 @@ AI 调用扣积分时优先消耗即将过期的限时积分，再消耗永久�
 - 用户 session 不进入 MySQL。
 - 账号域不包含 `user_auth_bindings` 和 `admin_roles`。
 - 敏感和核心业务表支持软删除。
-- 任务、AI 调用用于审计和排障，不普通软删。
+- 任务用于审计和排障，不普通软删。
 - 用户画像区分事实、AI 推断和明确偏好。
 - 资产统一由 `assets` 管理对象存储元数据。
 - 衣橱只建核心单品和缺口，不做完整库存。
@@ -2003,6 +1941,6 @@ AI 调用扣积分时优先消耗即将过期的限时积分，再消耗永久�
 - 用户可查看、修正、删除长期记忆。
 - 订阅赠送限时积分和存储空间。
 - 充值积分全部永久有效。
-- AI 调用消耗积分，并可追溯到 `ai_calls` 和 `benefit_txns`。
+- AI 任务消耗积分，并可追溯到 `jobs` 和 `benefit_txns`。
 - 存储空间只能用永久积分购买，订阅赠送存储除外。
 - 系统配置通过 `system_configs` K-V 管理。
