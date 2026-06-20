@@ -41,7 +41,7 @@
 - 表之间内部关联优先使用 `*_id BIGINT`。
 - 前端、分享链接、外部 API 暴露 `public_id`。
 - `public_id` 可使用 ULID、NanoID 或类似短 ID。
-- 分享 token、上传 token、会话 token 使用安全随机值，不使用自增 ID。
+- 上传 token、会话 token 使用安全随机值，不使用自增 ID。
 
 通用字段含义：
 
@@ -180,10 +180,6 @@ memory_sources
 system_configs
 ai_calls
 jobs
-
-分享与指标
-share_tokens
-metrics_events
 ```
 
 第一版明确不建：
@@ -197,6 +193,8 @@ metrics_events
 - `report_versions`：报告生成后作为快照；更新时新增一条 `reports`。
 - `ai_config_versions`：系统配置第一版用 `system_configs`。
 - `operate_logs`：前期不建，减少首版后台复杂度。
+- `share_tokens`：第一期不做分享能力。
+- `metrics_events`：第一期不做埋点事件表。
 - `user_delete_requests`：第一版删除由应用层直接编排，不做请求流转表。
 
 ## 账号与管理
@@ -1479,93 +1477,6 @@ JSON 字段：
 - 不普通软删，作为排障记录。
 - 隐私删除后，摘要字段不能保留敏感原文。
 
-## 分享与指标
-
-### share_tokens
-
-用途：报告或建议分享页的访问 token。
-
-关键字段：
-
-- `id`
-- `public_id`
-- `token`
-- `owner_user_id`
-- `target_type`
-- `target_id`
-- `target_public_id`
-- `scope`
-- `expires_at`
-- `revoked_at`
-- `created_at`
-- `updated_at`
-- `deleted_at`
-
-字段说明：
-
-- `token`：安全随机分享 token。
-- `owner_user_id`：分享所有者用户 ID。
-- `scope`：分享范围 JSON，例如可见模块、脱敏级别。
-- `expires_at`：过期时间。
-- `revoked_at`：撤销时间。
-
-索引建议：
-
-- `uk_share_tokens_public_id`
-- `uk_share_tokens_token`
-- `idx_share_tokens_owner`
-- `idx_share_tokens_target`
-- `idx_share_tokens_expires`
-
-JSON 字段：
-
-- `scope`
-
-说明：
-
-- `token` 必须是安全随机值。
-- `target_type` 可为 `report`、`rec`。
-- 第一版分享页只展示脱敏摘要。
-
-### metrics_events
-
-用途：基础埋点事件。
-
-关键字段：
-
-- `id`
-- `user_id`
-- `event_name`
-- `event_source`
-- `target_type`
-- `target_id`
-- `properties`
-- `occurred_at`
-- `created_at`
-
-字段说明：
-
-- `event_name`：事件名称。
-- `event_source`：事件来源，例如 `miniapp`、`admin`、`server`。
-- `properties`：事件属性 JSON，不写入敏感原文。
-- `occurred_at`：事件发生时间。
-
-索引建议：
-
-- `idx_metrics_events_user_time`
-- `idx_metrics_events_name_time`
-- `idx_metrics_events_target`
-
-JSON 字段：
-
-- `properties`
-
-说明：
-
-- 第一版只存必要产品事件，不做复杂 BI。
-- 高敏感内容不要写入 `properties`。
-- 不普通软删；隐私删除后要脱敏可识别内容。
-
 ## 删除与隐私策略
 
 ### 软删除表
@@ -1589,7 +1500,6 @@ JSON 字段：
 - `recs`
 - `feedbacks`
 - `memories`
-- `share_tokens`
 
 ### 关联表
 
@@ -1603,13 +1513,12 @@ JSON 字段：
 - `report_image_routes`
 - `memory_sources`
 
-### 日志与指标
+### 日志
 
 以下表不普通软删，但隐私删除后必须脱敏摘要：
 
 - `jobs`
 - `ai_calls`
-- `metrics_events`
 
 ### 资产删除流程
 
@@ -1760,5 +1669,4 @@ ai_calls(job_id)
 - 推荐请求和推荐结果分为 `rec_requests` 与 `recs`。
 - 反馈和记忆支持来源追溯。
 - 用户可查看、修正、删除长期记忆。
-- 分享 token 只暴露脱敏范围。
 - 系统配置通过 `system_configs` K-V 管理。
