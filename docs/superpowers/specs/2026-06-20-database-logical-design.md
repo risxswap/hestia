@@ -80,6 +80,7 @@
 - 推荐请求与推荐结果。
 - 反馈。
 - 长期记忆。
+- 订阅、积分和存储权益。
 - 系统配置。
 - AI 调用和任务。
 
@@ -175,6 +176,14 @@ recs
 feedbacks
 memories
 memory_sources
+
+订阅、积分与存储权益
+plans
+subs
+orders
+credit_lots
+credit_txns
+storage_grants
 
 系统配置、AI 与任务
 system_configs
@@ -1325,6 +1334,292 @@ JSON 字段：
 - 一个记忆可以来自多次反馈。
 - 真实穿着反馈权重大于初始 onboarding。
 
+## 订阅、积分与存储权益
+
+### plans
+
+用途：订阅套餐定义。
+
+关键字段：
+
+- `id`
+- `public_id`
+- `plan_code`
+- `name`
+- `billing_period`
+- `price_amount`
+- `currency`
+- `grant_credits`
+- `credit_valid_days`
+- `grant_storage_bytes`
+- `status`
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+字段说明：
+
+- `plan_code`：套餐编码，例如 `monthly_basic`、`yearly_plus`。
+- `name`：套餐展示名。
+- `billing_period`：订阅周期，例如 `month`、`year`。
+- `price_amount`：订阅价格，单位由支付实现约定，建议使用分。
+- `currency`：币种，例如 `CNY`。
+- `grant_credits`：订阅成功后赠送的积分数量。
+- `credit_valid_days`：订阅赠送积分有效天数，通常等于订阅周期。
+- `grant_storage_bytes`：订阅期间赠送的存储空间字节数。
+
+索引建议：
+
+- `uk_plans_public_id`
+- `uk_plans_plan_code`
+- `idx_plans_status`
+
+说明：
+
+- `plans` 只定义订阅套餐。
+- 订阅赠送积分属于限时积分，只能用于 AI 调用。
+- 订阅赠送存储空间随订阅权益生效和失效。
+- 用户额外购买存储空间不能直接现金购买，只能使用永久积分兑换。
+
+### subs
+
+用途：用户订阅记录。
+
+关键字段：
+
+- `id`
+- `public_id`
+- `user_id`
+- `plan_id`
+- `order_id`
+- `status`
+- `current_period_start_at`
+- `current_period_end_at`
+- `cancel_at_period_end`
+- `cancelled_at`
+- `grant_snapshot`
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+字段说明：
+
+- `plan_id`：关联订阅套餐 ID。
+- `order_id`：开通或续费订阅的支付订单 ID。
+- `current_period_start_at`：当前订阅周期开始时间。
+- `current_period_end_at`：当前订阅周期结束时间。
+- `cancel_at_period_end`：是否到期后不再续订。
+- `cancelled_at`：取消时间。
+- `grant_snapshot`：订阅权益快照 JSON，记录当次赠送积分和存储空间，避免套餐后续调整影响历史订单。
+
+索引建议：
+
+- `uk_subs_public_id`
+- `idx_subs_user_status`
+- `idx_subs_user_period`
+- `idx_subs_order`
+
+JSON 字段：
+
+- `grant_snapshot`
+
+说明：
+
+- 用户当前有效订阅由 `user_id + status + current_period_end_at` 查询。
+- 订阅开通或续费后，应用层创建对应的 `credit_lots` 和 `storage_grants`。
+- 第一版不单独设计订阅版本表，套餐快照放在 `grant_snapshot`。
+
+### orders
+
+用途：支付订单记录。
+
+关键字段：
+
+- `id`
+- `public_id`
+- `user_id`
+- `order_no`
+- `order_type`
+- `amount`
+- `currency`
+- `pay_channel`
+- `pay_status`
+- `paid_at`
+- `closed_at`
+- `refund_status`
+- `item_snapshot`
+- `created_at`
+- `updated_at`
+
+字段说明：
+
+- `order_no`：内部订单号。
+- `order_type`：订单类型，例如 `subscription`、`credit_recharge`。
+- `amount`：支付金额，建议使用分。
+- `currency`：币种，例如 `CNY`。
+- `pay_channel`：支付渠道，例如 `wechat_pay`。
+- `pay_status`：支付状态，例如 `pending`、`paid`、`closed`、`refunded`。
+- `paid_at`：支付成功时间。
+- `closed_at`：订单关闭时间。
+- `refund_status`：退款状态。
+- `item_snapshot`：购买项目快照 JSON，记录套餐、充值积分数量、价格和展示文案。
+
+索引建议：
+
+- `uk_orders_public_id`
+- `uk_orders_order_no`
+- `idx_orders_user_created`
+- `idx_orders_type_status`
+- `idx_orders_pay_status`
+
+JSON 字段：
+
+- `item_snapshot`
+
+说明：
+
+- 订阅购买和积分充值都通过 `orders` 对账。
+- 充值积分全部是永久积分。
+- 存储空间购买不创建现金订单，只通过永久积分扣减和 `storage_grants` 记录。
+
+### credit_lots
+
+用途：用户积分批次余额。
+
+关键字段：
+
+- `id`
+- `public_id`
+- `user_id`
+- `source`
+- `source_type`
+- `source_id`
+- `credit_kind`
+- `total_credits`
+- `remaining_credits`
+- `expires_at`
+- `status`
+- `created_at`
+- `updated_at`
+
+字段说明：
+
+- `source`：积分来源，例如 `subscription_grant`、`recharge`、`admin_adjustment`、`refund`。
+- `source_type`：来源对象类型，例如 `sub`、`order`、`admin`。
+- `source_id`：来源对象内部 ID。
+- `credit_kind`：积分类型，`expiring` 表示限时积分，`permanent` 表示永久积分。
+- `total_credits`：本批次初始积分数量。
+- `remaining_credits`：本批次剩余积分数量。
+- `expires_at`：积分过期时间；永久积分为空。
+
+索引建议：
+
+- `uk_credit_lots_public_id`
+- `idx_credit_lots_user_kind`
+- `idx_credit_lots_user_expires`
+- `idx_credit_lots_source`
+- `idx_credit_lots_status`
+
+说明：
+
+- 订阅赠送积分写入 `credit_kind=expiring`，有效期来自订阅周期或套餐配置。
+- 充值积分写入 `credit_kind=permanent`，`expires_at` 为空。
+- AI 调用扣积分时，优先扣即将过期的限时积分，再扣永久积分。
+- 购买存储空间只能扣 `credit_kind=permanent` 的积分批次。
+
+### credit_txns
+
+用途：积分流水账本。
+
+关键字段：
+
+- `id`
+- `public_id`
+- `user_id`
+- `lot_id`
+- `txn_type`
+- `credits_delta`
+- `balance_after`
+- `target_type`
+- `target_id`
+- `order_id`
+- `ai_call_id`
+- `storage_grant_id`
+- `reason`
+- `created_at`
+
+字段说明：
+
+- `lot_id`：被增加或扣减的积分批次 ID。
+- `txn_type`：流水类型，例如 `grant`、`consume_ai`、`buy_storage`、`expire`、`refund`、`adjust`。
+- `credits_delta`：积分变动值，增加为正数，扣减为负数。
+- `balance_after`：该批次变动后的剩余积分。
+- `target_type`：关联业务对象类型。
+- `target_id`：关联业务对象内部 ID。
+- `order_id`：积分充值或退款相关订单 ID。
+- `ai_call_id`：AI 调用扣费时关联的调用记录 ID。
+- `storage_grant_id`：购买存储空间时关联的存储权益 ID。
+- `reason`：流水原因摘要。
+
+索引建议：
+
+- `uk_credit_txns_public_id`
+- `idx_credit_txns_user_created`
+- `idx_credit_txns_lot`
+- `idx_credit_txns_type`
+- `idx_credit_txns_order`
+- `idx_credit_txns_ai_call`
+- `idx_credit_txns_storage_grant`
+
+说明：
+
+- 一次 AI 调用可能扣多个积分批次，因此一个 `ai_calls` 可以对应多条 `credit_txns`。
+- 购买存储空间的 `credit_txns.txn_type=buy_storage`，只能引用永久积分批次。
+- 积分余额以 `credit_lots.remaining_credits` 为当前态，`credit_txns` 为可追溯流水。
+
+### storage_grants
+
+用途：用户存储空间权益。
+
+关键字段：
+
+- `id`
+- `public_id`
+- `user_id`
+- `source`
+- `sub_id`
+- `credit_txn_id`
+- `storage_bytes`
+- `starts_at`
+- `expires_at`
+- `status`
+- `created_at`
+- `updated_at`
+
+字段说明：
+
+- `source`：权益来源，例如 `subscription_grant`、`permanent_credit_purchase`、`admin_adjustment`。
+- `sub_id`：订阅赠送存储空间关联的订阅 ID。
+- `credit_txn_id`：永久积分购买存储空间时关联的积分流水 ID。
+- `storage_bytes`：本条权益提供的存储空间字节数。
+- `starts_at`：权益生效时间。
+- `expires_at`：权益失效时间；永久积分购买的存储空间为空。
+
+索引建议：
+
+- `uk_storage_grants_public_id`
+- `idx_storage_grants_user_status`
+- `idx_storage_grants_user_expires`
+- `idx_storage_grants_sub`
+- `idx_storage_grants_credit_txn`
+
+说明：
+
+- 当前可用存储空间等于用户有效 `storage_grants.storage_bytes` 之和。
+- 当前已用存储空间按用户未删除 `assets.file_size` 汇总。
+- 订阅赠送存储空间可过期。
+- 用户额外扩容只能通过永久积分购买，对应 `source=permanent_credit_purchase` 且 `expires_at` 为空。
+
 ## 系统配置、AI 与任务
 
 ### system_configs
@@ -1346,7 +1641,7 @@ JSON 字段：
 
 字段说明：
 
-- `group`：配置分组，例如 `ai`、`upload`、`feature`、`onboarding`。
+- `group`：配置分组，例如 `ai`、`upload`、`feature`、`onboarding`、`billing`。
 - `key`：分组内配置键名。
 - `value`：配置值。
 - `value_type`：配置值类型，例如 `string`、`number`、`bool`、`json`。
@@ -1360,8 +1655,8 @@ JSON 字段：
 
 说明：
 
-- `group` 示例：`ai`、`upload`、`feature`、`onboarding`、`recommendation`。
-- `key` 是组内配置名，例如 `default_model`、`max_image_size_mb`、`today_auto_enabled`。
+- `group` 示例：`ai`、`upload`、`feature`、`onboarding`、`recommendation`、`billing`、`storage`。
+- `key` 是组内配置名，例如 `default_model`、`max_image_size_mb`、`today_auto_enabled`、`credit_price_rules`、`storage_exchange_rules`。
 - `value_type` 可为 `string`、`number`、`bool`、`json`。
 - 复杂配置值存 JSON。
 - `group` 和 `key` 是 SQL 关键字风险词；实际 DDL 需使用反引号，或实现时改为 `config_group`、`config_key`。逻辑设计按产品确认使用 `group`、`key`。
@@ -1369,7 +1664,7 @@ JSON 字段：
 
 ### ai_calls
 
-用途：AI 调用审计和成本摘要。
+用途：AI 调用审计、成本摘要和积分扣费锚点。
 
 关键字段：
 
@@ -1384,6 +1679,7 @@ JSON 字段：
 - `output_summary`
 - `token_usage`
 - `cost_amount`
+- `credits_charged`
 - `latency_ms`
 - `status`
 - `error_message`
@@ -1399,6 +1695,7 @@ JSON 字段：
 - `output_summary`：输出摘要 JSON，不保存完整敏感原文。
 - `token_usage`：token 用量 JSON。
 - `cost_amount`：调用成本。
+- `credits_charged`：本次 AI 调用最终扣减的积分总数。
 - `latency_ms`：调用耗时，单位毫秒。
 - `error_message`：失败原因摘要。
 
@@ -1419,6 +1716,7 @@ JSON 字段：
 
 - 不保存完整敏感原文和完整图片地址。
 - 不普通软删，作为审计和排障记录。
+- 积分扣减明细不直接塞进 `ai_calls`，而是通过 `credit_txns.ai_call_id` 追溯。
 
 ### jobs
 
@@ -1500,6 +1798,8 @@ JSON 字段：
 - `recs`
 - `feedbacks`
 - `memories`
+- `plans`
+- `subs`
 
 ### 关联表
 
@@ -1519,6 +1819,20 @@ JSON 字段：
 
 - `jobs`
 - `ai_calls`
+
+### 账务记录
+
+以下表不普通软删，作为支付、权益和积分对账依据：
+
+- `orders`
+- `credit_lots`
+- `credit_txns`
+- `storage_grants`
+
+说明：
+
+- 用户隐私删除后，账务记录保留必要对账字段，但脱敏展示昵称、头像、输入摘要等个人内容。
+- 账务记录的取消、退款、过期和调整通过状态字段与反向流水表达，不物理删除。
 
 ### 资产删除流程
 
@@ -1540,6 +1854,7 @@ JSON 字段：
 - 偏好、反馈和记忆。
 - 推荐和报告快照中的敏感摘要。
 - AI 调用和任务摘要中的敏感内容。
+- 账务记录中的非必要个人展示信息。
 
 ## 查询与索引原则
 
@@ -1601,6 +1916,21 @@ ai_calls(user_id, created_at)
 ai_calls(job_id)
 ```
 
+订阅、积分与存储查询：
+
+```text
+subs(user_id, status)
+subs(user_id, current_period_end_at)
+orders(user_id, created_at)
+orders(order_no) unique
+credit_lots(user_id, credit_kind, status)
+credit_lots(user_id, expires_at)
+credit_txns(user_id, created_at)
+credit_txns(ai_call_id)
+storage_grants(user_id, status)
+storage_grants(user_id, expires_at)
+```
+
 ## 推荐生成与数据写入流程
 
 ### Onboarding 后生成路线和报告
@@ -1630,12 +1960,51 @@ ai_calls(job_id)
 ```text
 1. 创建 rec_requests，记录来源、场景和输入
 2. 创建 jobs 处理推荐生成
-3. 调用 AI，写入 ai_calls
-4. 生成 recs，关联 adopted_route_id
-5. 更新 rec_requests.status
+3. 预检查用户可用积分是否足够覆盖本次预估 AI 调用
+4. 调用 AI，写入 ai_calls
+5. 按实际计费写入 credit_txns，并更新 credit_lots.remaining_credits
+6. 生成 recs，关联 adopted_route_id
+7. 更新 rec_requests.status
 ```
 
 今日页同一用户、同一日期、同一场景优先复用最新 ready `recs`。用户换场景、点击调整、聊天追问或拍照问搭配时，新建 `rec_requests` 和 `recs`。
+
+AI 调用扣积分时优先消耗即将过期的限时积分，再消耗永久积分。一次 AI 调用扣多个批次时，`ai_calls.credits_charged` 记录总扣减，`credit_txns` 记录每个批次的扣减明细。
+
+### 订阅开通或续费
+
+```text
+1. 创建 orders，order_type=subscription
+2. 支付成功后更新 orders.pay_status=paid
+3. 创建或续期 subs，并记录 grant_snapshot
+4. 创建 credit_lots，source=subscription_grant，credit_kind=expiring
+5. 写入 credit_txns，txn_type=grant
+6. 创建 storage_grants，source=subscription_grant，expires_at 跟随订阅周期
+```
+
+订阅赠送积分只用于 AI 调用。订阅赠送存储空间只在订阅权益有效期内计入可用容量。
+
+### 积分充值
+
+```text
+1. 创建 orders，order_type=credit_recharge
+2. 支付成功后更新 orders.pay_status=paid
+3. 创建 credit_lots，source=recharge，credit_kind=permanent，expires_at 为空
+4. 写入 credit_txns，txn_type=grant
+```
+
+充值积分全部永久有效，可用于 AI 调用，也可用于购买存储空间。
+
+### 永久积分购买存储空间
+
+```text
+1. 检查用户永久积分余额
+2. 创建 storage_grants，source=permanent_credit_purchase，expires_at 为空
+3. 写入 credit_txns，txn_type=buy_storage，只扣 credit_kind=permanent 的积分批次，并关联 storage_grant_id
+4. 回填 storage_grants.credit_txn_id
+```
+
+存储空间不能直接现金购买，也不能用订阅赠送的限时积分购买。
 
 ### 用户反馈与记忆更新
 
@@ -1669,4 +2038,8 @@ ai_calls(job_id)
 - 推荐请求和推荐结果分为 `rec_requests` 与 `recs`。
 - 反馈和记忆支持来源追溯。
 - 用户可查看、修正、删除长期记忆。
+- 订阅赠送限时积分和存储空间。
+- 充值积分全部永久有效。
+- AI 调用消耗积分，并可追溯到 `ai_calls` 和 `credit_txns`。
+- 存储空间只能用永久积分购买，订阅赠送存储除外。
 - 系统配置通过 `system_configs` K-V 管理。
