@@ -81,7 +81,7 @@
 - 反馈。
 - 长期记忆。
 - 系统配置。
-- AI 调用、任务和操作日志。
+- AI 调用和任务。
 
 JSON 快照存储：
 
@@ -120,7 +120,7 @@ JSON 快照存储：
 
 - 用户 session 存 Redis。
 - 管理端 session 也优先存 Redis。
-- MySQL 只存用户账号、管理员账号和必要审计记录。
+- MySQL 只存用户账号、管理员账号、任务记录和 AI 调用摘要。
 
 ### 表命名策略
 
@@ -129,7 +129,6 @@ JSON 快照存储：
 - 使用 `image_routes`，因为这里的 `image` 表示个人形象，不是图片资源。
 - 图片、照片和文件统一使用 `assets`。
 - 推荐请求和推荐结果使用短名：`rec_requests`、`recs`。
-- 操作日志使用 `operate_logs`，不局限于管理端。
 
 ## 表域总览
 
@@ -139,13 +138,10 @@ JSON 快照存储：
 账号与管理
 users
 admin_users
-operate_logs
 
 画像
 profiles
-profile_facts
-profile_inferences
-profile_prefs
+profile_attrs
 
 资产与衣橱
 assets
@@ -199,6 +195,7 @@ metrics_events
 - `rec_options`：第一版一条请求默认最多一条推荐结果，替代方案放 JSON。
 - `report_versions`：报告生成后作为快照；更新时新增一条 `reports`。
 - `ai_config_versions`：系统配置第一版用 `system_configs`。
+- `operate_logs`：前期不建，减少首版后台复杂度。
 - `user_delete_requests`：第一版删除由应用层直接编排，不做请求流转表。
 
 ## 账号与管理
@@ -215,7 +212,7 @@ metrics_events
 - `wechat_unionid`
 - `phone`
 - `nickname`
-- `avatar_asset_id`
+- `avatar_url`
 - `onboarding_status`
 - `status`
 - `last_active_at`
@@ -229,7 +226,7 @@ metrics_events
 - `wechat_unionid`：微信开放平台 unionid，可为空。
 - `phone`：用户手机号，可为空。
 - `nickname`：用户昵称。
-- `avatar_asset_id`：用户头像资源 ID，关联 `assets.id`。
+- `avatar_url`：用户头像 URL，和业务资产分开处理。
 - `onboarding_status`：onboarding 进度状态。
 - `last_active_at`：用户最近活跃时间。
 
@@ -245,7 +242,7 @@ metrics_events
 
 - 小程序微信登录直接落到 `users`。
 - `phone` 允许为空；如果启用手机号登录，需要唯一索引。
-- `avatar_asset_id` 关联 `assets.id`，可为空。
+- 用户头像和业务资产分开处理，头像 URL 不进入 `assets`。
 
 ### admin_users
 
@@ -283,48 +280,6 @@ metrics_events
 - 第一版不建 `admin_roles`。
 - 用 `is_super_admin` 和 `status` 控制最小管理能力。
 
-### operate_logs
-
-用途：记录管理端操作、系统操作、用户敏感动作和关键业务操作。
-
-关键字段：
-
-- `id`
-- `operator_type`
-- `operator_id`
-- `module`
-- `action`
-- `target_type`
-- `target_id`
-- `target_public_id`
-- `summary`
-- `ip`
-- `user_agent`
-- `created_at`
-
-字段说明：
-
-- `operator_type`：操作者类型，可为 `admin_user`、`system`、`user`。
-- `operator_id`：操作者内部 ID；系统操作可为空或使用约定值。
-- `module`：操作所属模块，例如 `style_library`、`system_config`、`job`。
-- `action`：操作动作，例如 `publish`、`update`、`retry`、`view_sensitive_data`。
-- `summary`：操作摘要，不保存敏感原文。
-- `ip`：操作来源 IP。
-- `user_agent`：操作来源客户端信息。
-
-索引建议：
-
-- `idx_operate_logs_operator_created`
-- `idx_operate_logs_target`
-- `idx_operate_logs_module_action`
-
-说明：
-
-- `operator_type` 可为 `admin_user`、`system`、`user`。
-- 不普通软删。
-- 不保存敏感原文和完整图片地址。
-- 系统配置更新、任务重试、用户数据查看、风格库发布都要记录。
-
 ## 画像
 
 ### profiles
@@ -340,11 +295,10 @@ metrics_events
 - `gender`
 - `height_cm`
 - `body_notes`
-- `skin_tone_notes`
+- `skin_notes`
 - `hair_notes`
 - `lifestyle_scenarios`
 - `style_goal_summary`
-- `profile_summary`
 - `created_at`
 - `updated_at`
 - `deleted_at`
@@ -354,11 +308,10 @@ metrics_events
 - `gender`：用户性别或表达倾向，可为空。
 - `height_cm`：用户身高，单位厘米。
 - `body_notes`：用户或系统记录的身形相关中性描述。
-- `skin_tone_notes`：用户或系统记录的肤色、明度、冷暖倾向描述。
+- `skin_notes`：用户或系统记录的肤色、明度、冷暖倾向等中性描述。
 - `hair_notes`：发量、发质、长度、日常打理等摘要。
 - `lifestyle_scenarios`：常见生活、职业和社交场景 JSON。
 - `style_goal_summary`：用户想呈现的整体形象目标摘要。
-- `profile_summary`：当前画像摘要 JSON，供报告和推荐读取。
 
 索引建议：
 
@@ -369,24 +322,31 @@ metrics_events
 JSON 字段：
 
 - `lifestyle_scenarios`
-- `profile_summary`
 
 说明：
 
-- 不把 AI 推断和用户事实混在一起，详细内容放 `profile_facts` 和 `profile_inferences`。
+- `profiles` 只存稳定摘要，不再保存画像摘要冗余字段。
+- 用户事实、AI 推断、明确偏好和禁忌统一放入 `profile_attrs`，通过 `attr_type` 区分。
 
-### profile_facts
+### profile_attrs
 
-用途：用户明确提供或确认过的档案事实。
+用途：统一存储用户画像属性，包括用户明确事实、AI 推断、用户偏好和禁忌。
 
 关键字段：
 
 - `id`
 - `user_id`
 - `profile_id`
-- `fact_key`
-- `fact_value`
+- `attr_type`
+- `attr_key`
+- `attr_value`
+- `polarity`
+- `confidence`
 - `source`
+- `source_asset_id`
+- `source_job_id`
+- `status`
+- `confirmed_by_user`
 - `confirmed_at`
 - `created_at`
 - `updated_at`
@@ -394,112 +354,37 @@ JSON 字段：
 
 字段说明：
 
-- `fact_key`：事实键名，例如 `height_cm`、`occupation`、`hair_texture`。
-- `fact_value`：事实值 JSON，记录用户明确陈述或确认的信息。
-- `confirmed_at`：用户确认该事实的时间。
-
-索引建议：
-
-- `idx_profile_facts_user_key`
-- `idx_profile_facts_profile`
-
-JSON 字段：
-
-- `fact_value`
-
-说明：
-
-- 存用户明确说的内容，例如身高、职业、发质自述、常见场景。
-- `source` 可为 `onboarding`、`chat`、`feedback`、`user_correction`。
-
-### profile_inferences
-
-用途：AI 推断的画像信息，带置信度和可修正状态。
-
-关键字段：
-
-- `id`
-- `user_id`
-- `profile_id`
-- `inference_key`
-- `inference_value`
-- `confidence`
-- `source_asset_id`
-- `source_job_id`
-- `status`
-- `confirmed_by_user`
-- `created_at`
-- `updated_at`
-- `deleted_at`
-
-字段说明：
-
-- `inference_key`：推断键名，例如 `face_shape_tendency`、`skin_undertone`、`hair_volume`。
-- `inference_value`：推断值 JSON。
-- `confidence`：AI 推断置信度。
-- `source_asset_id`：支撑该推断的图片资源 ID。
-- `source_job_id`：产生该推断的任务 ID。
+- `attr_type`：属性类型，可为 `fact`、`inference`、`pref`。
+- `attr_key`：属性键名，例如 `occupation`、`hair_texture`、`face_shape_tendency`、`low_heels`。
+- `attr_value`：属性值 JSON。
+- `polarity`：偏好方向，仅偏好类常用，可为 `like`、`dislike`、`prefer`、`avoid`、`neutral`。
+- `confidence`：置信度；用户确认事实通常最高，AI 推断需带不确定性。
+- `source_asset_id`：支撑该属性的图片资源 ID，可为空。
+- `source_job_id`：产生该属性的任务 ID，可为空。
 - `confirmed_by_user`：用户是否确认过该推断。
+- `confirmed_at`：用户确认该属性的时间。
 
 索引建议：
 
-- `idx_profile_inferences_user_key`
-- `idx_profile_inferences_status`
-- `idx_profile_inferences_source_asset`
-- `idx_profile_inferences_source_job`
+- `idx_profile_attrs_user_type_key`
+- `idx_profile_attrs_profile`
+- `idx_profile_attrs_status`
+- `idx_profile_attrs_polarity`
+- `idx_profile_attrs_source_asset`
+- `idx_profile_attrs_source_job`
 
 JSON 字段：
 
-- `inference_value`
+- `attr_value`
 
 说明：
 
-- 存脸型倾向、肤色倾向、体型比例线索、发量发质等 AI 推断。
+- `attr_type=fact` 存用户明确说过或确认过的事实，例如职业、发质自述、常见场景。
+- `attr_type=inference` 存脸型倾向、肤色倾向、体型比例线索、发量发质等 AI 推断。
+- `attr_type=pref` 存用户明确偏好和禁忌，例如颜色、版型、成熟度、露肤度、场景偏好。
 - `status` 可为 `active`、`rejected`、`superseded`。
-- 用户否定后标记 `rejected`，避免反复使用同样结论。
-
-### profile_prefs
-
-用途：用户明确表达或确认的偏好和禁忌。
-
-关键字段：
-
-- `id`
-- `user_id`
-- `profile_id`
-- `pref_type`
-- `pref_key`
-- `pref_value`
-- `polarity`
-- `source`
-- `confidence`
-- `created_at`
-- `updated_at`
-- `deleted_at`
-
-字段说明：
-
-- `pref_type`：偏好类别，例如 `style`、`color`、`silhouette`、`makeup`、`hair`、`scene`。
-- `pref_key`：偏好键名，例如 `high_saturation_color`、`soft_knit`、`low_heels`。
-- `pref_value`：偏好值 JSON。
-- `polarity`：偏好方向，例如 `like`、`dislike`、`prefer`、`avoid`。
-- `confidence`：偏好置信度；真实反馈沉淀出的偏好权重更高。
-
-索引建议：
-
-- `idx_profile_prefs_user_type`
-- `idx_profile_prefs_key`
-- `idx_profile_prefs_polarity`
-
-JSON 字段：
-
-- `pref_value`
-
-说明：
-
-- `polarity` 可为 `like`、`dislike`、`prefer`、`avoid`。
-- 用于记录风格、颜色、版型、成熟度、露肤度、场景偏好等。
-- `profile_prefs` 是用户明确偏好；`memories` 是顾问从反馈中沉淀出的长期记忆和策略规则。
+- 用户否定 AI 推断或偏好后标记 `rejected`，避免反复使用同样结论。
+- `profile_attrs` 是画像层属性；`memories` 是顾问从反馈中沉淀出的长期记忆和策略规则。
 
 ## 资产与衣橱
 
@@ -547,7 +432,7 @@ JSON 字段：
 
 说明：
 
-- `asset_type` 可为 `selfie`、`body_photo`、`wardrobe_item`、`reference_image`、`style_sample`、`avatar`。
+- `asset_type` 可为 `selfie`、`body_photo`、`wardrobe_item`、`reference_image`、`style_sample`。
 - 用户资产用 `owner_user_id`，管理端风格样本图可以为空或用系统归属。
 - 删除资产时先软删，再创建资源清理任务。
 - 业务表不要直接存对象存储完整 URL。
@@ -1310,7 +1195,7 @@ JSON 字段：
 
 说明：
 
-- `target_type` 可为 `image_route`、`rec`、`report`、`wardrobe_item`、`memory`、`profile_inference`。
+- `target_type` 可为 `image_route`、`rec`、`report`、`wardrobe_item`、`memory`、`profile_attr`。
 - `feedback_type` 可为 `accepted`、`rejected`、`modified`、`worn_good`、`worn_bad`、`external_positive`、`external_negative`、`correction`。
 - 真实穿着反馈优先级高于初始 AI 判断。
 
@@ -1385,7 +1270,7 @@ JSON 字段：
 字段说明：
 
 - `memory_id`：长期记忆 ID。
-- `source_type`：记忆来源类型，例如 `feedback`、`rec`、`profile_fact`。
+- `source_type`：记忆来源类型，例如 `feedback`、`rec`、`profile_attr`。
 - `source_id`：来源对象内部 ID。
 - `source_public_id`：来源对象外部 ID 快照。
 - `weight`：该来源对记忆的贡献权重。
@@ -1397,7 +1282,7 @@ JSON 字段：
 
 说明：
 
-- `source_type` 可为 `feedback`、`rec`、`profile_fact`、`profile_inference`、`onboarding`、`chat`。
+- `source_type` 可为 `feedback`、`rec`、`profile_attr`、`onboarding`、`chat`。
 - 一个记忆可以来自多次反馈。
 - 真实穿着反馈权重大于初始 onboarding。
 
@@ -1441,7 +1326,7 @@ JSON 字段：
 - `value_type` 可为 `string`、`number`、`bool`、`json`。
 - 复杂配置值存 JSON。
 - `group` 和 `key` 是 SQL 关键字风险词；实际 DDL 需使用反引号，或实现时改为 `config_group`、`config_key`。逻辑设计按产品确认使用 `group`、`key`。
-- 配置历史第一版不建版本表，关键变更通过 `operate_logs` 记录。
+- 配置历史第一版不建版本表，后续如需审计再补专门的操作日志能力。
 
 ### ai_calls
 
@@ -1648,9 +1533,7 @@ JSON 字段：
 
 - `users`
 - `profiles`
-- `profile_facts`
-- `profile_inferences`
-- `profile_prefs`
+- `profile_attrs`
 - `assets`
 - `wardrobe_items`
 - `wardrobe_gaps`
@@ -1684,7 +1567,6 @@ JSON 字段：
 
 - `jobs`
 - `ai_calls`
-- `operate_logs`
 - `metrics_events`
 
 ### 资产删除流程
@@ -1703,7 +1585,7 @@ JSON 字段：
 用户隐私删除由应用层编排，必须覆盖：
 
 - 照片和参考图。
-- 画像事实和 AI 推断。
+- 画像属性。
 - 偏好、反馈和记忆。
 - 推荐和报告快照中的敏感摘要。
 - AI 调用和任务摘要中的敏感内容。
@@ -1773,7 +1655,7 @@ ai_calls(job_id)
 ### Onboarding 后生成路线和报告
 
 ```text
-1. 写入 users / profiles / profile_facts / profile_inferences / profile_prefs
+1. 写入 users / profiles / profile_attrs
 2. 上传图片写入 assets，并建立必要 asset_links
 3. AI 生成候选路线，写入 image_routes
 4. 路线引用风格样本，写入 image_route_styles
@@ -1811,7 +1693,7 @@ ai_calls(job_id)
 2. 记忆任务读取 feedbacks 和上下文
 3. 新增或更新 memories
 4. 写入 memory_sources
-5. 必要时更新 image_routes.weight 或 profile_prefs
+5. 必要时更新 image_routes.weight 或 profile_attrs
 ```
 
 真实穿着反馈优先级高于初始 AI 推断和参考风格匹配。
@@ -1826,8 +1708,8 @@ ai_calls(job_id)
 - 用户 session 不进入 MySQL。
 - 账号域不包含 `user_auth_bindings` 和 `admin_roles`。
 - 敏感和核心业务表支持软删除。
-- 任务、AI 调用、操作日志用于审计和排障，不普通软删。
-- 用户画像区分事实、AI 推断和明确偏好。
+- 任务、AI 调用用于审计和排障，不普通软删。
+- 用户画像属性通过 profile_attrs 区分事实、AI 推断和明确偏好。
 - 资产统一由 `assets` 管理对象存储元数据。
 - 衣橱只建核心单品和缺口，不做完整库存。
 - 风格库支持可迁移元素和不可迁移风险。
