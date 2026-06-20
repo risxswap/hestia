@@ -195,23 +195,6 @@ system_configs
 jobs
 ```
 
-第一版明确不建：
-
-- `user_sessions`：会话放 Redis。
-- `user_auth_bindings`：第一版微信身份和可选手机号直接放 `users`。
-- `admin_roles`：第一版管理权限保持极简。
-- `image_route_versions`：路线历史先由 `image_route_events` 解释。
-- `memory_events`：记忆当前态 + 来源足够。
-- `advice_options`：第一版一条请求默认最多一条建议结果，替代方案放 JSON。
-- `report_versions`：报告生成后作为快照；更新时新增一条 `reports`。
-- `chats`：第一版只有一个“聊聊”入口，不做会话分类和咨询线程列表。
-- `ai_config_versions`：系统配置第一版用 `system_configs`。
-- `ai_calls`：第一版 AI 任务摘要放 `jobs`，积分扣减放 `benefit_txns`，不单独建 AI 调用表。
-- `operate_logs`：前期不建，减少首版后台复杂度。
-- `share_tokens`：第一期不做分享能力。
-- `metrics_events`：第一期不做埋点事件表。
-- `user_delete_requests`：第一版删除由应用层直接编排，不做请求流转表。
-
 ## 账号与管理
 
 ### users
@@ -291,7 +274,7 @@ jobs
 
 说明：
 
-- 第一版不建 `admin_roles`。
+- 管理权限第一版保持极简。
 - 用 `is_super_admin` 和 `status` 控制最小管理能力。
 
 ## 画像
@@ -516,7 +499,7 @@ JSON 字段：
 
 - `asset_type` 可为 `selfie`、`body_photo`、`wardrobe_item`、`reference_image`、`style_sample`。
 - 用户资产用 `owner_user_id`，管理端风格样本图可以为空或用系统归属。
-- 第一版不建通用 `asset_links`。自拍、半身照等通过 `owner_user_id + asset_type` 查询；明确业务关系使用 `wardrobe_item_assets`、`style_sample_assets` 或业务表 JSON 引用。
+- 自拍、半身照等通过 `owner_user_id + asset_type` 查询；明确业务关系使用 `wardrobe_item_assets`、`style_sample_assets` 或业务表 JSON 引用。
 - 删除资产时先软删，再创建资源清理任务。
 - 业务表不要直接存对象存储完整 URL。
 
@@ -944,7 +927,7 @@ JSON 字段：
 
 - `event_type` 可为 `generated`、`liked`、`disliked`、`adjust_requested`、`activated`、`paused`、`archived`、`weight_changed`、`strategy_updated`。
 - 用于解释路线从哪里来、为什么变化。
-- 第一版不建 `image_route_versions`。
+- 路线历史通过 `image_route_events` 解释。
 
 ### image_route_styles
 
@@ -1129,7 +1112,7 @@ JSON 字段：
 
 说明：
 
-- 第一版不建 `chats`，所有对话消息都属于唯一“聊聊”入口。
+- 所有对话消息都属于唯一“聊聊”入口。
 - 聊聊中涉及报告、建议、记忆等上下文时，对象引用写入 `content_json`。
 - 用户消息触发建议时，`advice_requests.source_msg_id` 指向该消息。
 - 用户消息触发反馈、修正或偏好更新时，`feedbacks.source_msg_id` 指向该消息。
@@ -1265,7 +1248,7 @@ JSON 字段：
 - `status` 可为 `generating`、`ready`、`failed`、`expired`、`hidden`。
 - 今日页查询同一 `user_id + advice_date + scene_key` 下最新 ready 建议。
 - 用户换场景、点击调整、聊天追问或拍照问搭配时，新建 `advice_requests` 和 `advices` 记录。
-- 第一版不建 `advice_options`；替代方案放 `alternatives`。
+- 替代方案放 `alternatives`。
 
 ## 反馈与记忆
 
@@ -1368,7 +1351,7 @@ JSON 字段：
 - `visibility` 可为 `visible`、`hidden`。
 - `status` 可为 `active`、`rejected`、`superseded`、`deleted`。
 - 用户修正后直接更新当前值，并记录 `user_corrected_at`、`correction_note`。
-- 第一版不建 `memory_events`。
+- 记忆当前态和来源追溯由 `memories` 与 `memory_sources` 承载。
 
 ### memory_sources
 
@@ -1697,7 +1680,7 @@ JSON 字段：
 - `value_type` 可为 `string`、`number`、`bool`、`json`。
 - 复杂配置值存 JSON。
 - `group` 和 `key` 是 SQL 关键字风险词；实际 DDL 需使用反引号，或实现时改为 `config_group`、`config_key`。逻辑设计按产品确认使用 `group`、`key`。
-- 配置历史第一版不建版本表，后续如需审计再补专门的操作日志能力。
+- 配置当前值通过 `system_configs` 管理。
 
 ### jobs
 
@@ -1755,7 +1738,7 @@ JSON 字段：
 - Redis 负责队列和锁，MySQL 记录状态。
 - 不普通软删，作为排障记录。
 - 隐私删除后，摘要字段不能保留敏感原文。
-- 第一版不单独建 `ai_calls`；AI 任务排障摘要放 `jobs`，积分扣减明细放 `benefit_txns`。
+- AI 任务排障摘要放 `jobs`，积分扣减明细放 `benefit_txns`。
 
 ## 删除与隐私策略
 
@@ -2024,8 +2007,6 @@ AI 任务扣积分时优先消耗即将过期的限时积分，再消耗永久�
 - 核心实体使用 BIGINT 内部 ID 和 `public_id`。
 - 表之间使用 `*_id` 关联字段，但不依赖复杂数据库外键。
 - 跨表一致性由应用层代码和事务保障。
-- 用户 session 不进入 MySQL。
-- 账号域不包含 `user_auth_bindings` 和 `admin_roles`。
 - 敏感和核心业务表支持软删除。
 - 任务用于审计和排障，不普通软删。
 - 用户画像区分事实、AI 推断和明确偏好。
@@ -2035,7 +2016,7 @@ AI 任务扣积分时优先消耗即将过期的限时积分，再消耗永久�
 - `image_routes` 是形象路线中枢对象。
 - 报告作为不可编辑快照，更新时新增 `reports`。
 - 建议请求和建议结果分为 `advice_requests` 与 `advices`。
-- “聊聊”入口消息统一存入 `chat_msgs`，第一版不建 `chats`。
+- “聊聊”入口消息统一存入 `chat_msgs`。
 - 反馈和记忆支持来源追溯。
 - 用户可查看、修正、删除长期记忆。
 - 订阅赠送限时积分和存储空间。
