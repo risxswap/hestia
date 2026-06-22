@@ -45,7 +45,7 @@ func newMemoryDraftRepo() *memoryDraftRepo {
 
 func (r *memoryDraftRepo) FindActiveByUserID(_ context.Context, userID int64) (onboarding.Draft, error) {
 	draft, ok := r.drafts[userID]
-	if !ok {
+	if !ok || draft.Status != onboarding.DraftStatusDraft {
 		return onboarding.Draft{}, onboarding.ErrDraftNotFound
 	}
 	return draft, nil
@@ -68,7 +68,17 @@ func (r *memoryDraftRepo) Update(_ context.Context, draft onboarding.Draft) (onb
 
 func (r *memoryDraftRepo) MarkSubmitted(_ context.Context, draftID int64, userID int64) error {
 	draft, ok := r.drafts[userID]
-	if !ok || draft.ID != draftID {
+	if !ok || draft.ID != draftID || draft.Status != onboarding.DraftStatusDraft {
+		return onboarding.ErrDraftNotFound
+	}
+	draft.Status = onboarding.DraftStatusSubmitted
+	r.drafts[userID] = draft
+	return nil
+}
+
+func (r *memoryDraftRepo) ClaimDraft(_ context.Context, draftID int64, userID int64, contentHash string) error {
+	draft, ok := r.drafts[userID]
+	if !ok || draft.ID != draftID || draft.ContentHash != contentHash || draft.Status != onboarding.DraftStatusDraft {
 		return onboarding.ErrDraftNotFound
 	}
 	draft.Status = onboarding.DraftStatusSubmitted
@@ -240,6 +250,52 @@ func TestSubmitOnboardingMarksJobFailedWhenGeneratorFails(t *testing.T) {
 	got := getJob(t, env.router, env.jobs.lastJob.PublicID)
 	if got.Status != "failed" {
 		t.Fatalf("expected failed job, got %q", got.Status)
+	}
+}
+
+func TestSubmitOnboardingDoesNotCreateSecondReportAfterDraftSubmitted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	env := newSubmitTestEnv(generator.NewRuleReportGenerator())
+
+	putJSON(t, env.router, `{
+		"step": "wardrobe",
+		"data": {
+			"basic": {"gender":"female","height_cm":168},
+			"style_goal": {"goals": ["干净利落"]},
+			"wardrobe": {"items": [{"name":"米白衬衫","category":"top"}]}
+		}
+	}`, http.StatusOK)
+
+	submitOnboarding(t, env.router, http.StatusOK)
+	submitOnboarding(t, env.router, http.StatusBadRequest)
+
+	if len(env.reports.byID) != 1 {
+		t.Fatalf("expected one report after duplicate submit, got %#v", env.reports.byID)
+	}
+	if len(env.jobs.byID) != 1 {
+		t.Fatalf("expected one job after duplicate submit, got %#v", env.jobs.byID)
+	}
+}
+
+func TestSubmitOnboardingRunsGeneratorOutsideTransaction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	watcher := &transactionWatchingGenerator{}
+	env := newSubmitTestEnv(watcher)
+	watcher.transactor = env.transactor
+
+	putJSON(t, env.router, `{
+		"step": "wardrobe",
+		"data": {
+			"basic": {"gender":"female","height_cm":168},
+			"style_goal": {"goals": ["干净利落"]},
+			"wardrobe": {"items": [{"name":"米白衬衫","category":"top"}]}
+		}
+	}`, http.StatusOK)
+
+	submitOnboarding(t, env.router, http.StatusOK)
+
+	if watcher.calledInTx {
+		t.Fatal("expected generator to run before transaction begins")
 	}
 }
 
@@ -614,6 +670,18 @@ func (failingGenerator) GenerateInitialReport(context.Context, generator.Initial
 	return nil, errors.New("generator unavailable")
 }
 
+type transactionWatchingGenerator struct {
+	transactor *memoryTransactor
+	calledInTx bool
+}
+
+func (g *transactionWatchingGenerator) GenerateInitialReport(ctx context.Context, input generator.InitialReportInput) (*generator.InitialReportResult, error) {
+	if g.transactor != nil && g.transactor.active {
+		g.calledInTx = true
+	}
+	return generator.NewRuleReportGenerator().GenerateInitialReport(ctx, input)
+}
+
 type memoryProfileRepo struct {
 	nextID int64
 	byUser map[int64]profile.Profile
@@ -819,10 +887,15 @@ type memoryTransactor struct {
 	deps      onboarding.SubmitDependencies
 	commits   int
 	rollbacks int
+	active    bool
 }
 
 func (t *memoryTransactor) WithinTx(ctx context.Context, fn func(ctx context.Context, deps onboarding.SubmitDependencies) error) error {
 	snapshot := t.snapshot()
+	t.active = true
+	defer func() {
+		t.active = false
+	}()
 	if err := fn(ctx, t.deps); err != nil {
 		t.restore(snapshot)
 		t.rollbacks++

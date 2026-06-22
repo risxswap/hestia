@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"hestia/server/internal/common/dbutil"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -33,9 +35,11 @@ VALUES
 		if err != nil {
 			return nil, err
 		}
-		if id, err := result.LastInsertId(); err == nil {
-			items[i].ID = id
+		id, err := dbutil.RequireLastInsertID(result, "wardrobe item create")
+		if err != nil {
+			return nil, err
 		}
+		items[i].ID = id
 	}
 	return items, nil
 }

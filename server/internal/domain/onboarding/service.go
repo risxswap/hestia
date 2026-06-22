@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"hestia/server/internal/common/id"
@@ -155,46 +156,8 @@ func (s *Service) Submit(ctx context.Context, userID int64) (SubmitResponse, err
 	if err != nil {
 		return SubmitResponse{}, err
 	}
-	var response SubmitResponse
-	err = s.submit.Transactor.WithinTx(ctx, func(txCtx context.Context, txDeps SubmitDependencies) error {
-		if txDeps.Generator == nil {
-			txDeps.Generator = s.submit.Generator
-		}
-		return s.submitInTx(txCtx, userID, draft, parsed, txDeps, &response)
-	})
-	if err != nil {
-		s.recordFailedJob(ctx, userID, draft)
-		return SubmitResponse{}, err
-	}
-	return response, nil
-}
-
-func (s *Service) submitInTx(ctx context.Context, userID int64, draft Draft, parsed parsedSubmitDraft, deps SubmitDependencies, response *SubmitResponse) error {
-	if err := deps.validateWork(); err != nil {
-		return err
-	}
-	profileItem, err := deps.Profiles.UpsertFromOnboarding(ctx, userID, parsed.profile)
-	if err != nil {
-		return err
-	}
-	if _, err := deps.Assets.RegisterOnboardingAssets(ctx, userID, parsed.assets); err != nil {
-		return err
-	}
-	if _, err := deps.Wardrobe.CreateCoreItems(ctx, userID, parsed.wardrobe); err != nil {
-		return err
-	}
-
-	generationJob, err := deps.Jobs.CreateInitialReportJob(ctx, userID, map[string]any{
-		"draft_public_id": draft.PublicID,
-		"profile_id":      profileItem.ID,
-	})
-	if err != nil {
-		return err
-	}
-
-	result, err := deps.Generator.GenerateInitialReport(ctx, generator.InitialReportInput{
+	result, err := s.submit.Generator.GenerateInitialReport(ctx, generator.InitialReportInput{
 		UserID:          userID,
-		ProfileID:       profileItem.ID,
 		StyleGoals:      parsed.profile.StyleGoals,
 		Avoidances:      parsed.profile.Avoidances,
 		Scenarios:       parsed.profile.LifestyleScenarios,
@@ -206,14 +169,59 @@ func (s *Service) submitInTx(ctx context.Context, userID int64, draft Draft, par
 		ReferenceStyles: parsed.referenceStyles,
 	})
 	if err != nil {
+		s.recordFailedJob(ctx, userID, draft)
+		return SubmitResponse{}, fmt.Errorf("generate initial report: %w", err)
+	}
+	var response SubmitResponse
+	err = s.submit.Transactor.WithinTx(ctx, func(txCtx context.Context, txDeps SubmitDependencies) error {
+		if txDeps.Generator == nil {
+			txDeps.Generator = s.submit.Generator
+		}
+		return s.submitInTx(txCtx, userID, draft, parsed, result, txDeps, &response)
+	})
+	if err != nil {
+		if !errors.Is(err, ErrValidation) {
+			s.recordFailedJob(ctx, userID, draft)
+		}
+		return SubmitResponse{}, err
+	}
+	return response, nil
+}
+
+func (s *Service) submitInTx(ctx context.Context, userID int64, draft Draft, parsed parsedSubmitDraft, result *generator.InitialReportResult, deps SubmitDependencies, response *SubmitResponse) error {
+	if err := deps.validateWork(); err != nil {
 		return err
 	}
+	if err := deps.Drafts.ClaimDraft(ctx, draft.ID, userID, draft.ContentHash); err != nil {
+		if errors.Is(err, ErrDraftNotFound) {
+			return ValidationError{Field: "draft", Message: "already submitted or changed"}
+		}
+		return fmt.Errorf("draft claim: %w", err)
+	}
+	profileItem, err := deps.Profiles.UpsertFromOnboarding(ctx, userID, parsed.profile)
+	if err != nil {
+		return fmt.Errorf("profile upsert: %w", err)
+	}
+	if _, err := deps.Assets.RegisterOnboardingAssets(ctx, userID, parsed.assets); err != nil {
+		return fmt.Errorf("assets register: %w", err)
+	}
+	if _, err := deps.Wardrobe.CreateCoreItems(ctx, userID, parsed.wardrobe); err != nil {
+		return fmt.Errorf("wardrobe create: %w", err)
+	}
+
+	generationJob, err := deps.Jobs.CreateInitialReportJob(ctx, userID, map[string]any{
+		"draft_public_id": draft.PublicID,
+		"profile_id":      profileItem.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("job create: %w", err)
+	}
 	if err := deps.Profiles.SaveGeneratorInferences(ctx, userID, profileItem.ID, generationJob.ID, result.Inferences); err != nil {
-		return err
+		return fmt.Errorf("profile inferences save: %w", err)
 	}
 	routes, err := deps.ImageRoutes.CreateFromGenerator(ctx, userID, profileItem.ID, generationJob.ID, result.Routes)
 	if err != nil {
-		return err
+		return fmt.Errorf("image routes create: %w", err)
 	}
 	content := map[string]any{
 		"summary":               result.Summary,
@@ -246,7 +254,7 @@ func (s *Service) submitInTx(ctx context.Context, userID int64, draft Draft, par
 		},
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("report create: %w", err)
 	}
 	reportRoutes := make([]report.ReportRoute, 0, len(routes))
 	for i, route := range routes {
@@ -269,19 +277,16 @@ func (s *Service) submitInTx(ctx context.Context, userID int64, draft Draft, par
 		})
 	}
 	if err := deps.Reports.AttachRoutes(ctx, reportItem.ID, reportRoutes); err != nil {
-		return err
+		return fmt.Errorf("report routes attach: %w", err)
 	}
 	if err := deps.Profiles.CompleteOnboarding(ctx, userID); err != nil {
-		return err
-	}
-	if err := deps.Drafts.MarkSubmitted(ctx, draft.ID, userID); err != nil {
-		return err
+		return fmt.Errorf("onboarding complete: %w", err)
 	}
 	if err := deps.Reports.MarkReady(ctx, reportItem.ID); err != nil {
-		return err
+		return fmt.Errorf("report mark ready: %w", err)
 	}
 	if err := deps.Jobs.MarkSucceeded(ctx, generationJob, map[string]any{"report_public_id": reportItem.PublicID}); err != nil {
-		return err
+		return fmt.Errorf("job mark succeeded: %w", err)
 	}
 	*response = SubmitResponse{JobPublicID: generationJob.PublicID, ReportPublicID: reportItem.PublicID}
 	return nil
@@ -308,7 +313,7 @@ func (d SubmitDependencies) validate() error {
 }
 
 func (d SubmitDependencies) validateWork() error {
-	if d.Drafts == nil || d.Profiles == nil || d.Assets == nil || d.Wardrobe == nil || d.Jobs == nil || d.Reports == nil || d.ImageRoutes == nil || d.Generator == nil {
+	if d.Drafts == nil || d.Profiles == nil || d.Assets == nil || d.Wardrobe == nil || d.Jobs == nil || d.Reports == nil || d.ImageRoutes == nil {
 		return errors.New("onboarding submit transaction dependencies are nil")
 	}
 	return nil

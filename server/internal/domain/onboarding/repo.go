@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 
+	"hestia/server/internal/common/dbutil"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -14,6 +16,7 @@ type DraftRepository interface {
 	FindActiveByUserID(ctx context.Context, userID int64) (Draft, error)
 	Create(ctx context.Context, draft Draft) (Draft, error)
 	Update(ctx context.Context, draft Draft) (Draft, error)
+	ClaimDraft(ctx context.Context, draftID int64, userID int64, contentHash string) error
 	MarkSubmitted(ctx context.Context, draftID int64, userID int64) error
 }
 
@@ -74,9 +77,11 @@ VALUES
 	if err != nil {
 		return Draft{}, err
 	}
-	if id, err := result.LastInsertId(); err == nil {
-		draft.ID = id
+	id, err := dbutil.RequireLastInsertID(result, "onboarding draft create")
+	if err != nil {
+		return Draft{}, err
 	}
+	draft.ID = id
 	return draft, nil
 }
 
@@ -113,8 +118,28 @@ UPDATE onboarding_drafts
 SET status = 'submitted', submitted_at = CURRENT_TIMESTAMP(3)
 WHERE id = ?
   AND user_id = ?
+  AND status = 'draft'
   AND deleted_at IS NULL
 `, draftID, userID)
+	if err != nil {
+		return err
+	}
+	return rowsAffectedError(result)
+}
+
+func (r *MySQLDraftRepository) ClaimDraft(ctx context.Context, draftID int64, userID int64, contentHash string) error {
+	if r == nil || r.ext == nil {
+		return errors.New("onboarding repository database is nil")
+	}
+	result, err := r.ext.ExecContext(ctx, `
+UPDATE onboarding_drafts
+SET status = 'submitted', submitted_at = CURRENT_TIMESTAMP(3)
+WHERE id = ?
+  AND user_id = ?
+  AND content_hash = ?
+  AND status = 'draft'
+  AND deleted_at IS NULL
+`, draftID, userID, contentHash)
 	if err != nil {
 		return err
 	}

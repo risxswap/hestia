@@ -7,6 +7,8 @@ import (
 	"errors"
 	"time"
 
+	"hestia/server/internal/common/dbutil"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -39,9 +41,11 @@ VALUES
 	if err != nil {
 		return Job{}, err
 	}
-	if id, err := result.LastInsertId(); err == nil {
-		item.ID = id
+	id, err := dbutil.RequireLastInsertID(result, "job create")
+	if err != nil {
+		return Job{}, err
 	}
+	item.ID = id
 	return item, nil
 }
 
@@ -58,12 +62,15 @@ func (r *MySQLRepository) UpdateStatus(ctx context.Context, id int64, status str
 		now := time.Now().UTC()
 		finishedAt = now
 	}
-	_, err = r.ext.ExecContext(ctx, `
+	result, err := r.ext.ExecContext(ctx, `
 UPDATE jobs
 SET status = ?, output_summary = CAST(? AS JSON), error_message = NULLIF(?, ''), finished_at = ?
 WHERE id = ?
 `, status, outputJSON, errorMessage, finishedAt, id)
-	return err
+	if err != nil {
+		return err
+	}
+	return dbutil.RequireRowsAffected(result, "job update status")
 }
 
 func (r *MySQLRepository) FindByPublicIDForUser(ctx context.Context, userID int64, publicID string) (Job, error) {

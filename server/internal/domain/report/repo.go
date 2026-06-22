@@ -7,6 +7,8 @@ import (
 	"errors"
 	"time"
 
+	"hestia/server/internal/common/dbutil"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -47,9 +49,11 @@ VALUES
 	if err != nil {
 		return Report{}, err
 	}
-	if id, err := result.LastInsertId(); err == nil {
-		item.ID = id
+	id, err := dbutil.RequireLastInsertID(result, "report create")
+	if err != nil {
+		return Report{}, err
 	}
+	item.ID = id
 	return item, nil
 }
 
@@ -62,12 +66,16 @@ func (r *MySQLRepository) AddRoutes(ctx context.Context, reportID int64, routes 
 		if err != nil {
 			return err
 		}
-		if _, err := r.ext.ExecContext(ctx, `
+		result, err := r.ext.ExecContext(ctx, `
 INSERT INTO report_image_routes
   (report_id, image_route_id, route_role, sort_order, route_snapshot)
 VALUES
   (?, ?, ?, ?, CAST(? AS JSON))
-`, reportID, route.ImageRouteID, route.RouteRole, route.SortOrder, snapshot); err != nil {
+`, reportID, route.ImageRouteID, route.RouteRole, route.SortOrder, snapshot)
+		if err != nil {
+			return err
+		}
+		if err := dbutil.RequireRowsAffected(result, "report route create"); err != nil {
 			return err
 		}
 	}
@@ -78,13 +86,16 @@ func (r *MySQLRepository) MarkReady(ctx context.Context, reportID int64) error {
 	if r == nil || r.ext == nil {
 		return errors.New("report repository database is nil")
 	}
-	_, err := r.ext.ExecContext(ctx, `
+	result, err := r.ext.ExecContext(ctx, `
 UPDATE reports
 SET status = 'ready'
 WHERE id = ?
   AND deleted_at IS NULL
 `, reportID)
-	return err
+	if err != nil {
+		return err
+	}
+	return dbutil.RequireRowsAffected(result, "report mark ready")
 }
 
 func (r *MySQLRepository) LatestInitialForUser(ctx context.Context, userID int64) (Report, error) {

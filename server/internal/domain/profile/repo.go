@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"hestia/server/internal/common/dbutil"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -139,8 +141,11 @@ func (r *MySQLRepository) MarkUserOnboardingCompleted(ctx context.Context, userI
 	if r == nil || r.ext == nil {
 		return errors.New("profile repository database is nil")
 	}
-	_, err := r.ext.ExecContext(ctx, `UPDATE users SET onboarding_status = 'completed' WHERE id = ? AND deleted_at IS NULL`, userID)
-	return err
+	result, err := r.ext.ExecContext(ctx, `UPDATE users SET onboarding_status = 'completed' WHERE id = ? AND deleted_at IS NULL`, userID)
+	if err != nil {
+		return err
+	}
+	return dbutil.RequireRowsAffected(result, "user onboarding complete")
 }
 
 func jsonText(value any) (string, error) {
