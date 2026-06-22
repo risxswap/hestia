@@ -8,19 +8,23 @@ import (
 )
 
 type MySQLRepository struct {
-	db *sqlx.DB
+	ext sqlx.ExtContext
 }
 
 func NewMySQLRepository(db *sqlx.DB) *MySQLRepository {
-	return &MySQLRepository{db: db}
+	return NewMySQLRepositoryWithExt(db)
+}
+
+func NewMySQLRepositoryWithExt(ext sqlx.ExtContext) *MySQLRepository {
+	return &MySQLRepository{ext: ext}
 }
 
 func (r *MySQLRepository) CreateCoreItems(ctx context.Context, items []Item) ([]Item, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return nil, errors.New("wardrobe repository database is nil")
 	}
 	for i := range items {
-		result, err := r.db.ExecContext(ctx, `
+		result, err := r.ext.ExecContext(ctx, `
 INSERT INTO wardrobe_items
   (public_id, user_id, name, category, color, silhouette, material, season, user_notes, is_core, status)
 VALUES

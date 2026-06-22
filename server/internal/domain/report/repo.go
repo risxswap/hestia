@@ -11,15 +11,19 @@ import (
 )
 
 type MySQLRepository struct {
-	db *sqlx.DB
+	ext sqlx.ExtContext
 }
 
 func NewMySQLRepository(db *sqlx.DB) *MySQLRepository {
-	return &MySQLRepository{db: db}
+	return NewMySQLRepositoryWithExt(db)
+}
+
+func NewMySQLRepositoryWithExt(ext sqlx.ExtContext) *MySQLRepository {
+	return &MySQLRepository{ext: ext}
 }
 
 func (r *MySQLRepository) Create(ctx context.Context, item Report) (Report, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return Report{}, errors.New("report repository database is nil")
 	}
 	content, err := jsonText(item.ContentJSON)
@@ -34,7 +38,7 @@ func (r *MySQLRepository) Create(ctx context.Context, item Report) (Report, erro
 	if err != nil {
 		return Report{}, err
 	}
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.ext.ExecContext(ctx, `
 INSERT INTO reports
   (public_id, user_id, profile_id, report_type, status, title, summary, content_json, context_snapshot, style_refs_json, job_id, generated_at)
 VALUES
@@ -50,7 +54,7 @@ VALUES
 }
 
 func (r *MySQLRepository) AddRoutes(ctx context.Context, reportID int64, routes []ReportRoute) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return errors.New("report repository database is nil")
 	}
 	for _, route := range routes {
@@ -58,7 +62,7 @@ func (r *MySQLRepository) AddRoutes(ctx context.Context, reportID int64, routes 
 		if err != nil {
 			return err
 		}
-		if _, err := r.db.ExecContext(ctx, `
+		if _, err := r.ext.ExecContext(ctx, `
 INSERT INTO report_image_routes
   (report_id, image_route_id, route_role, sort_order, route_snapshot)
 VALUES
@@ -71,10 +75,10 @@ VALUES
 }
 
 func (r *MySQLRepository) MarkReady(ctx context.Context, reportID int64) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return errors.New("report repository database is nil")
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.ext.ExecContext(ctx, `
 UPDATE reports
 SET status = 'ready'
 WHERE id = ?
@@ -134,11 +138,11 @@ LIMIT 1
 }
 
 func (r *MySQLRepository) RoutesByReportID(ctx context.Context, reportID int64) ([]ReportRoute, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return nil, errors.New("report repository database is nil")
 	}
 	var rows []reportRouteRow
-	if err := r.db.SelectContext(ctx, &rows, `
+	if err := sqlx.SelectContext(ctx, r.ext, &rows, `
 SELECT
   image_route_id,
   route_role,
@@ -167,11 +171,11 @@ ORDER BY sort_order ASC, id ASC
 }
 
 func (r *MySQLRepository) findOne(ctx context.Context, query string, args ...any) (Report, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return Report{}, errors.New("report repository database is nil")
 	}
 	var row reportRow
-	err := r.db.GetContext(ctx, &row, query, args...)
+	err := sqlx.GetContext(ctx, r.ext, &row, query, args...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Report{}, ErrReportNotFound
 	}

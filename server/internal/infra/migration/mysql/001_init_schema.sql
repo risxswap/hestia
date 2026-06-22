@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS `assets` (
   `source` varchar(32) NOT NULL,
   `status` varchar(32) NOT NULL DEFAULT 'active',
   `review_status` varchar(32) NOT NULL DEFAULT 'pending',
+  `metadata_json` json DEFAULT NULL,
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `deleted_at` datetime(3) DEFAULT NULL,

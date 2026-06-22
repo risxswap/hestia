@@ -44,6 +44,7 @@ func NewService(repo DraftRepository) *Service {
 }
 
 type SubmitDependencies struct {
+	Drafts      DraftRepository
 	Profiles    *profile.Service
 	Assets      *asset.Service
 	Wardrobe    *wardrobe.Service
@@ -51,6 +52,11 @@ type SubmitDependencies struct {
 	Reports     *report.Service
 	ImageRoutes *imageroute.Service
 	Generator   generator.ReportGenerator
+	Transactor  Transactor
+}
+
+type Transactor interface {
+	WithinTx(ctx context.Context, fn func(ctx context.Context, deps SubmitDependencies) error) error
 }
 
 func NewSubmitService(repo DraftRepository, deps SubmitDependencies) *Service {
@@ -149,27 +155,44 @@ func (s *Service) Submit(ctx context.Context, userID int64) (SubmitResponse, err
 	if err != nil {
 		return SubmitResponse{}, err
 	}
-
-	profileItem, err := s.submit.Profiles.UpsertFromOnboarding(ctx, userID, parsed.profile)
+	var response SubmitResponse
+	err = s.submit.Transactor.WithinTx(ctx, func(txCtx context.Context, txDeps SubmitDependencies) error {
+		if txDeps.Generator == nil {
+			txDeps.Generator = s.submit.Generator
+		}
+		return s.submitInTx(txCtx, userID, draft, parsed, txDeps, &response)
+	})
 	if err != nil {
+		s.recordFailedJob(ctx, userID, draft)
 		return SubmitResponse{}, err
 	}
-	if _, err := s.submit.Assets.RegisterOnboardingAssets(ctx, userID, parsed.assets); err != nil {
-		return SubmitResponse{}, err
+	return response, nil
+}
+
+func (s *Service) submitInTx(ctx context.Context, userID int64, draft Draft, parsed parsedSubmitDraft, deps SubmitDependencies, response *SubmitResponse) error {
+	if err := deps.validateWork(); err != nil {
+		return err
 	}
-	if _, err := s.submit.Wardrobe.CreateCoreItems(ctx, userID, parsed.wardrobe); err != nil {
-		return SubmitResponse{}, err
+	profileItem, err := deps.Profiles.UpsertFromOnboarding(ctx, userID, parsed.profile)
+	if err != nil {
+		return err
+	}
+	if _, err := deps.Assets.RegisterOnboardingAssets(ctx, userID, parsed.assets); err != nil {
+		return err
+	}
+	if _, err := deps.Wardrobe.CreateCoreItems(ctx, userID, parsed.wardrobe); err != nil {
+		return err
 	}
 
-	generationJob, err := s.submit.Jobs.CreateInitialReportJob(ctx, userID, map[string]any{
+	generationJob, err := deps.Jobs.CreateInitialReportJob(ctx, userID, map[string]any{
 		"draft_public_id": draft.PublicID,
 		"profile_id":      profileItem.ID,
 	})
 	if err != nil {
-		return SubmitResponse{}, err
+		return err
 	}
 
-	result, err := s.submit.Generator.GenerateInitialReport(ctx, generator.InitialReportInput{
+	result, err := deps.Generator.GenerateInitialReport(ctx, generator.InitialReportInput{
 		UserID:          userID,
 		ProfileID:       profileItem.ID,
 		StyleGoals:      parsed.profile.StyleGoals,
@@ -183,17 +206,14 @@ func (s *Service) Submit(ctx context.Context, userID int64) (SubmitResponse, err
 		ReferenceStyles: parsed.referenceStyles,
 	})
 	if err != nil {
-		_ = s.submit.Jobs.MarkFailed(ctx, generationJob, "initial report generator failed")
-		return SubmitResponse{}, err
+		return err
 	}
-	if err := s.submit.Profiles.SaveGeneratorInferences(ctx, userID, profileItem.ID, generationJob.ID, result.Inferences); err != nil {
-		_ = s.submit.Jobs.MarkFailed(ctx, generationJob, "save profile inferences failed")
-		return SubmitResponse{}, err
+	if err := deps.Profiles.SaveGeneratorInferences(ctx, userID, profileItem.ID, generationJob.ID, result.Inferences); err != nil {
+		return err
 	}
-	routes, err := s.submit.ImageRoutes.CreateFromGenerator(ctx, userID, profileItem.ID, generationJob.ID, result.Routes)
+	routes, err := deps.ImageRoutes.CreateFromGenerator(ctx, userID, profileItem.ID, generationJob.ID, result.Routes)
 	if err != nil {
-		_ = s.submit.Jobs.MarkFailed(ctx, generationJob, "save image routes failed")
-		return SubmitResponse{}, err
+		return err
 	}
 	content := map[string]any{
 		"summary":               result.Summary,
@@ -207,7 +227,7 @@ func (s *Service) Submit(ctx context.Context, userID int64) (SubmitResponse, err
 		"reference_style_logic": result.ReferenceStyleLogic,
 		"privacy_note":          result.PrivacyNote,
 	}
-	reportItem, err := s.submit.Reports.CreateInitialReport(ctx, report.CreateInitialInput{
+	reportItem, err := deps.Reports.CreateInitialReport(ctx, report.CreateInitialInput{
 		UserID:      userID,
 		ProfileID:   profileItem.ID,
 		JobID:       generationJob.ID,
@@ -226,8 +246,7 @@ func (s *Service) Submit(ctx context.Context, userID int64) (SubmitResponse, err
 		},
 	})
 	if err != nil {
-		_ = s.submit.Jobs.MarkFailed(ctx, generationJob, "save report failed")
-		return SubmitResponse{}, err
+		return err
 	}
 	reportRoutes := make([]report.ReportRoute, 0, len(routes))
 	for i, route := range routes {
@@ -249,31 +268,48 @@ func (s *Service) Submit(ctx context.Context, userID int64) (SubmitResponse, err
 			},
 		})
 	}
-	if err := s.submit.Reports.AttachRoutes(ctx, reportItem.ID, reportRoutes); err != nil {
-		_ = s.submit.Jobs.MarkFailed(ctx, generationJob, "link report routes failed")
-		return SubmitResponse{}, err
+	if err := deps.Reports.AttachRoutes(ctx, reportItem.ID, reportRoutes); err != nil {
+		return err
 	}
-	if err := s.submit.Profiles.CompleteOnboarding(ctx, userID); err != nil {
-		_ = s.submit.Jobs.MarkFailed(ctx, generationJob, "complete onboarding failed")
-		return SubmitResponse{}, err
+	if err := deps.Profiles.CompleteOnboarding(ctx, userID); err != nil {
+		return err
 	}
-	if err := s.repo.MarkSubmitted(ctx, draft.ID, userID); err != nil {
-		_ = s.submit.Jobs.MarkFailed(ctx, generationJob, "mark draft submitted failed")
-		return SubmitResponse{}, err
+	if err := deps.Drafts.MarkSubmitted(ctx, draft.ID, userID); err != nil {
+		return err
 	}
-	if err := s.submit.Reports.MarkReady(ctx, reportItem.ID); err != nil {
-		_ = s.submit.Jobs.MarkFailed(ctx, generationJob, "mark report ready failed")
-		return SubmitResponse{}, err
+	if err := deps.Reports.MarkReady(ctx, reportItem.ID); err != nil {
+		return err
 	}
-	if err := s.submit.Jobs.MarkSucceeded(ctx, generationJob, map[string]any{"report_public_id": reportItem.PublicID}); err != nil {
-		return SubmitResponse{}, err
+	if err := deps.Jobs.MarkSucceeded(ctx, generationJob, map[string]any{"report_public_id": reportItem.PublicID}); err != nil {
+		return err
 	}
-	return SubmitResponse{JobPublicID: generationJob.PublicID, ReportPublicID: reportItem.PublicID}, nil
+	*response = SubmitResponse{JobPublicID: generationJob.PublicID, ReportPublicID: reportItem.PublicID}
+	return nil
+}
+
+func (s *Service) recordFailedJob(ctx context.Context, userID int64, draft Draft) {
+	if s == nil || s.submit.Jobs == nil {
+		return
+	}
+	failedJob, err := s.submit.Jobs.CreateInitialReportJob(ctx, userID, map[string]any{
+		"draft_public_id": draft.PublicID,
+	})
+	if err != nil {
+		return
+	}
+	_ = s.submit.Jobs.MarkFailed(ctx, failedJob, "initial report submit failed")
 }
 
 func (d SubmitDependencies) validate() error {
-	if d.Profiles == nil || d.Assets == nil || d.Wardrobe == nil || d.Jobs == nil || d.Reports == nil || d.ImageRoutes == nil || d.Generator == nil {
+	if d.Profiles == nil || d.Assets == nil || d.Wardrobe == nil || d.Jobs == nil || d.Reports == nil || d.ImageRoutes == nil || d.Generator == nil || d.Transactor == nil {
 		return errors.New("onboarding submit dependencies are nil")
+	}
+	return nil
+}
+
+func (d SubmitDependencies) validateWork() error {
+	if d.Drafts == nil || d.Profiles == nil || d.Assets == nil || d.Wardrobe == nil || d.Jobs == nil || d.Reports == nil || d.ImageRoutes == nil || d.Generator == nil {
+		return errors.New("onboarding submit transaction dependencies are nil")
 	}
 	return nil
 }

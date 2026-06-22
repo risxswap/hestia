@@ -9,22 +9,26 @@ import (
 )
 
 type MySQLRepository struct {
-	db *sqlx.DB
+	ext sqlx.ExtContext
 }
 
 func NewMySQLRepository(db *sqlx.DB) *MySQLRepository {
-	return &MySQLRepository{db: db}
+	return NewMySQLRepositoryWithExt(db)
+}
+
+func NewMySQLRepositoryWithExt(ext sqlx.ExtContext) *MySQLRepository {
+	return &MySQLRepository{ext: ext}
 }
 
 func (r *MySQLRepository) Upsert(ctx context.Context, item Profile) (Profile, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return Profile{}, errors.New("profile repository database is nil")
 	}
 	scenarios, err := jsonText(item.LifestyleScenarios)
 	if err != nil {
 		return Profile{}, err
 	}
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.ext.ExecContext(ctx, `
 INSERT INTO profiles
   (public_id, user_id, status, gender, height_cm, body_notes, skin_notes, hair_notes, lifestyle_scenarios, style_goal_summary)
 VALUES
@@ -43,7 +47,7 @@ ON DUPLICATE KEY UPDATE
 		return Profile{}, err
 	}
 	var saved Profile
-	err = r.db.GetContext(ctx, &saved, `
+	err = sqlx.GetContext(ctx, r.ext, &saved, `
 SELECT
   id,
   public_id,
@@ -67,10 +71,10 @@ LIMIT 1
 }
 
 func (r *MySQLRepository) ReplaceFacts(ctx context.Context, userID int64, profileID int64, facts []Fact) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return errors.New("profile repository database is nil")
 	}
-	if _, err := r.db.ExecContext(ctx, `UPDATE profile_facts SET deleted_at = CURRENT_TIMESTAMP(3) WHERE user_id = ? AND profile_id = ? AND deleted_at IS NULL`, userID, profileID); err != nil {
+	if _, err := r.ext.ExecContext(ctx, `UPDATE profile_facts SET deleted_at = CURRENT_TIMESTAMP(3) WHERE user_id = ? AND profile_id = ? AND deleted_at IS NULL`, userID, profileID); err != nil {
 		return err
 	}
 	for _, fact := range facts {
@@ -78,7 +82,7 @@ func (r *MySQLRepository) ReplaceFacts(ctx context.Context, userID int64, profil
 		if err != nil {
 			return err
 		}
-		if _, err := r.db.ExecContext(ctx, `
+		if _, err := r.ext.ExecContext(ctx, `
 INSERT INTO profile_facts (user_id, profile_id, fact_key, fact_value, source, confirmed_at)
 VALUES (?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP(3))
 `, userID, profileID, fact.Key, raw, fact.Source); err != nil {
@@ -89,10 +93,10 @@ VALUES (?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP(3))
 }
 
 func (r *MySQLRepository) ReplacePrefs(ctx context.Context, userID int64, profileID int64, prefs []Pref) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return errors.New("profile repository database is nil")
 	}
-	if _, err := r.db.ExecContext(ctx, `UPDATE profile_prefs SET deleted_at = CURRENT_TIMESTAMP(3) WHERE user_id = ? AND profile_id = ? AND deleted_at IS NULL`, userID, profileID); err != nil {
+	if _, err := r.ext.ExecContext(ctx, `UPDATE profile_prefs SET deleted_at = CURRENT_TIMESTAMP(3) WHERE user_id = ? AND profile_id = ? AND deleted_at IS NULL`, userID, profileID); err != nil {
 		return err
 	}
 	for _, pref := range prefs {
@@ -100,7 +104,7 @@ func (r *MySQLRepository) ReplacePrefs(ctx context.Context, userID int64, profil
 		if err != nil {
 			return err
 		}
-		if _, err := r.db.ExecContext(ctx, `
+		if _, err := r.ext.ExecContext(ctx, `
 INSERT INTO profile_prefs (user_id, profile_id, pref_type, pref_key, pref_value, polarity, source, confidence)
 VALUES (?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)
 `, userID, profileID, pref.Type, pref.Key, raw, pref.Polarity, pref.Source, pref.Confidence); err != nil {
@@ -111,7 +115,7 @@ VALUES (?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)
 }
 
 func (r *MySQLRepository) CreateInferences(ctx context.Context, inferences []Inference) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return errors.New("profile repository database is nil")
 	}
 	for _, inference := range inferences {
@@ -119,7 +123,7 @@ func (r *MySQLRepository) CreateInferences(ctx context.Context, inferences []Inf
 		if err != nil {
 			return err
 		}
-		if _, err := r.db.ExecContext(ctx, `
+		if _, err := r.ext.ExecContext(ctx, `
 INSERT INTO profile_inferences
   (user_id, profile_id, inference_key, inference_value, confidence, source_job_id, status)
 VALUES
@@ -132,10 +136,10 @@ VALUES
 }
 
 func (r *MySQLRepository) MarkUserOnboardingCompleted(ctx context.Context, userID int64) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return errors.New("profile repository database is nil")
 	}
-	_, err := r.db.ExecContext(ctx, `UPDATE users SET onboarding_status = 'completed' WHERE id = ? AND deleted_at IS NULL`, userID)
+	_, err := r.ext.ExecContext(ctx, `UPDATE users SET onboarding_status = 'completed' WHERE id = ? AND deleted_at IS NULL`, userID)
 	return err
 }
 

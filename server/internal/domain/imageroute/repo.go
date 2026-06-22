@@ -9,15 +9,19 @@ import (
 )
 
 type MySQLRepository struct {
-	db *sqlx.DB
+	ext sqlx.ExtContext
 }
 
 func NewMySQLRepository(db *sqlx.DB) *MySQLRepository {
-	return &MySQLRepository{db: db}
+	return NewMySQLRepositoryWithExt(db)
+}
+
+func NewMySQLRepositoryWithExt(ext sqlx.ExtContext) *MySQLRepository {
+	return &MySQLRepository{ext: ext}
 }
 
 func (r *MySQLRepository) CreateMany(ctx context.Context, items []Route) ([]Route, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return nil, errors.New("image route repository database is nil")
 	}
 	for i := range items {
@@ -49,7 +53,7 @@ func (r *MySQLRepository) CreateMany(ctx context.Context, items []Route) ([]Rout
 		if err != nil {
 			return nil, err
 		}
-		result, err := r.db.ExecContext(ctx, `
+		result, err := r.ext.ExecContext(ctx, `
 INSERT INTO image_routes
   (public_id, user_id, profile_id, name, route_role, status, weight, target_impression, suitable_scenes, hair_strategy, makeup_strategy, outfit_strategy, avoid_points, reason, source, created_from_report_id, created_from_job_id)
 VALUES

@@ -215,6 +215,9 @@ func TestSubmitOnboardingGeneratesInitialReportAndLatestReportCanBeRead(t *testi
 	if len(latest.Routes) == 0 {
 		t.Fatalf("expected report routes")
 	}
+	if env.transactor.commits != 1 || env.transactor.rollbacks != 0 {
+		t.Fatalf("expected one committed transaction, got commits=%d rollbacks=%d", env.transactor.commits, env.transactor.rollbacks)
+	}
 }
 
 func TestSubmitOnboardingMarksJobFailedWhenGeneratorFails(t *testing.T) {
@@ -305,6 +308,42 @@ func TestSubmitOnboardingDoesNotExposeReadyReportWhenAttachRoutesFails(t *testin
 	assertLatestReportStatus(t, env.router, http.StatusNotFound)
 }
 
+func TestSubmitOnboardingRollsBackBusinessWritesWhenMarkSucceededFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	env := newSubmitTestEnv(generator.NewRuleReportGenerator())
+	env.jobs.failSucceeded = true
+
+	putJSON(t, env.router, `{
+		"step": "wardrobe",
+		"data": {
+			"basic": {"gender":"female","height_cm":168},
+			"style_goal": {"goals": ["干净利落"]},
+			"wardrobe": {"items": [{"name":"米白衬衫","category":"top"}]},
+			"photos": [{"client_ref":"tmp-selfie","note":"自拍"}]
+		}
+	}`, http.StatusOK)
+
+	submitOnboarding(t, env.router, http.StatusInternalServerError)
+
+	assertLatestReportStatus(t, env.router, http.StatusNotFound)
+	if len(env.assets.created) != 0 {
+		t.Fatalf("expected asset writes to roll back, got %#v", env.assets.created)
+	}
+	if len(env.profiles.byUser) != 0 {
+		t.Fatalf("expected profile writes to roll back, got %#v", env.profiles.byUser)
+	}
+	if len(env.wardrobes.created) != 0 {
+		t.Fatalf("expected wardrobe writes to roll back, got %#v", env.wardrobes.created)
+	}
+	got := getJob(t, env.router, env.jobs.lastJob.PublicID)
+	if got.Status != "failed" {
+		t.Fatalf("expected transaction failure to leave failed job record, got %q", got.Status)
+	}
+	if env.transactor.rollbacks != 1 {
+		t.Fatalf("expected one rolled back transaction, got %d", env.transactor.rollbacks)
+	}
+}
+
 func TestSubmitOnboardingRejectsInvalidDraftShapes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
@@ -360,10 +399,13 @@ func newAuthenticatedRouter(repo onboarding.DraftRepository) *gin.Engine {
 }
 
 type submitTestEnv struct {
-	router  *gin.Engine
-	jobs    *memoryJobRepo
-	assets  *memoryAssetRepo
-	reports *memoryReportRepo
+	router     *gin.Engine
+	jobs       *memoryJobRepo
+	assets     *memoryAssetRepo
+	profiles   *memoryProfileRepo
+	wardrobes  *memoryWardrobeRepo
+	reports    *memoryReportRepo
+	transactor *memoryTransactor
 }
 
 func newSubmitTestEnv(reportGenerator generator.ReportGenerator) submitTestEnv {
@@ -391,6 +433,25 @@ func newSubmitTestEnv(reportGenerator generator.ReportGenerator) submitTestEnv {
 	jobService := job.NewService(jobs)
 	reportService := report.NewService(reports)
 	routeService := imageroute.NewService(routes)
+	transactor := &memoryTransactor{
+		drafts:    drafts,
+		profiles:  profiles,
+		assets:    assets,
+		wardrobes: wardrobes,
+		jobs:      jobs,
+		reports:   reports,
+		routes:    routes,
+		deps: onboarding.SubmitDependencies{
+			Drafts:      drafts,
+			Profiles:    profileService,
+			Assets:      assetService,
+			Wardrobe:    wardrobeService,
+			Jobs:        jobService,
+			Reports:     reportService,
+			ImageRoutes: routeService,
+			Generator:   reportGenerator,
+		},
+	}
 
 	onboardingService := onboarding.NewSubmitService(drafts, onboarding.SubmitDependencies{
 		Profiles:    profileService,
@@ -400,11 +461,12 @@ func newSubmitTestEnv(reportGenerator generator.ReportGenerator) submitTestEnv {
 		Reports:     reportService,
 		ImageRoutes: routeService,
 		Generator:   reportGenerator,
+		Transactor:  transactor,
 	})
 	onboarding.RegisterRoutes(router.Group("/api/user/onboarding"), onboarding.NewHandler(onboardingService, nil))
 	report.RegisterUserRoutesWithService(router.Group("/api/user/reports"), reportService, nil)
 	job.RegisterUserRoutesWithService(router.Group("/api/user/jobs"), jobService, nil)
-	return submitTestEnv{router: router, jobs: jobs, assets: assets, reports: reports}
+	return submitTestEnv{router: router, jobs: jobs, assets: assets, profiles: profiles, wardrobes: wardrobes, reports: reports, transactor: transactor}
 }
 
 func putJSON(t *testing.T, router *gin.Engine, body string, expectedStatus int) {
@@ -608,7 +670,8 @@ func (r *memoryAssetRepo) CreateMany(_ context.Context, items []asset.Asset) ([]
 }
 
 type memoryWardrobeRepo struct {
-	nextID int64
+	nextID  int64
+	created []wardrobe.Item
 }
 
 func newMemoryWardrobeRepo() *memoryWardrobeRepo {
@@ -620,13 +683,15 @@ func (r *memoryWardrobeRepo) CreateCoreItems(_ context.Context, items []wardrobe
 		items[i].ID = r.nextID
 		r.nextID++
 	}
+	r.created = append(r.created, items...)
 	return items, nil
 }
 
 type memoryJobRepo struct {
-	nextID  int64
-	lastJob job.Job
-	byID    map[int64]job.Job
+	nextID        int64
+	lastJob       job.Job
+	byID          map[int64]job.Job
+	failSucceeded bool
 }
 
 func newMemoryJobRepo() *memoryJobRepo {
@@ -642,6 +707,9 @@ func (r *memoryJobRepo) Create(_ context.Context, item job.Job) (job.Job, error)
 }
 
 func (r *memoryJobRepo) UpdateStatus(_ context.Context, id int64, status string, output map[string]any, errorMessage string) error {
+	if status == job.StatusSucceeded && r.failSucceeded {
+		return errors.New("mark succeeded failed")
+	}
 	item := r.byID[id]
 	item.Status = status
 	item.OutputSummary = output
@@ -738,4 +806,184 @@ func (r *memoryImageRouteRepo) CreateMany(_ context.Context, items []imageroute.
 		r.nextID++
 	}
 	return items, nil
+}
+
+type memoryTransactor struct {
+	drafts    *memoryDraftRepo
+	profiles  *memoryProfileRepo
+	assets    *memoryAssetRepo
+	wardrobes *memoryWardrobeRepo
+	jobs      *memoryJobRepo
+	reports   *memoryReportRepo
+	routes    *memoryImageRouteRepo
+	deps      onboarding.SubmitDependencies
+	commits   int
+	rollbacks int
+}
+
+func (t *memoryTransactor) WithinTx(ctx context.Context, fn func(ctx context.Context, deps onboarding.SubmitDependencies) error) error {
+	snapshot := t.snapshot()
+	if err := fn(ctx, t.deps); err != nil {
+		t.restore(snapshot)
+		t.rollbacks++
+		return err
+	}
+	t.commits++
+	return nil
+}
+
+type memorySnapshot struct {
+	drafts    memoryDraftSnapshot
+	profiles  memoryProfileSnapshot
+	assets    memoryAssetSnapshot
+	wardrobes memoryWardrobeSnapshot
+	jobs      memoryJobSnapshot
+	reports   memoryReportSnapshot
+	routes    memoryImageRouteSnapshot
+}
+
+func (t *memoryTransactor) snapshot() memorySnapshot {
+	return memorySnapshot{
+		drafts:    t.drafts.snapshot(),
+		profiles:  t.profiles.snapshot(),
+		assets:    t.assets.snapshot(),
+		wardrobes: t.wardrobes.snapshot(),
+		jobs:      t.jobs.snapshot(),
+		reports:   t.reports.snapshot(),
+		routes:    t.routes.snapshot(),
+	}
+}
+
+func (t *memoryTransactor) restore(snapshot memorySnapshot) {
+	t.drafts.restore(snapshot.drafts)
+	t.profiles.restore(snapshot.profiles)
+	t.assets.restore(snapshot.assets)
+	t.wardrobes.restore(snapshot.wardrobes)
+	t.jobs.restore(snapshot.jobs)
+	t.reports.restore(snapshot.reports)
+	t.routes.restore(snapshot.routes)
+}
+
+type memoryDraftSnapshot struct {
+	drafts map[int64]onboarding.Draft
+	nextID int64
+}
+
+func (r *memoryDraftRepo) snapshot() memoryDraftSnapshot {
+	drafts := make(map[int64]onboarding.Draft, len(r.drafts))
+	for key, value := range r.drafts {
+		drafts[key] = value
+	}
+	return memoryDraftSnapshot{drafts: drafts, nextID: r.nextID}
+}
+
+func (r *memoryDraftRepo) restore(snapshot memoryDraftSnapshot) {
+	r.drafts = snapshot.drafts
+	r.nextID = snapshot.nextID
+}
+
+type memoryProfileSnapshot struct {
+	nextID int64
+	byUser map[int64]profile.Profile
+}
+
+func (r *memoryProfileRepo) snapshot() memoryProfileSnapshot {
+	byUser := make(map[int64]profile.Profile, len(r.byUser))
+	for key, value := range r.byUser {
+		byUser[key] = value
+	}
+	return memoryProfileSnapshot{nextID: r.nextID, byUser: byUser}
+}
+
+func (r *memoryProfileRepo) restore(snapshot memoryProfileSnapshot) {
+	r.nextID = snapshot.nextID
+	r.byUser = snapshot.byUser
+}
+
+type memoryAssetSnapshot struct {
+	nextID  int64
+	created []asset.Asset
+}
+
+func (r *memoryAssetRepo) snapshot() memoryAssetSnapshot {
+	return memoryAssetSnapshot{nextID: r.nextID, created: append([]asset.Asset(nil), r.created...)}
+}
+
+func (r *memoryAssetRepo) restore(snapshot memoryAssetSnapshot) {
+	r.nextID = snapshot.nextID
+	r.created = snapshot.created
+}
+
+type memoryWardrobeSnapshot struct {
+	nextID  int64
+	created []wardrobe.Item
+}
+
+func (r *memoryWardrobeRepo) snapshot() memoryWardrobeSnapshot {
+	return memoryWardrobeSnapshot{nextID: r.nextID, created: append([]wardrobe.Item(nil), r.created...)}
+}
+
+func (r *memoryWardrobeRepo) restore(snapshot memoryWardrobeSnapshot) {
+	r.nextID = snapshot.nextID
+	r.created = snapshot.created
+}
+
+type memoryJobSnapshot struct {
+	nextID        int64
+	lastJob       job.Job
+	byID          map[int64]job.Job
+	failSucceeded bool
+}
+
+func (r *memoryJobRepo) snapshot() memoryJobSnapshot {
+	byID := make(map[int64]job.Job, len(r.byID))
+	for key, value := range r.byID {
+		byID[key] = value
+	}
+	return memoryJobSnapshot{nextID: r.nextID, lastJob: r.lastJob, byID: byID, failSucceeded: r.failSucceeded}
+}
+
+func (r *memoryJobRepo) restore(snapshot memoryJobSnapshot) {
+	r.nextID = snapshot.nextID
+	r.lastJob = snapshot.lastJob
+	r.byID = snapshot.byID
+	r.failSucceeded = snapshot.failSucceeded
+}
+
+type memoryReportSnapshot struct {
+	nextID        int64
+	byID          map[int64]report.Report
+	routes        map[int64][]report.ReportRoute
+	failAddRoutes bool
+}
+
+func (r *memoryReportRepo) snapshot() memoryReportSnapshot {
+	byID := make(map[int64]report.Report, len(r.byID))
+	for key, value := range r.byID {
+		byID[key] = value
+	}
+	routes := make(map[int64][]report.ReportRoute, len(r.routes))
+	for key, value := range r.routes {
+		routes[key] = append([]report.ReportRoute(nil), value...)
+	}
+	return memoryReportSnapshot{nextID: r.nextID, byID: byID, routes: routes, failAddRoutes: r.failAddRoutes}
+}
+
+func (r *memoryReportRepo) restore(snapshot memoryReportSnapshot) {
+	r.nextID = snapshot.nextID
+	r.byID = snapshot.byID
+	r.routes = snapshot.routes
+	r.failAddRoutes = snapshot.failAddRoutes
+}
+
+type memoryImageRouteSnapshot struct {
+	nextID int64
+}
+
+func (r *memoryImageRouteRepo) snapshot() memoryImageRouteSnapshot {
+	return memoryImageRouteSnapshot{nextID: r.nextID}
+}
+
+func (r *memoryImageRouteRepo) restore(snapshot memoryImageRouteSnapshot) {
+	r.nextID = snapshot.nextID
 }

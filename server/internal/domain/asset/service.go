@@ -68,6 +68,13 @@ func (s *Service) RegisterOnboardingAssets(ctx context.Context, userID int64, in
 			Status:       StatusActive,
 			ReviewStatus: ReviewStatusPending,
 			Note:         strings.TrimSpace(input.Note),
+			Metadata: map[string]any{
+				"client_ref":                clientRef,
+				"note":                      strings.TrimSpace(input.Note),
+				"original_asset_public_id":  assetPublicID,
+				"simulated_local_asset":     input.ObjectKey == "",
+				"onboarding_source_version": 1,
+			},
 		})
 	}
 	if len(items) == 0 {

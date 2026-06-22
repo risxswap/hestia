@@ -18,20 +18,24 @@ type DraftRepository interface {
 }
 
 type MySQLDraftRepository struct {
-	db *sqlx.DB
+	ext sqlx.ExtContext
 }
 
 func NewMySQLDraftRepository(db *sqlx.DB) *MySQLDraftRepository {
-	return &MySQLDraftRepository{db: db}
+	return NewMySQLDraftRepositoryWithExt(db)
+}
+
+func NewMySQLDraftRepositoryWithExt(ext sqlx.ExtContext) *MySQLDraftRepository {
+	return &MySQLDraftRepository{ext: ext}
 }
 
 func (r *MySQLDraftRepository) FindActiveByUserID(ctx context.Context, userID int64) (Draft, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return Draft{}, errors.New("onboarding repository database is nil")
 	}
 
 	var draft Draft
-	err := r.db.GetContext(ctx, &draft, `
+	err := sqlx.GetContext(ctx, r.ext, &draft, `
 SELECT
   id,
   public_id,
@@ -58,10 +62,10 @@ LIMIT 1
 }
 
 func (r *MySQLDraftRepository) Create(ctx context.Context, draft Draft) (Draft, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return Draft{}, errors.New("onboarding repository database is nil")
 	}
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.ext.ExecContext(ctx, `
 INSERT INTO onboarding_drafts
   (public_id, user_id, status, current_step, draft_data, content_hash, version)
 VALUES
@@ -77,10 +81,10 @@ VALUES
 }
 
 func (r *MySQLDraftRepository) Update(ctx context.Context, draft Draft) (Draft, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return Draft{}, errors.New("onboarding repository database is nil")
 	}
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.ext.ExecContext(ctx, `
 UPDATE onboarding_drafts
 SET
   current_step = ?,
@@ -101,10 +105,10 @@ WHERE id = ?
 }
 
 func (r *MySQLDraftRepository) MarkSubmitted(ctx context.Context, draftID int64, userID int64) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return errors.New("onboarding repository database is nil")
 	}
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.ext.ExecContext(ctx, `
 UPDATE onboarding_drafts
 SET status = 'submitted', submitted_at = CURRENT_TIMESTAMP(3)
 WHERE id = ?

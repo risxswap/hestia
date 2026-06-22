@@ -11,22 +11,26 @@ import (
 )
 
 type MySQLRepository struct {
-	db *sqlx.DB
+	ext sqlx.ExtContext
 }
 
 func NewMySQLRepository(db *sqlx.DB) *MySQLRepository {
-	return &MySQLRepository{db: db}
+	return NewMySQLRepositoryWithExt(db)
+}
+
+func NewMySQLRepositoryWithExt(ext sqlx.ExtContext) *MySQLRepository {
+	return &MySQLRepository{ext: ext}
 }
 
 func (r *MySQLRepository) Create(ctx context.Context, item Job) (Job, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return Job{}, errors.New("job repository database is nil")
 	}
 	input, err := jsonText(item.InputSummary)
 	if err != nil {
 		return Job{}, err
 	}
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.ext.ExecContext(ctx, `
 INSERT INTO jobs
   (public_id, job_type, status, queue_name, related_type, related_id, user_id, input_summary, started_at)
 VALUES
@@ -42,7 +46,7 @@ VALUES
 }
 
 func (r *MySQLRepository) UpdateStatus(ctx context.Context, id int64, status string, output map[string]any, errorMessage string) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return errors.New("job repository database is nil")
 	}
 	outputJSON, err := jsonText(output)
@@ -54,7 +58,7 @@ func (r *MySQLRepository) UpdateStatus(ctx context.Context, id int64, status str
 		now := time.Now().UTC()
 		finishedAt = now
 	}
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.ext.ExecContext(ctx, `
 UPDATE jobs
 SET status = ?, output_summary = CAST(? AS JSON), error_message = NULLIF(?, ''), finished_at = ?
 WHERE id = ?
@@ -63,11 +67,11 @@ WHERE id = ?
 }
 
 func (r *MySQLRepository) FindByPublicIDForUser(ctx context.Context, userID int64, publicID string) (Job, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.ext == nil {
 		return Job{}, errors.New("job repository database is nil")
 	}
 	var row jobRow
-	err := r.db.GetContext(ctx, &row, `
+	err := sqlx.GetContext(ctx, r.ext, &row, `
 SELECT
   id,
   public_id,

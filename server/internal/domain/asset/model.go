@@ -16,6 +16,7 @@ type Asset struct {
 	Status       string
 	ReviewStatus string
 	Note         string
+	Metadata     map[string]any
 }
 
 type Input struct {
