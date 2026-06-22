@@ -3,6 +3,7 @@ package user
 import (
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/common/response"
+	"hestia/server/internal/domain/account"
 	"hestia/server/internal/domain/agent"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ func NewRouter(deps *baseapp.Deps) *gin.Engine {
 	router := gin.New()
 	api := router.Group("/api/user")
 	api.GET("/health", health)
+	account.RegisterUserRoutes(api, deps)
 	agent.RegisterUserRoutes(api.Group("/agent"), deps)
 	return router
 }
