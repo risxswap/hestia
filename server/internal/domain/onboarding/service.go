@@ -127,11 +127,14 @@ func (s *Service) SaveDraft(ctx context.Context, userID int64, input SaveDraftIn
 		return responseFromDraft(created), nil
 	}
 
-	existing.CurrentStep = step
-	existing.DraftData = data
-	existing.ContentHash = contentHash
-	existing.Version++
-	updated, err := s.repo.Update(ctx, existing)
+	expectedVersion := existing.Version
+	expectedContentHash := existing.ContentHash
+	updatedDraft := existing
+	updatedDraft.CurrentStep = step
+	updatedDraft.DraftData = data
+	updatedDraft.ContentHash = contentHash
+	updatedDraft.Version++
+	updated, err := s.repo.Update(ctx, updatedDraft, expectedVersion, expectedContentHash)
 	if err != nil {
 		return DraftResponse{}, err
 	}

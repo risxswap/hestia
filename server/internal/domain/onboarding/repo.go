@@ -15,7 +15,7 @@ var ErrDraftNotFound = errors.New("onboarding draft not found")
 type DraftRepository interface {
 	FindActiveByUserID(ctx context.Context, userID int64) (Draft, error)
 	Create(ctx context.Context, draft Draft) (Draft, error)
-	Update(ctx context.Context, draft Draft) (Draft, error)
+	Update(ctx context.Context, draft Draft, expectedVersion int, expectedContentHash string) (Draft, error)
 	ClaimDraft(ctx context.Context, draftID int64, userID int64, contentHash string) error
 	MarkSubmitted(ctx context.Context, draftID int64, userID int64) error
 }
@@ -85,7 +85,7 @@ VALUES
 	return draft, nil
 }
 
-func (r *MySQLDraftRepository) Update(ctx context.Context, draft Draft) (Draft, error) {
+func (r *MySQLDraftRepository) Update(ctx context.Context, draft Draft, expectedVersion int, expectedContentHash string) (Draft, error) {
 	if r == nil || r.ext == nil {
 		return Draft{}, errors.New("onboarding repository database is nil")
 	}
@@ -98,8 +98,11 @@ SET
   version = ?
 WHERE id = ?
   AND user_id = ?
+  AND status = 'draft'
+  AND version = ?
+  AND content_hash = ?
   AND deleted_at IS NULL
-`, draft.CurrentStep, draft.DraftData, draft.ContentHash, draft.Version, draft.ID, draft.UserID)
+`, draft.CurrentStep, draft.DraftData, draft.ContentHash, draft.Version, draft.ID, draft.UserID, expectedVersion, expectedContentHash)
 	if err != nil {
 		return Draft{}, err
 	}

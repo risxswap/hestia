@@ -58,8 +58,9 @@ func (r *memoryDraftRepo) Create(_ context.Context, draft onboarding.Draft) (onb
 	return draft, nil
 }
 
-func (r *memoryDraftRepo) Update(_ context.Context, draft onboarding.Draft) (onboarding.Draft, error) {
-	if _, ok := r.drafts[draft.UserID]; !ok {
+func (r *memoryDraftRepo) Update(_ context.Context, draft onboarding.Draft, expectedVersion int, expectedContentHash string) (onboarding.Draft, error) {
+	existing, ok := r.drafts[draft.UserID]
+	if !ok || existing.Status != onboarding.DraftStatusDraft || existing.Version != expectedVersion || existing.ContentHash != expectedContentHash {
 		return onboarding.Draft{}, onboarding.ErrDraftNotFound
 	}
 	r.drafts[draft.UserID] = draft
