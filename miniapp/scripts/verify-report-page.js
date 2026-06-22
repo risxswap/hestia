@@ -100,6 +100,10 @@ assert(
   "report.js should export fallbackReportData"
 );
 assert(
+  !reportModule.fallbackReportData.updatedAt,
+  "fallbackReportData should not include a displayable updatedAt"
+);
+assert(
   reportModule && reportModule.reportPageConfig,
   "report.js should export reportPageConfig"
 );
@@ -164,6 +168,7 @@ assert(
   fallback && fallback.actionItems === reportModule.fallbackReportData.actionItems,
   "normalizeReportResponse should use mock fallback when report data is missing"
 );
+assert(!fallback.updatedAt, "fallback normalized report should not include displayable updatedAt");
 
 let registeredPageConfig;
 requireFreshReportModule({
@@ -225,6 +230,7 @@ const failPayload = callLoadLatestReport(reportModule, {
   }
 });
 assert(failPayload === reportModule.fallbackReportData, "request failure should use fallback");
+assert(!failPayload.updatedAt, "request failure fallback should not include displayable updatedAt");
 
 const noTokenPayload = callLoadLatestReport(reportModule, {
   getApp: () => ({
@@ -242,6 +248,7 @@ const noTokenPayload = callLoadLatestReport(reportModule, {
   }
 });
 assert(noTokenPayload === reportModule.fallbackReportData, "missing token should use fallback");
+assert(!noTokenPayload.updatedAt, "missing token fallback should not include displayable updatedAt");
 
 const noBaseUrlPayload = callLoadLatestReport(reportModule, {
   getApp: () => ({
@@ -259,6 +266,7 @@ const noBaseUrlPayload = callLoadLatestReport(reportModule, {
   }
 });
 assert(noBaseUrlPayload === reportModule.fallbackReportData, "missing apiBaseUrl should use fallback");
+assert(!noBaseUrlPayload.updatedAt, "missing apiBaseUrl fallback should not include displayable updatedAt");
 
 assertIncludes("pages/report/report.wxml", reportWxml, "{{summary}}");
 assertIncludes("pages/report/report.wxml", reportWxml, "wx:if=\"{{updatedAt}}\"");

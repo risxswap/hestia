@@ -1,7 +1,7 @@
 const { actionItems } = require("../../utils/mock");
 
 const fallbackReportData = {
-  updatedAt: "2026-06-03",
+  updatedAt: "",
   title: "你的下一步",
   summary: "当前展示本地预览报告。后端报告未准备好时，你仍然可以先按这些行动项试穿并记录反馈。",
   routes: [
