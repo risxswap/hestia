@@ -3,6 +3,10 @@ package migration_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"hestia/server/internal/infra/config"
@@ -32,6 +36,75 @@ func TestRunOnStartupReturnsRunnerError(t *testing.T) {
 	err := migration.RunOnStartup(context.Background(), &config.Config{}, runner)
 	if !errors.Is(err, expected) {
 		t.Fatalf("expected runner error, got %v", err)
+	}
+}
+
+func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
+	schemaPath := filepath.Join("mysql", "001_init_schema.sql")
+	raw, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("read initial schema %s: %v", schemaPath, err)
+	}
+	sql := string(raw)
+
+	expectedTables := []string{
+		"users",
+		"admin_users",
+		"profiles",
+		"profile_facts",
+		"profile_inferences",
+		"profile_prefs",
+		"assets",
+		"wardrobe_items",
+		"wardrobe_item_assets",
+		"wardrobe_gaps",
+		"style_subjects",
+		"style_samples",
+		"style_tags",
+		"style_sample_tags",
+		"style_sample_assets",
+		"image_routes",
+		"image_route_events",
+		"image_route_styles",
+		"reports",
+		"report_image_routes",
+		"chat_msgs",
+		"advice_requests",
+		"advices",
+		"feedbacks",
+		"memories",
+		"memory_sources",
+		"plans",
+		"subs",
+		"orders",
+		"benefits",
+		"benefit_txns",
+		"system_configs",
+		"jobs",
+	}
+	for _, table := range expectedTables {
+		if !regexp.MustCompile("(?i)CREATE TABLE IF NOT EXISTS `" + table + "`").MatchString(sql) {
+			t.Fatalf("schema should create table %s", table)
+		}
+	}
+
+	for _, token := range []string{
+		"`public_id` varchar(32) NOT NULL",
+		"UNIQUE KEY `uk_users_public_id` (`public_id`)",
+		"UNIQUE KEY `uk_system_configs_group_key` (`group`, `key`)",
+		"KEY `idx_advices_user_date_scene` (`user_id`, `advice_date`, `scene_key`, `status`)",
+		"KEY `idx_jobs_status_next_retry` (`status`, `next_retry_at`)",
+		"`content_json` json DEFAULT NULL",
+		"`memory_value` json NOT NULL",
+		"ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci",
+	} {
+		if !strings.Contains(sql, token) {
+			t.Fatalf("schema missing required token: %s", token)
+		}
+	}
+
+	if strings.Contains(strings.ToLower(sql), "foreign key") {
+		t.Fatal("initial schema should keep relations as indexed ids without database foreign keys")
 	}
 }
 

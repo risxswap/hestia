@@ -6,6 +6,8 @@
 .env
 .env.*
 !.env.example
+config.toml
+server/config.toml
 
 # OS files
 .DS_Store
