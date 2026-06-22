@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	baseapp "hestia/server/internal/app"
+	"hestia/server/internal/infra/config"
 )
 
 func TestHealth(t *testing.T) {
@@ -38,5 +42,37 @@ func TestMiniappHealthIsNotRegistered(t *testing.T) {
 
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("expected status 404, got %d", response.Code)
+	}
+}
+
+func TestDevLoginIsHiddenInProduction(t *testing.T) {
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/user/dev-login",
+		strings.NewReader(`{"nickname":"测试用户","dev_key":"ming-local"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	NewRouter(&baseapp.Deps{Config: &config.Config{AppEnv: "production"}}).ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", response.Code)
+	}
+}
+
+func TestDevLoginRouteIsKeptInDevelopment(t *testing.T) {
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/user/dev-login",
+		strings.NewReader(`{"nickname":"测试用户","dev_key":"ming-local"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	NewRouter(&baseapp.Deps{Config: &config.Config{AppEnv: "development"}}).ServeHTTP(response, request)
+
+	if response.Code == http.StatusNotFound {
+		t.Fatalf("expected dev-login route in development")
 	}
 }

@@ -1,8 +1,11 @@
 package account_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,9 +20,13 @@ import (
 
 type fakeUserRepo struct {
 	user account.User
+	err  error
 }
 
 func (r *fakeUserRepo) UpsertDevUser(_ context.Context, input account.DevUserInput) (account.User, error) {
+	if r.err != nil {
+		return account.User{}, r.err
+	}
 	r.user = account.User{
 		ID:               12,
 		PublicID:         input.PublicID,
@@ -50,7 +57,7 @@ func TestDevLoginCreatesUserAndReturnsToken(t *testing.T) {
 	writer := &fakeSessionWriter{}
 	service := account.NewService(repo, writer, time.Hour)
 	router := gin.New()
-	account.RegisterRoutes(router.Group("/api/user"), account.NewHandler(service))
+	account.RegisterRoutes(router.Group("/api/user"), account.NewHandler(service, slog.Default()))
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/user/dev-login",
@@ -92,5 +99,85 @@ func TestDevLoginCreatesUserAndReturnsToken(t *testing.T) {
 	}
 	if writer.token != body.Data.Token {
 		t.Fatalf("expected writer token %q, got %q", body.Data.Token, writer.token)
+	}
+}
+
+func TestDevLoginLogsInternalError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	repo := &fakeUserRepo{err: errors.New("database down")}
+	writer := &fakeSessionWriter{}
+	service := account.NewService(repo, writer, time.Hour)
+	router := gin.New()
+	account.RegisterRoutes(router.Group("/api/user"), account.NewHandler(service, logger))
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/user/dev-login",
+		strings.NewReader(`{"nickname":"测试用户","dev_key":"ming-local"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	gotLogs := logs.String()
+	if !strings.Contains(gotLogs, "dev login failed") {
+		t.Fatalf("expected log message, got %q", gotLogs)
+	}
+	if !strings.Contains(gotLogs, "database down") {
+		t.Fatalf("expected underlying error in logs, got %q", gotLogs)
+	}
+}
+
+func TestDevLoginRejectsTooLongDevKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := account.NewService(nil, nil, time.Hour)
+	router := gin.New()
+	account.RegisterRoutes(router.Group("/api/user"), account.NewHandler(service, slog.Default()))
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/user/dev-login",
+		strings.NewReader(`{"nickname":"测试用户","dev_key":"`+strings.Repeat("a", 121)+`"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "account.validation_failed" {
+		t.Fatalf("expected validation code, got %q", body.Code)
+	}
+}
+
+func TestDevLoginRejectsTooLongNickname(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := account.NewService(nil, nil, time.Hour)
+	router := gin.New()
+	account.RegisterRoutes(router.Group("/api/user"), account.NewHandler(service, slog.Default()))
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/user/dev-login",
+		strings.NewReader(`{"nickname":"`+strings.Repeat("你", 129)+`","dev_key":"ming-local"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
 	}
 }

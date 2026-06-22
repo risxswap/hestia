@@ -5,12 +5,30 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"hestia/server/internal/common/auth"
 	"hestia/server/internal/common/id"
 )
 
 const defaultSessionTTL = 30 * 24 * time.Hour
+const maxDevKeyLength = 120
+const maxNicknameLength = 128
+
+var ErrValidation = errors.New("account validation failed")
+
+type ValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e ValidationError) Error() string {
+	return e.Field + ": " + e.Message
+}
+
+func (e ValidationError) Is(target error) bool {
+	return target == ErrValidation
+}
 
 type Service struct {
 	repo       UserRepository
@@ -27,8 +45,15 @@ func NewService(repo UserRepository, sessions auth.SessionWriter, sessionTTL tim
 
 func (s *Service) DevLogin(ctx context.Context, input DevLoginInput) (DevLoginResult, error) {
 	devKey := strings.TrimSpace(input.DevKey)
+	nickname := strings.TrimSpace(input.Nickname)
 	if devKey == "" {
-		return DevLoginResult{}, errors.New("dev_key is required")
+		return DevLoginResult{}, ValidationError{Field: "dev_key", Message: "required"}
+	}
+	if utf8.RuneCountInString(devKey) > maxDevKeyLength {
+		return DevLoginResult{}, ValidationError{Field: "dev_key", Message: "too long"}
+	}
+	if utf8.RuneCountInString(nickname) > maxNicknameLength {
+		return DevLoginResult{}, ValidationError{Field: "nickname", Message: "too long"}
 	}
 	if s == nil || s.repo == nil || s.sessions == nil {
 		return DevLoginResult{}, errors.New("account service dependencies are nil")
@@ -37,7 +62,7 @@ func (s *Service) DevLogin(ctx context.Context, input DevLoginInput) (DevLoginRe
 	user, err := s.repo.UpsertDevUser(ctx, DevUserInput{
 		PublicID:     id.NewPublicID("usr"),
 		WechatOpenID: "dev:" + devKey,
-		Nickname:     strings.TrimSpace(input.Nickname),
+		Nickname:     nickname,
 	})
 	if err != nil {
 		return DevLoginResult{}, err

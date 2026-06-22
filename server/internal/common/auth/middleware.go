@@ -87,6 +87,10 @@ func RequireUserSession(store SessionStore) gin.HandlerFunc {
 			unauthorized(c)
 			return
 		}
+		if session.Surface != "user" {
+			unauthorized(c)
+			return
+		}
 		SetUserContext(c, User{
 			UserID:       session.UserID,
 			UserPublicID: session.UserPublicID,

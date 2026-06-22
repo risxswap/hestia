@@ -89,6 +89,31 @@ func TestRequireUserSessionRejectsUnknownToken(t *testing.T) {
 	}
 }
 
+func TestRequireUserSessionRejectsNonUserSurface(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	store := fakeSessionStore{
+		session: auth.Session{
+			UserID:       12,
+			UserPublicID: "usr_test",
+			Surface:      "admin",
+			CreatedAt:    time.Now(),
+		},
+	}
+	router.GET("/me", auth.RequireUserSession(store), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/me", nil)
+	request.Header.Set("Authorization", "Bearer admin_token")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", recorder.Code)
+	}
+}
+
 type fakeRedisClient struct {
 	values   map[string][]byte
 	setKey   string
