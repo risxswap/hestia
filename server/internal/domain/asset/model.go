@@ -3,6 +3,7 @@ package asset
 type Asset struct {
 	ID           int64
 	PublicID     string
+	ClientRef    string
 	OwnerUserID  int64
 	Bucket       string
 	ObjectKey    string
@@ -14,13 +15,17 @@ type Asset struct {
 	Source       string
 	Status       string
 	ReviewStatus string
+	Note         string
 }
 
 type Input struct {
-	ObjectKey string
-	MimeType  string
-	FileSize  int64
-	Width     *int
-	Height    *int
-	AssetType string
+	AssetPublicID string
+	ClientRef     string
+	ObjectKey     string
+	MimeType      string
+	FileSize      int64
+	Width         *int
+	Height        *int
+	AssetType     string
+	Note          string
 }

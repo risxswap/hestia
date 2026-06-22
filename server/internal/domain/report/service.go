@@ -13,6 +13,7 @@ var ErrReportNotFound = errors.New("report not found")
 type Repository interface {
 	Create(ctx context.Context, item Report) (Report, error)
 	AddRoutes(ctx context.Context, reportID int64, routes []ReportRoute) error
+	MarkReady(ctx context.Context, reportID int64) error
 	LatestInitialForUser(ctx context.Context, userID int64) (Report, error)
 	FindByPublicIDForUser(ctx context.Context, userID int64, publicID string) (Report, error)
 	RoutesByReportID(ctx context.Context, reportID int64) ([]ReportRoute, error)
@@ -33,7 +34,7 @@ func (s *Service) CreateInitialReport(ctx context.Context, input CreateInitialIn
 		UserID:          input.UserID,
 		ProfileID:       input.ProfileID,
 		ReportType:      TypeInitial,
-		Status:          StatusReady,
+		Status:          StatusGenerating,
 		Title:           input.Title,
 		Summary:         input.Summary,
 		ContentJSON:     input.ContentJSON,
@@ -49,6 +50,10 @@ func (s *Service) AttachRoutes(ctx context.Context, reportID int64, routes []Rep
 		return nil
 	}
 	return s.repo.AddRoutes(ctx, reportID, routes)
+}
+
+func (s *Service) MarkReady(ctx context.Context, reportID int64) error {
+	return s.repo.MarkReady(ctx, reportID)
 }
 
 func (s *Service) LatestForUser(ctx context.Context, userID int64) (Response, error) {

@@ -102,7 +102,7 @@ func decodeRequired(data DraftData, key string, target any) error {
 		return ValidationError{Field: key, Message: "required"}
 	}
 	if err := json.Unmarshal(raw, target); err != nil {
-		return err
+		return ValidationError{Field: key, Message: "invalid shape"}
 	}
 	return nil
 }
@@ -137,47 +137,79 @@ type wardrobeItemDraft struct {
 }
 
 type assetDraft struct {
-	ObjectKey string `json:"object_key"`
-	MimeType  string `json:"mime_type"`
-	FileSize  int64  `json:"file_size"`
-	Width     *int   `json:"width"`
-	Height    *int   `json:"height"`
-	AssetType string `json:"asset_type"`
+	AssetPublicID string `json:"asset_public_id"`
+	ClientRef     string `json:"client_ref"`
+	ObjectKey     string `json:"object_key"`
+	MimeType      string `json:"mime_type"`
+	FileSize      int64  `json:"file_size"`
+	Width         *int   `json:"width"`
+	Height        *int   `json:"height"`
+	AssetType     string `json:"asset_type"`
+	Note          string `json:"note"`
 }
 
 func parseAssetInputs(data DraftData) []asset.Input {
-	keys := []string{"photos", "assets", "images"}
 	var inputs []asset.Input
+	keys := []string{"photos", "assets", "images", "uploaded_refs"}
 	for _, key := range keys {
 		raw, ok := data[key]
 		if !ok {
 			continue
 		}
-		var wrapper struct {
-			Items []assetDraft `json:"items"`
-		}
-		if err := json.Unmarshal(raw, &wrapper); err == nil && len(wrapper.Items) > 0 {
-			inputs = append(inputs, assetDraftsToInputs(wrapper.Items)...)
+		inputs = append(inputs, parseAssetList(raw)...)
+	}
+	for _, key := range []string{"reference", "references", "style_reference"} {
+		raw, ok := data[key]
+		if !ok {
 			continue
 		}
-		var list []assetDraft
-		if err := json.Unmarshal(raw, &list); err == nil {
-			inputs = append(inputs, assetDraftsToInputs(list)...)
+		var nested struct {
+			UploadedRefs []assetDraft `json:"uploaded_refs"`
+			Photos       []assetDraft `json:"photos"`
+			Items        []assetDraft `json:"items"`
 		}
+		if err := json.Unmarshal(raw, &nested); err != nil {
+			continue
+		}
+		inputs = append(inputs, assetDraftsToInputs(nested.UploadedRefs)...)
+		inputs = append(inputs, assetDraftsToInputs(nested.Photos)...)
+		inputs = append(inputs, assetDraftsToInputs(nested.Items)...)
 	}
 	return inputs
+}
+
+func parseAssetList(raw json.RawMessage) []asset.Input {
+	var wrapper struct {
+		Items        []assetDraft `json:"items"`
+		UploadedRefs []assetDraft `json:"uploaded_refs"`
+	}
+	if err := json.Unmarshal(raw, &wrapper); err == nil {
+		inputs := assetDraftsToInputs(wrapper.Items)
+		inputs = append(inputs, assetDraftsToInputs(wrapper.UploadedRefs)...)
+		if len(inputs) > 0 {
+			return inputs
+		}
+	}
+	var list []assetDraft
+	if err := json.Unmarshal(raw, &list); err == nil {
+		return assetDraftsToInputs(list)
+	}
+	return nil
 }
 
 func assetDraftsToInputs(items []assetDraft) []asset.Input {
 	inputs := make([]asset.Input, 0, len(items))
 	for _, item := range items {
 		inputs = append(inputs, asset.Input{
-			ObjectKey: item.ObjectKey,
-			MimeType:  item.MimeType,
-			FileSize:  item.FileSize,
-			Width:     item.Width,
-			Height:    item.Height,
-			AssetType: item.AssetType,
+			AssetPublicID: item.AssetPublicID,
+			ClientRef:     item.ClientRef,
+			ObjectKey:     item.ObjectKey,
+			MimeType:      item.MimeType,
+			FileSize:      item.FileSize,
+			Width:         item.Width,
+			Height:        item.Height,
+			AssetType:     item.AssetType,
+			Note:          item.Note,
 		})
 	}
 	return inputs

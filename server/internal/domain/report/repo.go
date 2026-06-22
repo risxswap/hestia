@@ -70,6 +70,19 @@ VALUES
 	return nil
 }
 
+func (r *MySQLRepository) MarkReady(ctx context.Context, reportID int64) error {
+	if r == nil || r.db == nil {
+		return errors.New("report repository database is nil")
+	}
+	_, err := r.db.ExecContext(ctx, `
+UPDATE reports
+SET status = 'ready'
+WHERE id = ?
+  AND deleted_at IS NULL
+`, reportID)
+	return err
+}
+
 func (r *MySQLRepository) LatestInitialForUser(ctx context.Context, userID int64) (Report, error) {
 	return r.findOne(ctx, `
 SELECT

@@ -240,6 +240,110 @@ func TestSubmitOnboardingMarksJobFailedWhenGeneratorFails(t *testing.T) {
 	}
 }
 
+func TestSubmitOnboardingRegistersPublicIDAndClientRefAssets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	env := newSubmitTestEnv(generator.NewRuleReportGenerator())
+
+	putJSON(t, env.router, `{
+		"step": "wardrobe",
+		"data": {
+			"basic": {"gender":"female","height_cm":168},
+			"style_goal": {
+				"goals": ["干净利落"],
+				"reference_styles": ["刘诗诗"]
+			},
+			"wardrobe": {"items": [{"name":"米白衬衫","category":"top"}]},
+			"photos": [
+				{"asset_public_id":"ast_existing_selfie","asset_type":"selfie","note":"自然光自拍"}
+			],
+			"reference": {
+				"uploaded_refs": [
+					{"client_ref":"tmp-ref-1","asset_type":"style_reference","note":"参考图"}
+				]
+			}
+		}
+	}`, http.StatusOK)
+
+	submitOnboarding(t, env.router, http.StatusOK)
+
+	if len(env.assets.created) != 2 {
+		t.Fatalf("expected two registered assets, got %#v", env.assets.created)
+	}
+	if env.assets.created[0].PublicID != "ast_existing_selfie" {
+		t.Fatalf("expected existing asset public id to be preserved, got %q", env.assets.created[0].PublicID)
+	}
+	if env.assets.created[0].AssetType != "selfie" || env.assets.created[0].Note != "自然光自拍" {
+		t.Fatalf("expected selfie metadata to be preserved, got %#v", env.assets.created[0])
+	}
+	if env.assets.created[1].PublicID == "" || env.assets.created[1].PublicID == env.assets.created[1].ClientRef {
+		t.Fatalf("expected formal public id for client ref asset, got %#v", env.assets.created[1])
+	}
+	if env.assets.created[1].ClientRef != "tmp-ref-1" || env.assets.created[1].Note != "参考图" {
+		t.Fatalf("expected client ref metadata to be preserved, got %#v", env.assets.created[1])
+	}
+}
+
+func TestSubmitOnboardingDoesNotExposeReadyReportWhenAttachRoutesFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	env := newSubmitTestEnv(generator.NewRuleReportGenerator())
+	env.reports.failAddRoutes = true
+
+	putJSON(t, env.router, `{
+		"step": "wardrobe",
+		"data": {
+			"basic": {"gender":"female","height_cm":168},
+			"style_goal": {"goals": ["干净利落"]},
+			"wardrobe": {"items": [{"name":"米白衬衫","category":"top"}]}
+		}
+	}`, http.StatusOK)
+
+	submitOnboarding(t, env.router, http.StatusInternalServerError)
+	got := getJob(t, env.router, env.jobs.lastJob.PublicID)
+	if got.Status != "failed" {
+		t.Fatalf("expected failed job, got %q", got.Status)
+	}
+	assertLatestReportStatus(t, env.router, http.StatusNotFound)
+}
+
+func TestSubmitOnboardingRejectsInvalidDraftShapes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "basic is a string",
+			body: `{
+				"step": "wardrobe",
+				"data": {
+					"basic": "not-an-object",
+					"style_goal": {"goals": ["干净利落"]},
+					"wardrobe": {"items": [{"name":"米白衬衫","category":"top"}]}
+				}
+			}`,
+		},
+		{
+			name: "style goals is a string",
+			body: `{
+				"step": "wardrobe",
+				"data": {
+					"basic": {"gender":"female"},
+					"style_goal": {"goals": "干净利落"},
+					"wardrobe": {"items": [{"name":"米白衬衫","category":"top"}]}
+				}
+			}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := newSubmitTestEnv(generator.NewRuleReportGenerator())
+			putJSON(t, env.router, tt.body, http.StatusOK)
+
+			submitOnboarding(t, env.router, http.StatusBadRequest)
+		})
+	}
+}
+
 func newAuthenticatedRouter(repo onboarding.DraftRepository) *gin.Engine {
 	router := gin.New()
 	group := router.Group("/api/user/onboarding")
@@ -256,8 +360,10 @@ func newAuthenticatedRouter(repo onboarding.DraftRepository) *gin.Engine {
 }
 
 type submitTestEnv struct {
-	router *gin.Engine
-	jobs   *memoryJobRepo
+	router  *gin.Engine
+	jobs    *memoryJobRepo
+	assets  *memoryAssetRepo
+	reports *memoryReportRepo
 }
 
 func newSubmitTestEnv(reportGenerator generator.ReportGenerator) submitTestEnv {
@@ -298,7 +404,7 @@ func newSubmitTestEnv(reportGenerator generator.ReportGenerator) submitTestEnv {
 	onboarding.RegisterRoutes(router.Group("/api/user/onboarding"), onboarding.NewHandler(onboardingService, nil))
 	report.RegisterUserRoutesWithService(router.Group("/api/user/reports"), reportService, nil)
 	job.RegisterUserRoutesWithService(router.Group("/api/user/jobs"), jobService, nil)
-	return submitTestEnv{router: router, jobs: jobs}
+	return submitTestEnv{router: router, jobs: jobs, assets: assets, reports: reports}
 }
 
 func putJSON(t *testing.T, router *gin.Engine, body string, expectedStatus int) {
@@ -402,6 +508,18 @@ func getLatestReport(t *testing.T, router *gin.Engine) reportResponse {
 	return body.Data
 }
 
+func assertLatestReportStatus(t *testing.T, router *gin.Engine, expectedStatus int) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/user/reports/latest", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != expectedStatus {
+		t.Fatalf("expected status %d, got %d, body=%s", expectedStatus, recorder.Code, recorder.Body.String())
+	}
+}
+
 type jobResponse struct {
 	PublicID string `json:"public_id"`
 	Type     string `json:"type"`
@@ -472,7 +590,8 @@ func (r *memoryProfileRepo) MarkUserOnboardingCompleted(context.Context, int64) 
 }
 
 type memoryAssetRepo struct {
-	nextID int64
+	nextID  int64
+	created []asset.Asset
 }
 
 func newMemoryAssetRepo() *memoryAssetRepo {
@@ -484,6 +603,7 @@ func (r *memoryAssetRepo) CreateMany(_ context.Context, items []asset.Asset) ([]
 		items[i].ID = r.nextID
 		r.nextID++
 	}
+	r.created = append(r.created, items...)
 	return items, nil
 }
 
@@ -541,9 +661,10 @@ func (r *memoryJobRepo) FindByPublicIDForUser(_ context.Context, userID int64, p
 }
 
 type memoryReportRepo struct {
-	nextID int64
-	byID   map[int64]report.Report
-	routes map[int64][]report.ReportRoute
+	nextID        int64
+	byID          map[int64]report.Report
+	routes        map[int64][]report.ReportRoute
+	failAddRoutes bool
 }
 
 func newMemoryReportRepo() *memoryReportRepo {
@@ -558,7 +679,20 @@ func (r *memoryReportRepo) Create(_ context.Context, item report.Report) (report
 }
 
 func (r *memoryReportRepo) AddRoutes(_ context.Context, reportID int64, items []report.ReportRoute) error {
+	if r.failAddRoutes {
+		return errors.New("attach routes failed")
+	}
 	r.routes[reportID] = append(r.routes[reportID], items...)
+	return nil
+}
+
+func (r *memoryReportRepo) MarkReady(_ context.Context, reportID int64) error {
+	item, ok := r.byID[reportID]
+	if !ok {
+		return report.ErrReportNotFound
+	}
+	item.Status = report.StatusReady
+	r.byID[reportID] = item
 	return nil
 }
 

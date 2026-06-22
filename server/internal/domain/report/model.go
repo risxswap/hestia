@@ -3,8 +3,9 @@ package report
 import "time"
 
 const (
-	TypeInitial = "initial"
-	StatusReady = "ready"
+	TypeInitial      = "initial"
+	StatusGenerating = "generating"
+	StatusReady      = "ready"
 )
 
 type Report struct {

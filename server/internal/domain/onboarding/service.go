@@ -261,6 +261,10 @@ func (s *Service) Submit(ctx context.Context, userID int64) (SubmitResponse, err
 		_ = s.submit.Jobs.MarkFailed(ctx, generationJob, "mark draft submitted failed")
 		return SubmitResponse{}, err
 	}
+	if err := s.submit.Reports.MarkReady(ctx, reportItem.ID); err != nil {
+		_ = s.submit.Jobs.MarkFailed(ctx, generationJob, "mark report ready failed")
+		return SubmitResponse{}, err
+	}
 	if err := s.submit.Jobs.MarkSucceeded(ctx, generationJob, map[string]any{"report_public_id": reportItem.PublicID}); err != nil {
 		return SubmitResponse{}, err
 	}
