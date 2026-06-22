@@ -1,14 +1,24 @@
 package main
 
 import (
-	"log"
 	"net/http"
 
+	baseapp "hestia/server/internal/app"
 	userapp "hestia/server/internal/app/user"
+	"hestia/server/internal/infra/config"
+	"hestia/server/internal/infra/logger"
 )
 
 func main() {
-	router := userapp.NewRouter()
-	log.Println("user-server listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	cfg, err := config.Load()
+	if err != nil {
+		panic(err)
+	}
+	log := logger.New()
+	router := userapp.NewRouter(&baseapp.Deps{Config: cfg, Logger: log})
+	log.Info("user-server listening", "port", cfg.UserPort)
+	if err := http.ListenAndServe(":"+cfg.UserPort, router); err != nil {
+		log.Error("user-server stopped", "error", err)
+		panic(err)
+	}
 }

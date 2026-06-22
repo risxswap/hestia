@@ -1,15 +1,25 @@
 package admin
 
-import "net/http"
+import (
+	baseapp "hestia/server/internal/app"
+	"hestia/server/internal/common/response"
+	"hestia/server/internal/domain/job"
 
-func NewRouter() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/admin/health", health)
-	return mux
+	"github.com/gin-gonic/gin"
+)
+
+func NewRouter(deps *baseapp.Deps) *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	api := router.Group("/api/admin")
+	api.GET("/health", health)
+	job.RegisterAdminRoutes(api.Group("/jobs"), deps)
+	return router
 }
 
-func health(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok","surface":"admin"}`))
+func health(c *gin.Context) {
+	response.OK(c, gin.H{
+		"status":  "ok",
+		"surface": "admin",
+	})
 }

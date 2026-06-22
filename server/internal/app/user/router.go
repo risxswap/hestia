@@ -1,16 +1,25 @@
 package user
 
-import "net/http"
+import (
+	baseapp "hestia/server/internal/app"
+	"hestia/server/internal/common/response"
+	"hestia/server/internal/domain/agent"
 
-func NewRouter() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/miniapp/health", health)
-	mux.HandleFunc("/api/user/health", health)
-	return mux
+	"github.com/gin-gonic/gin"
+)
+
+func NewRouter(deps *baseapp.Deps) *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	api := router.Group("/api/user")
+	api.GET("/health", health)
+	agent.RegisterUserRoutes(api.Group("/agent"), deps)
+	return router
 }
 
-func health(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok","surface":"user"}`))
+func health(c *gin.Context) {
+	response.OK(c, gin.H{
+		"status":  "ok",
+		"surface": "user",
+	})
 }
