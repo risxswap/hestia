@@ -33,11 +33,16 @@ type SessionWriter interface {
 	Set(ctx context.Context, token string, session Session, ttl time.Duration) error
 }
 
-type RedisSessionStore struct {
-	client *redis.Client
+type redisSessionClient interface {
+	Get(ctx context.Context, key string) *redis.StringCmd
+	Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd
 }
 
-func NewRedisSessionStore(client *redis.Client) *RedisSessionStore {
+type RedisSessionStore struct {
+	client redisSessionClient
+}
+
+func NewRedisSessionStore(client redisSessionClient) *RedisSessionStore {
 	return &RedisSessionStore{client: client}
 }
 
