@@ -14,6 +14,7 @@ type DraftRepository interface {
 	FindActiveByUserID(ctx context.Context, userID int64) (Draft, error)
 	Create(ctx context.Context, draft Draft) (Draft, error)
 	Update(ctx context.Context, draft Draft) (Draft, error)
+	MarkSubmitted(ctx context.Context, draftID int64, userID int64) error
 }
 
 type MySQLDraftRepository struct {
@@ -97,6 +98,23 @@ WHERE id = ?
 		return Draft{}, err
 	}
 	return draft, nil
+}
+
+func (r *MySQLDraftRepository) MarkSubmitted(ctx context.Context, draftID int64, userID int64) error {
+	if r == nil || r.db == nil {
+		return errors.New("onboarding repository database is nil")
+	}
+	result, err := r.db.ExecContext(ctx, `
+UPDATE onboarding_drafts
+SET status = 'submitted', submitted_at = CURRENT_TIMESTAMP(3)
+WHERE id = ?
+  AND user_id = ?
+  AND deleted_at IS NULL
+`, draftID, userID)
+	if err != nil {
+		return err
+	}
+	return rowsAffectedError(result)
 }
 
 func rowsAffectedError(result sql.Result) error {

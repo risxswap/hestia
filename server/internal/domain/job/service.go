@@ -1,11 +1,74 @@
 package job
 
-type Service struct{}
+import (
+	"context"
+	"errors"
+	"time"
 
-func NewService() *Service {
-	return &Service{}
+	"hestia/server/internal/common/id"
+)
+
+var ErrJobNotFound = errors.New("job not found")
+
+type Repository interface {
+	Create(ctx context.Context, item Job) (Job, error)
+	UpdateStatus(ctx context.Context, id int64, status string, output map[string]any, errorMessage string) error
+	FindByPublicIDForUser(ctx context.Context, userID int64, publicID string) (Job, error)
+}
+
+type Service struct {
+	repo Repository
+}
+
+func NewService(repo ...Repository) *Service {
+	var selected Repository
+	if len(repo) > 0 {
+		selected = repo[0]
+	}
+	return &Service{repo: selected}
 }
 
 func (s *Service) List() ListJobsResult {
 	return ListJobsResult{Items: []JobSummary{}}
+}
+
+func (s *Service) CreateInitialReportJob(ctx context.Context, userID int64, input map[string]any) (Job, error) {
+	startedAt := time.Now().UTC()
+	item := Job{
+		PublicID:     id.NewPublicID("job"),
+		JobType:      TypeInitialReportGeneration,
+		Status:       StatusRunning,
+		QueueName:    QueueInline,
+		RelatedType:  "onboarding",
+		UserID:       userID,
+		InputSummary: input,
+		StartedAt:    &startedAt,
+	}
+	return s.repo.Create(ctx, item)
+}
+
+func (s *Service) MarkSucceeded(ctx context.Context, item Job, output map[string]any) error {
+	return s.repo.UpdateStatus(ctx, item.ID, StatusSucceeded, output, "")
+}
+
+func (s *Service) MarkFailed(ctx context.Context, item Job, message string) error {
+	return s.repo.UpdateStatus(ctx, item.ID, StatusFailed, nil, message)
+}
+
+func (s *Service) GetForUser(ctx context.Context, userID int64, publicID string) (JobSummary, error) {
+	item, err := s.repo.FindByPublicIDForUser(ctx, userID, publicID)
+	if err != nil {
+		return JobSummary{}, err
+	}
+	return summaryFromJob(item), nil
+}
+
+func summaryFromJob(item Job) JobSummary {
+	return JobSummary{
+		PublicID:      item.PublicID,
+		Type:          item.JobType,
+		Status:        item.Status,
+		OutputSummary: item.OutputSummary,
+		ErrorMessage:  item.ErrorMessage,
+	}
 }

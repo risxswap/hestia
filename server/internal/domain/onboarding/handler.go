@@ -73,6 +73,25 @@ func (h *Handler) Save(c *gin.Context) {
 	response.OK(c, result)
 }
 
+func (h *Handler) Submit(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	result, err := h.service.Submit(c.Request.Context(), user.UserID)
+	if err != nil {
+		if errors.Is(err, ErrValidation) {
+			response.Error(c, http.StatusBadRequest, "onboarding.validation_failed", "请先完成必要的 onboarding 信息")
+			return
+		}
+		h.logger.Error("submit onboarding failed", "error", err, "user_id", user.UserID)
+		response.Error(c, http.StatusInternalServerError, "onboarding.submit_failed", "生成初版报告失败，请稍后再试")
+		return
+	}
+	response.OK(c, result)
+}
+
 func parseDraftData(raw json.RawMessage) (DraftData, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, ValidationError{Field: "data", Message: "required"}

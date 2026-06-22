@@ -10,6 +10,7 @@ import (
 const (
 	DraftStatusDraft      = "draft"
 	DraftStatusNotStarted = "not_started"
+	DraftStatusSubmitted  = "submitted"
 )
 
 type DraftData map[string]json.RawMessage
@@ -98,4 +99,9 @@ type DraftResponse struct {
 	CurrentStep string    `json:"current_step"`
 	Version     int       `json:"version"`
 	DraftData   DraftData `json:"draft_data"`
+}
+
+type SubmitResponse struct {
+	JobPublicID    string `json:"job_public_id"`
+	ReportPublicID string `json:"report_public_id"`
 }

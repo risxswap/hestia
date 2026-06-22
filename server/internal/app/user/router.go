@@ -6,7 +6,10 @@ import (
 	"hestia/server/internal/common/response"
 	"hestia/server/internal/domain/account"
 	"hestia/server/internal/domain/agent"
+	"hestia/server/internal/domain/imageroute"
+	"hestia/server/internal/domain/job"
 	"hestia/server/internal/domain/onboarding"
+	"hestia/server/internal/domain/report"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,6 +28,9 @@ func NewRouter(deps *baseapp.Deps) *gin.Engine {
 		protected.Use(auth.RequireUserSession(auth.NewRedisSessionStore(deps.Redis)))
 	}
 	onboarding.RegisterUserRoutes(protected.Group("/onboarding"), deps)
+	job.RegisterUserRoutes(protected.Group("/jobs"), deps)
+	report.RegisterUserRoutes(protected.Group("/reports"), deps)
+	imageroute.RegisterUserRoutes(protected.Group("/image-routes"), deps)
 	return router
 }
 
