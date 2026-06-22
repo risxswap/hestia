@@ -64,7 +64,7 @@ Onboarding 采用混合式：
 
 ### account
 
-提供最小开发登录能力。第一轮创建或返回测试用户，并颁发开发态 token。后续接入微信登录时替换登录入口和 session 颁发，不改变 onboarding 主流程。
+提供最小开发登录能力。第一轮创建或返回测试用户，并颁发开发态 token。token 对应的会话信息存储在 Redis 中，MySQL 只保存用户账号，不保存登录 session。后续接入微信登录时替换登录入口和 session 颁发，不改变 onboarding 主流程。
 
 ### onboarding
 
@@ -109,6 +109,14 @@ POST /api/user/dev-login
 ```
 
 用途：创建或返回一个测试用户，返回 `user_public_id` 和开发态 token。
+
+开发态 token 写入 Redis，例如：
+
+```text
+hestia:user-session:{token} -> user_id、user_public_id、surface、created_at
+```
+
+第一轮请求通过 `Authorization: Bearer <token>` 鉴权。服务端中间件从 Redis 读取 session，并把 `user_id`、`user_public_id` 放入请求上下文。Redis 中查不到 token 时返回未登录错误。
 
 示例入参：
 
@@ -316,6 +324,7 @@ type ReportGenerator interface {
 ## 数据与隐私约束
 
 - 自拍、身材、衣橱、审美偏好和反馈都按敏感个人数据处理。
+- 用户会话信息只存 Redis，MySQL 不存登录 session。
 - 用户明确事实和 AI 推断必须分表或分类型保存，不能混同。
 - AI 推断必须带置信度、来源和可修正状态。
 - 报告表达避免羞辱式或制造焦虑的措辞。
