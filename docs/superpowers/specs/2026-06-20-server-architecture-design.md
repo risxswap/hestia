@@ -50,7 +50,6 @@ server/
   cmd/
     user-server/
     admin-server/
-    migrate/
   migrations/
   internal/
     app/
@@ -396,21 +395,20 @@ server/
     000001_create_users.down.sql
     000002_create_assets.up.sql
     000002_create_assets.down.sql
-  cmd/
-    migrate/
-      main.go
 ```
+
+迁移执行入口集成到 `admin-server`，不单独保留 `cmd/migrate`。`admin-server` 作为管理侧进程，负责承载运维管理类能力；迁移命令以 CLI 子命令形式提供，不暴露为普通 HTTP API。
 
 本地命令：
 
 ```bash
 cd server
-go run ./cmd/migrate up
-go run ./cmd/migrate down 1
-go run ./cmd/migrate version
+go run ./cmd/admin-server migrate up
+go run ./cmd/admin-server migrate down 1
+go run ./cmd/admin-server migrate version
 ```
 
-`cmd/migrate` 读取和服务端一致的配置，例如 `DATABASE_DSN`。
+迁移命令读取和 `admin-server` 一致的配置，例如 `DATABASE_DSN`。线上环境默认不自动执行迁移，避免服务启动时隐式修改表结构；需要由部署流程或人工运维显式执行 `admin-server migrate` 子命令。
 
 ## 配置与依赖装配
 
@@ -637,7 +635,7 @@ common/
 ```bash
 cd server
 go test ./...
-go run ./cmd/migrate version
+go run ./cmd/admin-server migrate version
 ```
 
 在迁移命令实现前，至少运行：
