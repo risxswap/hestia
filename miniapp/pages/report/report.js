@@ -8,6 +8,7 @@ const fallbackReportData = {
     {
       name: "干净 + 有气质",
       route_role: "local_preview",
+      roleLabel: "本地预览",
       reasonText: "用利落外套、清爽发型和稳定配色先建立可执行的第一版形象路线。"
     }
   ],
@@ -58,12 +59,25 @@ function normalizeRoutes(routes) {
     return {
       name: route.name || `路线 ${index + 1}`,
       route_role: route.route_role || "",
+      roleLabel: normalizeRouteRole(route.route_role),
       reason: reasons,
       reasonText: reasons.join("；"),
       target_impression: impressions,
       impressionText: impressions.join(" / ")
     };
   });
+}
+
+function normalizeRouteRole(role) {
+  const roleMap = {
+    primary: "主路线",
+    scenario: "场景路线",
+    explore: "探索路线",
+    exploration: "探索路线",
+    local_preview: "本地预览"
+  };
+
+  return roleMap[role] || "";
 }
 
 function normalizeReportResponse(report) {
@@ -74,7 +88,7 @@ function normalizeReportResponse(report) {
   const content = report.content_json || {};
 
   return {
-    updatedAt: report.updated_at || report.created_at || fallbackReportData.updatedAt,
+    updatedAt: report.updated_at || report.created_at || "",
     title: report.title || fallbackReportData.title,
     summary: report.summary || fallbackReportData.summary,
     referenceStyleLogic: content.reference_style_logic || "",
@@ -84,7 +98,7 @@ function normalizeReportResponse(report) {
   };
 }
 
-Page({
+const reportPageConfig = {
   data: fallbackReportData,
 
   onLoad() {
@@ -122,11 +136,16 @@ Page({
       }
     });
   }
-});
+};
+
+if (typeof Page === "function") {
+  Page(reportPageConfig);
+}
 
 if (typeof module !== "undefined") {
   module.exports = {
     normalizeReportResponse,
-    fallbackReportData
+    fallbackReportData,
+    reportPageConfig
   };
 }

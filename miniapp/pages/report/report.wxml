@@ -1,6 +1,6 @@
 <view class="page">
   <view class="card report-head">
-    <text class="muted">报告更新时间：{{updatedAt}}</text>
+    <text wx:if="{{updatedAt}}" class="muted">报告更新时间：{{updatedAt}}</text>
     <text class="title">{{title}}</text>
     <text class="summary">{{summary}}</text>
     <button class="primary-button">按这个生成明天搭配</button>
@@ -16,7 +16,7 @@
       <view class="route-item">
         <view class="route-title-row">
           <text class="route-name">{{item.name}}</text>
-          <text class="route-role">{{item.route_role}}</text>
+          <text wx:if="{{item.roleLabel}}" class="route-role">{{item.roleLabel}}</text>
         </view>
         <text wx:if="{{item.impressionText}}" class="muted">目标印象：{{item.impressionText}}</text>
         <text class="route-reason">{{item.reasonText}}</text>
