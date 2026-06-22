@@ -68,7 +68,7 @@ server/
       feedback/
       memory/
       job/
-    infrastructure/
+    infra/
       config/
       mysql/
       redis/
@@ -267,7 +267,7 @@ MySQL `jobs` 表负责业务状态和审计。Asynq 是执行层，`jobs` 是产
 目录：
 
 ```text
-infrastructure/queue/
+infra/queue/
   asynq.go
 
 domain/job/
@@ -347,7 +347,7 @@ database/sql + sqlx
 基础设施：
 
 ```text
-infrastructure/mysql/
+infra/mysql/
   mysql.go
 ```
 
@@ -422,7 +422,7 @@ go run ./cmd/migrate version
 配置目录：
 
 ```text
-infrastructure/config/
+infra/config/
   config.go
 ```
 
@@ -494,7 +494,7 @@ domain/asset
 基础设施：
 
 ```text
-infrastructure/oss
+infra/oss
 ```
 
 上传链路：
@@ -518,7 +518,7 @@ infrastructure/oss
 
 ## LLM 与 Eino 边界
 
-`infrastructure/llm` 只封装底层模型供应商调用：
+`infra/llm` 只封装底层模型供应商调用：
 
 - 请求发送。
 - 超时。
@@ -526,7 +526,7 @@ infrastructure/oss
 - 模型配置。
 - 结构化输出基础能力。
 
-`infrastructure/llm` 不写业务 prompt，不知道 Hestia 的画像、衣橱、建议、记忆语义。
+`infra/llm` 不写业务 prompt，不知道 Hestia 的画像、衣橱、建议、记忆语义。
 
 Eino 属于 `domain/agent`：
 
@@ -549,7 +549,7 @@ log/slog
 基础设施：
 
 ```text
-infrastructure/logger/
+infra/logger/
   logger.go
 ```
 
