@@ -1,16 +1,40 @@
 <view class="page">
   <view class="card report-head">
     <text class="muted">报告更新时间：{{updatedAt}}</text>
-    <text class="title">你的下一步</text>
+    <text class="title">{{title}}</text>
+    <text class="summary">{{summary}}</text>
     <button class="primary-button">按这个生成明天搭配</button>
   </view>
 
+  <view class="card routes" wx:if="{{routes.length}}">
+    <view class="section-head">
+      <text class="section-label">形象路线</text>
+      <text class="section-title">先明确适合你的表达方向</text>
+    </view>
+
+    <block wx:for="{{routes}}" wx:key="name">
+      <view class="route-item">
+        <view class="route-title-row">
+          <text class="route-name">{{item.name}}</text>
+          <text class="route-role">{{item.route_role}}</text>
+        </view>
+        <text wx:if="{{item.impressionText}}" class="muted">目标印象：{{item.impressionText}}</text>
+        <text class="route-reason">{{item.reasonText}}</text>
+      </view>
+    </block>
+  </view>
+
   <view class="card list">
+    <view class="section-head">
+      <text class="section-label">行动项</text>
+      <text class="section-title">下一步先做这些</text>
+    </view>
+
     <block wx:for="{{actionItems}}" wx:key="title">
       <view class="item">
         <text class="item-title">{{index + 1}}. {{item.title}}</text>
-        <text class="muted">{{item.reason}}</text>
-        <text class="avoid">{{item.avoid}}</text>
+        <text wx:if="{{item.reason}}" class="muted">{{item.reason}}</text>
+        <text wx:if="{{item.avoid}}" class="avoid">{{item.avoid}}</text>
       </view>
     </block>
   </view>
