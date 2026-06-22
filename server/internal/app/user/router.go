@@ -2,9 +2,11 @@ package user
 
 import (
 	baseapp "hestia/server/internal/app"
+	"hestia/server/internal/common/auth"
 	"hestia/server/internal/common/response"
 	"hestia/server/internal/domain/account"
 	"hestia/server/internal/domain/agent"
+	"hestia/server/internal/domain/onboarding"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,6 +18,13 @@ func NewRouter(deps *baseapp.Deps) *gin.Engine {
 	api.GET("/health", health)
 	account.RegisterUserRoutes(api, deps)
 	agent.RegisterUserRoutes(api.Group("/agent"), deps)
+	protected := api.Group("")
+	if deps == nil {
+		protected.Use(auth.RequireUserSession(auth.NewRedisSessionStore(nil)))
+	} else {
+		protected.Use(auth.RequireUserSession(auth.NewRedisSessionStore(deps.Redis)))
+	}
+	onboarding.RegisterUserRoutes(protected.Group("/onboarding"), deps)
 	return router
 }
 

@@ -72,6 +72,7 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 		"advice_requests",
 		"advices",
 		"feedbacks",
+		"onboarding_drafts",
 		"memories",
 		"memory_sources",
 		"plans",
@@ -95,6 +96,9 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 		"KEY `idx_advices_user_date_scene` (`user_id`, `advice_date`, `scene_key`, `status`)",
 		"KEY `idx_jobs_status_next_retry` (`status`, `next_retry_at`)",
 		"`content_json` json DEFAULT NULL",
+		"`content_hash` varchar(64) NOT NULL",
+		"`version` int unsigned NOT NULL DEFAULT 1",
+		"`draft_data` json DEFAULT NULL",
 		"`memory_value` json NOT NULL",
 		"ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci",
 	} {

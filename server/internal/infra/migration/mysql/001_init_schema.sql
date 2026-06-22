@@ -488,6 +488,24 @@ CREATE TABLE IF NOT EXISTS `feedbacks` (
   KEY `idx_feedbacks_source_msg` (`source_msg_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS `onboarding_drafts` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(32) NOT NULL,
+  `user_id` bigint unsigned NOT NULL,
+  `status` varchar(32) NOT NULL DEFAULT 'draft',
+  `current_step` varchar(64) DEFAULT NULL,
+  `draft_data` json DEFAULT NULL,
+  `content_hash` varchar(64) NOT NULL,
+  `version` int unsigned NOT NULL DEFAULT 1,
+  `submitted_at` datetime(3) DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_onboarding_drafts_public_id` (`public_id`),
+  KEY `idx_onboarding_drafts_user_status` (`user_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS `memories` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `public_id` varchar(32) NOT NULL,
