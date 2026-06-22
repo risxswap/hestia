@@ -501,8 +501,10 @@ CREATE TABLE IF NOT EXISTS `onboarding_drafts` (
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `deleted_at` datetime(3) DEFAULT NULL,
+  `active_user_id` bigint unsigned GENERATED ALWAYS AS (IF(`deleted_at` IS NULL, `user_id`, NULL)) STORED,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_onboarding_drafts_public_id` (`public_id`),
+  UNIQUE KEY `uk_onboarding_drafts_active_user` (`active_user_id`),
   KEY `idx_onboarding_drafts_user_status` (`user_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

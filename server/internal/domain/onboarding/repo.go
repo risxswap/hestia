@@ -79,7 +79,7 @@ func (r *MySQLDraftRepository) Update(ctx context.Context, draft Draft) (Draft, 
 	if r == nil || r.db == nil {
 		return Draft{}, errors.New("onboarding repository database is nil")
 	}
-	_, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, `
 UPDATE onboarding_drafts
 SET
   current_step = ?,
@@ -93,5 +93,19 @@ WHERE id = ?
 	if err != nil {
 		return Draft{}, err
 	}
+	if err := rowsAffectedError(result); err != nil {
+		return Draft{}, err
+	}
 	return draft, nil
+}
+
+func rowsAffectedError(result sql.Result) error {
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrDraftNotFound
+	}
+	return nil
 }

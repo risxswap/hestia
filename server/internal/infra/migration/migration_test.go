@@ -99,6 +99,8 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 		"`content_hash` varchar(64) NOT NULL",
 		"`version` int unsigned NOT NULL DEFAULT 1",
 		"`draft_data` json DEFAULT NULL",
+		"`active_user_id` bigint unsigned GENERATED ALWAYS AS (IF(`deleted_at` IS NULL, `user_id`, NULL)) STORED",
+		"UNIQUE KEY `uk_onboarding_drafts_active_user` (`active_user_id`)",
 		"`memory_value` json NOT NULL",
 		"ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci",
 	} {

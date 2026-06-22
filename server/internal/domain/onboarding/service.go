@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -125,8 +126,10 @@ func canonicalJSON(data DraftData) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var normalized map[string]any
-	if err := json.Unmarshal(raw, &normalized); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var normalized any
+	if err := decoder.Decode(&normalized); err != nil {
 		return nil, err
 	}
 	return json.Marshal(normalized)
