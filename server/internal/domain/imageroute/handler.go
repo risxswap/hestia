@@ -12,11 +12,11 @@ import (
 )
 
 type Handler struct {
-	service *Service
+	service *FeedbackService
 	logger  *slog.Logger
 }
 
-func NewHandler(service *Service, logger *slog.Logger) *Handler {
+func NewHandler(service *FeedbackService, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -38,6 +38,10 @@ func (h *Handler) ApplyFeedback(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, ErrInvalidFeedbackAction) {
 			response.Error(c, http.StatusBadRequest, "image_route.invalid_feedback_action", "不支持的路线反馈动作")
+			return
+		}
+		if errors.Is(err, ErrInvalidFeedbackReason) {
+			response.Error(c, http.StatusBadRequest, "image_route.invalid_feedback_reason", "反馈原因过长")
 			return
 		}
 		if errors.Is(err, ErrRouteNotFound) {

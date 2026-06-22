@@ -3,6 +3,7 @@ package imageroute_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,6 +43,27 @@ func TestApplyFeedbackLikeActivatesRouteAndWritesEvent(t *testing.T) {
 	}
 }
 
+func TestApplyFeedbackLikeAlreadyActiveRouteWritesEventAgain(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	activatedAt := time.Now().UTC().Add(-time.Hour)
+	repo := newMemoryRouteRepo()
+	repo.add(imageroute.Route{ID: 1, PublicID: "irt_active", UserID: 12, Status: imageroute.StatusActive, ActivatedAt: &activatedAt})
+	router := newAuthenticatedRouter(repo)
+
+	first := postFeedback(t, router, "irt_active", `{"action":"like"}`, http.StatusOK)
+	second := postFeedback(t, router, "irt_active", `{"action":"like"}`, http.StatusOK)
+
+	if first.Status != imageroute.StatusActive || second.Status != imageroute.StatusActive {
+		t.Fatalf("expected repeated like to keep active status, got first=%#v second=%#v", first, second)
+	}
+	if len(repo.events) != 2 {
+		t.Fatalf("expected two feedback events, got %#v", repo.events)
+	}
+	if repo.routes["irt_active"].ActivatedAt == nil || !repo.routes["irt_active"].ActivatedAt.Equal(activatedAt) {
+		t.Fatalf("expected existing activated_at to be preserved, got %#v", repo.routes["irt_active"].ActivatedAt)
+	}
+}
+
 func TestApplyFeedbackDislikeArchivesRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newMemoryRouteRepo()
@@ -75,6 +97,79 @@ func TestApplyFeedbackAdjustMovesRouteToRefinementAndKeepsReason(t *testing.T) {
 	}
 	if event.EventValue["action"] != imageroute.FeedbackActionAdjust || event.EventValue["status"] != imageroute.StatusRefinement {
 		t.Fatalf("expected adjust event value, got %#v", event.EventValue)
+	}
+}
+
+func TestApplyFeedbackTrimsActionAndReason(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newMemoryRouteRepo()
+	repo.add(imageroute.Route{ID: 1, PublicID: "irt_trim", UserID: 12, Status: imageroute.StatusCandidate})
+	router := newAuthenticatedRouter(repo)
+
+	got := postFeedback(t, router, "irt_trim", `{"action":" like ","reason":"  想更利落一点  "}`, http.StatusOK)
+
+	if got.Status != imageroute.StatusActive {
+		t.Fatalf("expected trimmed like action to activate route, got %#v", got)
+	}
+	event := repo.lastEvent(t)
+	if event.EventValue["action"] != imageroute.FeedbackActionLike || event.EventValue["reason"] != "想更利落一点" {
+		t.Fatalf("expected trimmed event value, got %#v", event.EventValue)
+	}
+}
+
+func TestApplyFeedbackRejectsTooLongReason(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newMemoryRouteRepo()
+	repo.add(imageroute.Route{ID: 1, PublicID: "irt_long_reason", UserID: 12, Status: imageroute.StatusCandidate})
+	router := newAuthenticatedRouter(repo)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/user/image-routes/irt_long_reason/feedback", strings.NewReader(`{"action":"adjust","reason":"`+strings.Repeat("很", 501)+`"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "image_route.invalid_feedback_reason" {
+		t.Fatalf("expected invalid feedback reason code, got %q", body.Code)
+	}
+	if repo.routes["irt_long_reason"].Status != imageroute.StatusCandidate {
+		t.Fatalf("expected route status unchanged, got %#v", repo.routes["irt_long_reason"])
+	}
+	if len(repo.events) != 0 {
+		t.Fatalf("expected no event for invalid reason, got %#v", repo.events)
+	}
+}
+
+func TestApplyFeedbackRollsBackStatusWhenEventWriteFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newMemoryRouteRepo()
+	repo.failEventInsert = true
+	repo.add(imageroute.Route{ID: 1, PublicID: "irt_event_fail", UserID: 12, Status: imageroute.StatusCandidate})
+	router := newAuthenticatedRouter(repo)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/user/image-routes/irt_event_fail/feedback", strings.NewReader(`{"action":"like"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if repo.routes["irt_event_fail"].Status != imageroute.StatusCandidate {
+		t.Fatalf("expected route status to roll back, got %#v", repo.routes["irt_event_fail"])
+	}
+	if len(repo.events) != 0 {
+		t.Fatalf("expected no event after failed insert, got %#v", repo.events)
 	}
 }
 
@@ -142,7 +237,7 @@ func newAuthenticatedRouter(repo *memoryRouteRepo) *gin.Engine {
 		})
 		c.Next()
 	})
-	imageroute.RegisterUserRoutesWithService(router.Group("/api/user/image-routes"), imageroute.NewService(repo), nil)
+	imageroute.RegisterUserRoutesWithService(router.Group("/api/user/image-routes"), imageroute.NewFeedbackService(repo), nil)
 	return router
 }
 
@@ -171,8 +266,9 @@ func postFeedback(t *testing.T, router *gin.Engine, routePublicID string, body s
 }
 
 type memoryRouteRepo struct {
-	routes map[string]imageroute.Route
-	events []imageroute.Event
+	routes          map[string]imageroute.Route
+	events          []imageroute.Event
+	failEventInsert bool
 }
 
 func newMemoryRouteRepo() *memoryRouteRepo {
@@ -202,14 +298,21 @@ func (r *memoryRouteRepo) FindByPublicIDForUser(_ context.Context, userID int64,
 }
 
 func (r *memoryRouteRepo) UpdateFeedback(_ context.Context, route imageroute.Route, event imageroute.Event) (imageroute.Route, error) {
-	if _, ok := r.routes[route.PublicID]; !ok {
+	previous, ok := r.routes[route.PublicID]
+	if !ok {
 		return imageroute.Route{}, imageroute.ErrRouteNotFound
 	}
 	if route.Status == imageroute.StatusActive && route.ActivatedAt == nil {
 		now := time.Now().UTC()
 		route.ActivatedAt = &now
 	}
+	previousEvents := append([]imageroute.Event(nil), r.events...)
 	r.routes[route.PublicID] = route
+	if r.failEventInsert {
+		r.routes[route.PublicID] = previous
+		r.events = previousEvents
+		return imageroute.Route{}, errors.New("insert route feedback event failed")
+	}
 	r.events = append(r.events, event)
 	return route, nil
 }

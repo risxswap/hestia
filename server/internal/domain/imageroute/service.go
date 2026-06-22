@@ -3,7 +3,9 @@ package imageroute
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"hestia/server/internal/common/id"
 	"hestia/server/internal/domain/generator"
@@ -24,15 +26,23 @@ const (
 	EventTypeRouteFeedback      = "route_feedback"
 	EventSourceOnboardingReport = "onboarding_report"
 	EventCreatedByUser          = "user"
+
+	MaxFeedbackReasonLength = 500
 )
 
 var (
 	ErrRouteNotFound         = errors.New("image route not found")
 	ErrInvalidFeedbackAction = errors.New("invalid image route feedback action")
+	ErrInvalidFeedbackReason = errors.New("invalid image route feedback reason")
 )
 
-type Repository interface {
+type CreateRepository interface {
 	CreateMany(ctx context.Context, items []Route) ([]Route, error)
+}
+
+type Repository interface {
+	CreateRepository
+	FeedbackRepository
 }
 
 type FeedbackRepository interface {
@@ -41,11 +51,19 @@ type FeedbackRepository interface {
 }
 
 type Service struct {
-	repo Repository
+	repo CreateRepository
 }
 
-func NewService(repo Repository) *Service {
+func NewService(repo CreateRepository) *Service {
 	return &Service{repo: repo}
+}
+
+type FeedbackService struct {
+	repo FeedbackRepository
+}
+
+func NewFeedbackService(repo FeedbackRepository) *FeedbackService {
+	return &FeedbackService{repo: repo}
 }
 
 func (s *Service) CreateFromGenerator(ctx context.Context, userID int64, profileID int64, jobID int64, routes []generator.RouteResult) ([]Route, error) {
@@ -76,16 +94,16 @@ func (s *Service) CreateFromGenerator(ctx context.Context, userID int64, profile
 	return s.repo.CreateMany(ctx, items)
 }
 
-func (s *Service) ApplyFeedback(ctx context.Context, userID int64, routePublicID string, input FeedbackInput) (FeedbackResponse, error) {
+func (s *FeedbackService) ApplyFeedback(ctx context.Context, userID int64, routePublicID string, input FeedbackInput) (FeedbackResponse, error) {
+	input = normalizeFeedbackInput(input)
+	if utf8.RuneCountInString(input.Reason) > MaxFeedbackReasonLength {
+		return FeedbackResponse{}, ErrInvalidFeedbackReason
+	}
 	status, err := statusForFeedbackAction(input.Action)
 	if err != nil {
 		return FeedbackResponse{}, err
 	}
-	repo, ok := s.repo.(FeedbackRepository)
-	if !ok {
-		return FeedbackResponse{}, errors.New("image route feedback repository is unavailable")
-	}
-	route, err := repo.FindByPublicIDForUser(ctx, userID, routePublicID)
+	route, err := s.repo.FindByPublicIDForUser(ctx, userID, routePublicID)
 	if err != nil {
 		return FeedbackResponse{}, err
 	}
@@ -106,7 +124,7 @@ func (s *Service) ApplyFeedback(ctx context.Context, userID int64, routePublicID
 		Source:    EventSourceOnboardingReport,
 		CreatedBy: EventCreatedByUser,
 	}
-	updated, err := repo.UpdateFeedback(ctx, route, event)
+	updated, err := s.repo.UpdateFeedback(ctx, route, event)
 	if err != nil {
 		return FeedbackResponse{}, err
 	}
@@ -114,6 +132,12 @@ func (s *Service) ApplyFeedback(ctx context.Context, userID int64, routePublicID
 		PublicID: updated.PublicID,
 		Status:   updated.Status,
 	}, nil
+}
+
+func normalizeFeedbackInput(input FeedbackInput) FeedbackInput {
+	input.Action = strings.TrimSpace(input.Action)
+	input.Reason = strings.TrimSpace(input.Reason)
+	return input
 }
 
 func statusForFeedbackAction(action string) (string, error) {

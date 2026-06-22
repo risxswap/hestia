@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"hestia/server/internal/common/dbutil"
@@ -127,28 +126,26 @@ func (r *MySQLRepository) UpdateFeedback(ctx context.Context, route Route, event
 }
 
 func (r *MySQLRepository) updateFeedback(ctx context.Context, route Route, event Event) (Route, error) {
-	result, err := r.ext.ExecContext(ctx, `
+	locked, err := r.lockRouteForFeedback(ctx, route.UserID, route.ID)
+	if err != nil {
+		return Route{}, err
+	}
+	route.PublicID = locked.PublicID
+	route.ProfileID = locked.ProfileID
+	if _, err := r.ext.ExecContext(ctx, `
 UPDATE image_routes
 SET status = ?, activated_at = ?
 WHERE id = ?
   AND user_id = ?
   AND deleted_at IS NULL
-`, route.Status, route.ActivatedAt, route.ID, route.UserID)
-	if err != nil {
+`, route.Status, route.ActivatedAt, route.ID, route.UserID); err != nil {
 		return Route{}, err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return Route{}, fmt.Errorf("image route update feedback rows affected: %w", err)
-	}
-	if rows == 0 {
-		return Route{}, ErrRouteNotFound
 	}
 	value, err := jsonText(event.EventValue)
 	if err != nil {
 		return Route{}, err
 	}
-	result, err = r.ext.ExecContext(ctx, `
+	result, err := r.ext.ExecContext(ctx, `
 INSERT INTO image_route_events
   (image_route_id, user_id, event_type, event_value, source, created_by)
 VALUES
@@ -161,6 +158,32 @@ VALUES
 		return Route{}, err
 	}
 	return route, nil
+}
+
+func (r *MySQLRepository) lockRouteForFeedback(ctx context.Context, userID int64, routeID int64) (Route, error) {
+	var row routeRow
+	err := sqlx.GetContext(ctx, r.ext, &row, `
+SELECT
+  id,
+  public_id,
+  user_id,
+  profile_id,
+  status,
+  activated_at
+FROM image_routes
+WHERE id = ?
+  AND user_id = ?
+  AND deleted_at IS NULL
+LIMIT 1
+FOR UPDATE
+`, routeID, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Route{}, ErrRouteNotFound
+	}
+	if err != nil {
+		return Route{}, err
+	}
+	return row.toRoute(), nil
 }
 
 type txStarter interface {

@@ -9,16 +9,16 @@ import (
 )
 
 func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
-	var repo Repository
+	var repo FeedbackRepository
 	var logger *slog.Logger
 	if deps != nil {
 		repo = NewMySQLRepository(deps.DB)
 		logger = deps.Logger
 	}
-	RegisterUserRoutesWithService(group, NewService(repo), logger)
+	RegisterUserRoutesWithService(group, NewFeedbackService(repo), logger)
 }
 
-func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service, logger *slog.Logger) {
+func RegisterUserRoutesWithService(group *gin.RouterGroup, service *FeedbackService, logger *slog.Logger) {
 	handler := NewHandler(service, logger)
 	group.POST("/:public_id/feedback", handler.ApplyFeedback)
 }
