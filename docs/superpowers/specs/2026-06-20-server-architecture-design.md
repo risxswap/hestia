@@ -75,6 +75,7 @@ server/
       oss/
       wechat/
       llm/
+      migration/
       logger/
     common/
       response/
@@ -397,18 +398,23 @@ server/
     000002_create_assets.down.sql
 ```
 
-迁移执行入口集成到 `admin-server`，不单独保留 `cmd/migrate`。`admin-server` 作为管理侧进程，负责承载运维管理类能力；迁移命令以 CLI 子命令形式提供，不暴露为普通 HTTP API。
+迁移执行集成到 `admin-server` 启动流程中，不单独保留 `cmd/migrate`，也不提供 `admin-server migrate` CLI 子命令。迁移代码放在：
 
-本地命令：
-
-```bash
-cd server
-go run ./cmd/admin-server migrate up
-go run ./cmd/admin-server migrate down 1
-go run ./cmd/admin-server migrate version
+```text
+infra/migration/
+  migration.go
 ```
 
-迁移命令读取和 `admin-server` 一致的配置，例如 `DATABASE_DSN`。线上环境默认不自动执行迁移，避免服务启动时隐式修改表结构；需要由部署流程或人工运维显式执行 `admin-server migrate` 子命令。
+`admin-server` 启动顺序：
+
+```text
+加载配置
+→ 连接数据库
+→ 执行 migration up
+→ 迁移成功后启动 HTTP 服务
+```
+
+迁移只自动执行 `up`，不自动执行 `down`。迁移失败时，`admin-server` 启动失败。迁移能力不暴露为普通 HTTP API。后续多实例部署时，`infra/migration` 需要加入迁移锁，避免多个 `admin-server` 实例同时执行迁移。
 
 ## 配置与依赖装配
 
@@ -635,10 +641,9 @@ common/
 ```bash
 cd server
 go test ./...
-go run ./cmd/admin-server migrate version
 ```
 
-在迁移命令实现前，至少运行：
+在真实数据库迁移 runner 实现前，至少运行：
 
 ```bash
 cd server

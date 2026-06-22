@@ -4,7 +4,7 @@
 
 **Goal:** 按服务端架构 spec 搭建第一层可编译、可测试的 Go/Gin 服务端骨架。
 
-**Architecture:** 保留 `user-server` 和 `admin-server` 两个入口，使用 Gin 替换当前 `net/http` mux。业务模块采用轻量 MVC 文件结构，先实现 `agent` 和 `job` 的路由骨架、公共响应/SSE、配置加载、手写 Deps，以及 admin-server 集成的 migrate CLI 子命令入口。
+**Architecture:** 保留 `user-server` 和 `admin-server` 两个入口，使用 Gin 替换当前 `net/http` mux。业务模块采用轻量 MVC 文件结构，先实现 `agent` 和 `job` 的路由骨架、公共响应/SSE、配置加载、手写 Deps，以及 admin-server 启动时调用的 `infra/migration` 迁移骨架。
 
 **Tech Stack:** Go, Gin, sqlx, go-redis, asynq, caarlos0/env, godotenv, slog.
 
@@ -206,31 +206,33 @@ Run: `cd server && go test ./internal/infra/... ./cmd/...`
 
 Expected: PASS.
 
-### Task 5: Admin migrate CLI skeleton and final verification
+### Task 5: Admin startup migration skeleton and final verification
 
 **Files:**
 - Modify: `server/cmd/admin-server/main.go`
-- Create: `server/cmd/admin-server/migrate.go`
-- Test: `server/cmd/admin-server/migrate_test.go`
+- Create: `server/internal/infra/migration/migration.go`
+- Test: `server/internal/infra/migration/migration_test.go`
+- Test: `server/cmd/admin-server/main_test.go`
 
-- [ ] **Step 1: Write failing migrate command tests**
+- [ ] **Step 1: Write failing startup migration tests**
 
-Add tests for CLI parsing:
+Add tests for startup migration:
 
 ```text
-runAdminCommand(["migrate", "version"]) writes a version-oriented message and exits nil.
-runAdminCommand(["migrate", "bad"]) returns an error mentioning unsupported migrate command.
+RunOnStartup calls Runner.Up once.
+RunOnStartup returns Runner.Up errors.
+prepareAdminServer calls migration runner before returning the router.
 ```
 
 - [ ] **Step 2: Run tests to verify red**
 
-Run: `cd server && go test ./cmd/admin-server`
+Run: `cd server && go test ./internal/infra/migration ./cmd/admin-server`
 
-Expected: FAIL because migrate command helper does not exist.
+Expected: FAIL because migration package and prepare helper do not exist.
 
-- [ ] **Step 3: Implement migrate command skeleton**
+- [ ] **Step 3: Implement startup migration skeleton**
 
-Implement `runAdminCommand(args []string, out io.Writer) error` and `runMigrateCommand(args []string, out io.Writer) error`. Keep it as a CLI skeleton; do not expose migrate over HTTP.
+Implement `infra/migration.RunOnStartup`, a `Runner` interface, a no-op runner for the first skeleton pass, and admin-server startup wiring. Do not expose migration over HTTP and do not keep a `cmd/admin-server/migrate.go` CLI helper.
 
 - [ ] **Step 4: Run full verification**
 
@@ -247,6 +249,6 @@ Expected: PASS.
 
 ## Self-Review
 
-- Spec coverage: covers Gin app routers, `/api/user` and `/api/admin` surfaces, response/SSE, domain route registration, `infra` config/logger, and admin-server migrate CLI skeleton.
+- Spec coverage: covers Gin app routers, `/api/user` and `/api/admin` surfaces, response/SSE, domain route registration, `infra` config/logger, and admin-server startup migration skeleton.
 - Intentional gaps: real MySQL/sqlx repositories, Redis/asynq worker execution, Qiniu, WeChat login, LLM/Eino runtime, and database migration execution are not implemented in this first skeleton pass.
 - Placeholder scan: no task depends on an undefined business implementation; skeleton methods return deterministic placeholder responses where necessary.
