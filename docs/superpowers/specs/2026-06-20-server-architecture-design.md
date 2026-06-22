@@ -36,7 +36,7 @@ Hestia 是个人 AI 形象顾问 Agent，第一版以微信小程序为主入口
 - 使用 Go 生态迁移工具管理数据库迁移。
 - 使用 Eino 实现智能体编排。
 - `agent` 是一等业务模块，对外暴露智能交互 API。
-- 每个业务模块自己暴露 `RegisterRoutes`，由 `app/user` 和 `app/admin` 统一装配。
+- 每个业务模块按对外服务面暴露用户侧或管理侧路由，由 `app/user` 和 `app/admin` 统一装配。
 - 不做 DDD，不做微服务拆分，不做与 MVP 无关的复杂抽象。
 - 关键用户信息必须结构化落库，不能只依赖聊天上下文。
 - 用户自拍、衣橱、偏好、反馈和记忆都按敏感数据处理。
@@ -123,17 +123,18 @@ domain/advice/
 - `model.go`：数据库模型、请求响应结构、模块内值对象。
 - `repo.go`：SQL 查询和持久化。
 
-每个模块暴露：
+每个模块按实际需要暴露用户侧或管理侧路由：
 
 ```go
-func RegisterRoutes(group *gin.RouterGroup, deps *Deps)
+func RegisterUserRoutes(group *gin.RouterGroup, deps *Deps)
+func RegisterAdminRoutes(group *gin.RouterGroup, deps *Deps)
 ```
 
-`app/user` 和 `app/admin` 根据服务边界选择注册哪些模块。
+不是每个模块都必须同时实现两类路由。`agent`、`profile`、`wardrobe`、`report`、`advice`、`feedback`、`memory` 主要面向用户侧；`stylelib`、`job`、运营配置主要面向管理侧。`app/user` 和 `app/admin` 根据服务边界选择注册哪些模块。
 
 ## Agent 模块
 
-`agent` 是智能体业务模块，不是隐藏在基础设施里的工具。小程序的主要智能交互统一进入 `agent`。
+`agent` 是智能体业务模块，不是隐藏在基础设施里的工具。用户侧的主要智能交互统一进入 `agent`，其中小程序是第一版主体验入口。
 
 `agent` 覆盖：
 
@@ -185,8 +186,7 @@ agent 可以调用其他领域模块 service。
 用户侧 API：
 
 ```text
-/api/miniapp/*    微信小程序
-/api/user/*       用户 Web
+/api/user/*       微信小程序和用户 Web
 ```
 
 管理端 API：
@@ -195,12 +195,14 @@ agent 可以调用其他领域模块 service。
 /api/admin/*
 ```
 
+小程序和用户 Web 都属于终端用户侧，权限模型相同，都使用终端用户 session。两端差异主要来自客户端能力和展示 DTO，例如小程序承载完整 Agent 交互，用户 Web 更偏报告复盘、历史建议、轻反馈和分享访问；这些差异不通过额外的服务端权限面拆分。
+
 ### Agent SSE 主入口
 
-小程序智能交互主入口：
+用户侧智能交互主入口：
 
 ```text
-POST /api/miniapp/agent/stream
+POST /api/user/agent/stream
 Accept: text/event-stream
 ```
 
@@ -245,15 +247,15 @@ SSE 只负责实时体验。最终状态仍然落到：
 普通查询、反馈和修正不走 Agent 主入口：
 
 ```text
-GET    /api/miniapp/reports/:id
-GET    /api/miniapp/advices/:id
-POST   /api/miniapp/advices/:id/feedback
-GET    /api/miniapp/memories
-DELETE /api/miniapp/memories/:id
-PATCH  /api/miniapp/profile/facts/:id
-PATCH  /api/miniapp/profile/inferences/:id
-GET    /api/miniapp/wardrobe/items
-POST   /api/miniapp/wardrobe/items
+GET    /api/user/reports/:id
+GET    /api/user/advices/:id
+POST   /api/user/advices/:id/feedback
+GET    /api/user/memories
+DELETE /api/user/memories/:id
+PATCH  /api/user/profile/facts/:id
+PATCH  /api/user/profile/inferences/:id
+GET    /api/user/wardrobe/items
+POST   /api/user/wardrobe/items
 ```
 
 这些 API 用于报告查看、建议查看、反馈提交、记忆删除、画像修正和核心衣橱管理。
@@ -653,7 +655,7 @@ go test ./...
 - `user-server` 支持小程序、用户 Web 和 Agent SSE。
 - `admin-server` 只服务管理端。
 - 业务模块采用轻量 MVC 文件结构。
-- 各模块自己暴露 `RegisterRoutes`，由 app 统一装配。
+- 各模块按服务面暴露 `RegisterUserRoutes` 或 `RegisterAdminRoutes`，由 app 统一装配。
 - `agent` 是一等业务模块，并作为智能交互主入口。
 - 其他领域模块不反向调用 `agent`。
 - SSE 用于 Agent 实时体验，最终结果结构化落库。
