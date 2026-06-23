@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"hestia/server/internal/common/auth"
+	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/domain/imageroute"
 
 	"github.com/gin-gonic/gin"
@@ -222,12 +223,49 @@ func TestApplyFeedbackReturnsNotFoundForOtherUserRoute(t *testing.T) {
 	}
 }
 
+func TestApplyFeedbackReturnsConflictWhenBusinessLockIsBusy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newMemoryRouteRepo()
+	repo.add(imageroute.Route{ID: 1, PublicID: "irt_busy", UserID: 12, Status: imageroute.StatusCandidate})
+	locker := &memoryRouteLock{busy: true}
+	router := newAuthenticatedRouterWithService(imageroute.NewFeedbackServiceWithLocker(repo, locker))
+
+	request := httptest.NewRequest(http.MethodPost, "/api/user/image-routes/irt_busy/feedback", strings.NewReader(`{"action":"like"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "image_route.feedback_busy" {
+		t.Fatalf("expected feedback busy code, got %q", body.Code)
+	}
+	if locker.lastKey != "hestia:lock:image-route-feedback:irt_busy" {
+		t.Fatalf("expected feedback lock key, got %q", locker.lastKey)
+	}
+	if len(repo.events) != 0 {
+		t.Fatalf("expected no event when lock is busy, got %#v", repo.events)
+	}
+}
+
 type feedbackResponse struct {
 	PublicID string `json:"public_id"`
 	Status   string `json:"status"`
 }
 
 func newAuthenticatedRouter(repo *memoryRouteRepo) *gin.Engine {
+	return newAuthenticatedRouterWithService(imageroute.NewFeedbackService(repo))
+}
+
+func newAuthenticatedRouterWithService(service *imageroute.FeedbackService) *gin.Engine {
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		auth.SetUserContext(c, auth.User{
@@ -237,7 +275,7 @@ func newAuthenticatedRouter(repo *memoryRouteRepo) *gin.Engine {
 		})
 		c.Next()
 	})
-	imageroute.RegisterUserRoutesWithService(router.Group("/api/user/image-routes"), imageroute.NewFeedbackService(repo), nil)
+	imageroute.RegisterUserRoutesWithService(router.Group("/api/user/image-routes"), service, nil)
 	return router
 }
 
@@ -323,4 +361,17 @@ func (r *memoryRouteRepo) lastEvent(t *testing.T) imageroute.Event {
 		t.Fatal("expected event to be written")
 	}
 	return r.events[len(r.events)-1]
+}
+
+type memoryRouteLock struct {
+	busy    bool
+	lastKey string
+}
+
+func (l *memoryRouteLock) WithLock(ctx context.Context, key string, _ time.Duration, fn func(context.Context) error) error {
+	l.lastKey = key
+	if l.busy {
+		return businesslock.ErrBusy
+	}
+	return fn(ctx)
 }

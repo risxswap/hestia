@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"hestia/server/internal/common/id"
+	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/domain/generator"
 )
 
@@ -28,6 +29,8 @@ const (
 	EventCreatedByUser          = "user"
 
 	MaxFeedbackReasonLength = 500
+
+	feedbackBusinessLockTTL = 30 * time.Second
 )
 
 var (
@@ -59,11 +62,19 @@ func NewService(repo CreateRepository) *Service {
 }
 
 type FeedbackService struct {
-	repo FeedbackRepository
+	repo   FeedbackRepository
+	locker businesslock.Locker
 }
 
 func NewFeedbackService(repo FeedbackRepository) *FeedbackService {
-	return &FeedbackService{repo: repo}
+	return NewFeedbackServiceWithLocker(repo, businesslock.NoopLocker{})
+}
+
+func NewFeedbackServiceWithLocker(repo FeedbackRepository, locker businesslock.Locker) *FeedbackService {
+	if locker == nil {
+		locker = businesslock.NoopLocker{}
+	}
+	return &FeedbackService{repo: repo, locker: locker}
 }
 
 func (s *Service) CreateFromGenerator(ctx context.Context, userID int64, profileID int64, jobID int64, routes []generator.RouteResult) ([]Route, error) {
@@ -103,6 +114,22 @@ func (s *FeedbackService) ApplyFeedback(ctx context.Context, userID int64, route
 	if err != nil {
 		return FeedbackResponse{}, err
 	}
+	var response FeedbackResponse
+	err = s.locker.WithLock(ctx, feedbackBusinessLockKey(routePublicID), feedbackBusinessLockTTL, func(lockCtx context.Context) error {
+		result, err := s.applyFeedbackUnlocked(lockCtx, userID, routePublicID, input, status)
+		if err != nil {
+			return err
+		}
+		response = result
+		return nil
+	})
+	if err != nil {
+		return FeedbackResponse{}, err
+	}
+	return response, nil
+}
+
+func (s *FeedbackService) applyFeedbackUnlocked(ctx context.Context, userID int64, routePublicID string, input FeedbackInput, status string) (FeedbackResponse, error) {
 	route, err := s.repo.FindByPublicIDForUser(ctx, userID, routePublicID)
 	if err != nil {
 		return FeedbackResponse{}, err
@@ -132,6 +159,10 @@ func (s *FeedbackService) ApplyFeedback(ctx context.Context, userID int64, route
 		PublicID: updated.PublicID,
 		Status:   updated.Status,
 	}, nil
+}
+
+func feedbackBusinessLockKey(routePublicID string) string {
+	return "hestia:lock:image-route-feedback:" + routePublicID
 }
 
 func normalizeFeedbackInput(input FeedbackInput) FeedbackInput {

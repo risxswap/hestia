@@ -3,6 +3,7 @@ package onboarding
 import (
 	"context"
 
+	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/domain/asset"
 	"hestia/server/internal/domain/generator"
 	"hestia/server/internal/domain/imageroute"
@@ -55,5 +56,6 @@ func NewMySQLSubmitDependencies(ext sqlx.ExtContext, generator generator.ReportG
 		Reports:     report.NewService(report.NewMySQLRepositoryWithExt(ext)),
 		ImageRoutes: imageroute.NewService(imageroute.NewMySQLRepositoryWithExt(ext)),
 		Generator:   generator,
+		Locker:      businesslock.NoopLocker{},
 	}
 }

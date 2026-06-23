@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"hestia/server/internal/common/auth"
+	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/domain/asset"
 	"hestia/server/internal/domain/generator"
 	"hestia/server/internal/domain/imageroute"
@@ -300,6 +302,41 @@ func TestSubmitOnboardingRunsGeneratorOutsideTransaction(t *testing.T) {
 	}
 }
 
+func TestSubmitOnboardingReturnsConflictWhenBusinessLockIsBusy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	env := newSubmitTestEnv(generator.NewRuleReportGenerator())
+	env.lock.busy = true
+
+	putJSON(t, env.router, `{
+		"step": "wardrobe",
+		"data": {
+			"basic": {"gender":"female","height_cm":168},
+			"style_goal": {"goals": ["干净利落"]},
+			"wardrobe": {"items": [{"name":"米白衬衫","category":"top"}]}
+		}
+	}`, http.StatusOK)
+
+	submitOnboarding(t, env.router, http.StatusConflict)
+
+	if env.lock.lastKey != "hestia:lock:onboarding-submit:12" {
+		t.Fatalf("expected user submit lock key, got %q", env.lock.lastKey)
+	}
+	if len(env.jobs.byID) != 0 {
+		t.Fatalf("expected no jobs when lock is busy, got %#v", env.jobs.byID)
+	}
+	if env.transactor.commits != 0 || env.transactor.rollbacks != 0 {
+		t.Fatalf("expected no transaction when lock is busy, got commits=%d rollbacks=%d", env.transactor.commits, env.transactor.rollbacks)
+	}
+}
+
+func TestSubmitOnboardingUsesNoopBusinessLockWhenDependencyFactoryHasNoRedis(t *testing.T) {
+	deps := onboarding.NewMySQLSubmitDependencies(nil, generator.NewRuleReportGenerator())
+
+	if deps.Locker == nil {
+		t.Fatal("expected submit dependency factory to provide a fallback locker")
+	}
+}
+
 func TestSubmitOnboardingRegistersPublicIDAndClientRefAssets(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	env := newSubmitTestEnv(generator.NewRuleReportGenerator())
@@ -463,6 +500,7 @@ type submitTestEnv struct {
 	wardrobes  *memoryWardrobeRepo
 	reports    *memoryReportRepo
 	transactor *memoryTransactor
+	lock       *memoryBusinessLock
 }
 
 func newSubmitTestEnv(reportGenerator generator.ReportGenerator) submitTestEnv {
@@ -483,6 +521,7 @@ func newSubmitTestEnv(reportGenerator generator.ReportGenerator) submitTestEnv {
 	jobs := newMemoryJobRepo()
 	reports := newMemoryReportRepo()
 	routes := newMemoryImageRouteRepo()
+	locker := &memoryBusinessLock{}
 
 	profileService := profile.NewService(profiles)
 	assetService := asset.NewService(assets)
@@ -519,11 +558,12 @@ func newSubmitTestEnv(reportGenerator generator.ReportGenerator) submitTestEnv {
 		ImageRoutes: routeService,
 		Generator:   reportGenerator,
 		Transactor:  transactor,
+		Locker:      locker,
 	})
 	onboarding.RegisterRoutes(router.Group("/api/user/onboarding"), onboarding.NewHandler(onboardingService, nil))
 	report.RegisterUserRoutesWithService(router.Group("/api/user/reports"), reportService, nil)
 	job.RegisterUserRoutesWithService(router.Group("/api/user/jobs"), jobService, nil)
-	return submitTestEnv{router: router, jobs: jobs, assets: assets, profiles: profiles, wardrobes: wardrobes, reports: reports, transactor: transactor}
+	return submitTestEnv{router: router, jobs: jobs, assets: assets, profiles: profiles, wardrobes: wardrobes, reports: reports, transactor: transactor, lock: locker}
 }
 
 func putJSON(t *testing.T, router *gin.Engine, body string, expectedStatus int) {
@@ -889,6 +929,19 @@ type memoryTransactor struct {
 	commits   int
 	rollbacks int
 	active    bool
+}
+
+type memoryBusinessLock struct {
+	busy    bool
+	lastKey string
+}
+
+func (l *memoryBusinessLock) WithLock(ctx context.Context, key string, _ time.Duration, fn func(context.Context) error) error {
+	l.lastKey = key
+	if l.busy {
+		return businesslock.ErrBusy
+	}
+	return fn(ctx)
 }
 
 func (t *memoryTransactor) WithinTx(ctx context.Context, fn func(ctx context.Context, deps onboarding.SubmitDependencies) error) error {

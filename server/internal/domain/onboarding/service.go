@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"hestia/server/internal/common/id"
+	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/domain/asset"
 	"hestia/server/internal/domain/generator"
 	"hestia/server/internal/domain/imageroute"
@@ -21,6 +23,8 @@ import (
 )
 
 var ErrValidation = errors.New("onboarding validation failed")
+
+const submitBusinessLockTTL = 2 * time.Minute
 
 type ValidationError struct {
 	Field   string
@@ -54,6 +58,7 @@ type SubmitDependencies struct {
 	ImageRoutes *imageroute.Service
 	Generator   generator.ReportGenerator
 	Transactor  Transactor
+	Locker      businesslock.Locker
 }
 
 type Transactor interface {
@@ -148,6 +153,22 @@ func (s *Service) Submit(ctx context.Context, userID int64) (SubmitResponse, err
 	if err := s.submit.validate(); err != nil {
 		return SubmitResponse{}, err
 	}
+	var response SubmitResponse
+	err := s.submit.Locker.WithLock(ctx, submitBusinessLockKey(userID), submitBusinessLockTTL, func(lockCtx context.Context) error {
+		result, err := s.submitUnlocked(lockCtx, userID)
+		if err != nil {
+			return err
+		}
+		response = result
+		return nil
+	})
+	if err != nil {
+		return SubmitResponse{}, err
+	}
+	return response, nil
+}
+
+func (s *Service) submitUnlocked(ctx context.Context, userID int64) (SubmitResponse, error) {
 	draft, err := s.repo.FindActiveByUserID(ctx, userID)
 	if errors.Is(err, ErrDraftNotFound) {
 		return SubmitResponse{}, ValidationError{Field: "draft", Message: "required"}
@@ -309,7 +330,7 @@ func (s *Service) recordFailedJob(ctx context.Context, userID int64, draft Draft
 }
 
 func (d SubmitDependencies) validate() error {
-	if d.Profiles == nil || d.Assets == nil || d.Wardrobe == nil || d.Jobs == nil || d.Reports == nil || d.ImageRoutes == nil || d.Generator == nil || d.Transactor == nil {
+	if d.Profiles == nil || d.Assets == nil || d.Wardrobe == nil || d.Jobs == nil || d.Reports == nil || d.ImageRoutes == nil || d.Generator == nil || d.Transactor == nil || d.Locker == nil {
 		return errors.New("onboarding submit dependencies are nil")
 	}
 	return nil
@@ -329,6 +350,10 @@ func hashDraftData(data DraftData) (string, error) {
 	}
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func submitBusinessLockKey(userID int64) string {
+	return fmt.Sprintf("hestia:lock:onboarding-submit:%d", userID)
 }
 
 func canonicalJSON(data DraftData) ([]byte, error) {

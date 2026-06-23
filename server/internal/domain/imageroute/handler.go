@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"hestia/server/internal/common/auth"
+	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/common/response"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,10 @@ func (h *Handler) ApplyFeedback(c *gin.Context) {
 	}
 	result, err := h.service.ApplyFeedback(c.Request.Context(), user.UserID, c.Param("public_id"), input)
 	if err != nil {
+		if errors.Is(err, businesslock.ErrBusy) {
+			response.Error(c, http.StatusConflict, "image_route.feedback_busy", "路线反馈正在处理中，请稍后再试")
+			return
+		}
 		if errors.Is(err, ErrInvalidFeedbackAction) {
 			response.Error(c, http.StatusBadRequest, "image_route.invalid_feedback_action", "不支持的路线反馈动作")
 			return

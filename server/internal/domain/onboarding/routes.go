@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	baseapp "hestia/server/internal/app"
+	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/domain/generator"
 
 	"github.com/gin-gonic/gin"
@@ -25,6 +26,7 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 		reportGenerator := generator.NewRuleReportGenerator()
 		submitDeps := NewMySQLSubmitDependencies(deps.DB, reportGenerator)
 		submitDeps.Transactor = NewMySQLTransactor(deps.DB, reportGenerator)
+		submitDeps.Locker = businesslock.NewRedisLocker(deps.Redis)
 		service = NewSubmitService(repo, submitDeps)
 	}
 	RegisterRoutes(group, NewHandler(service, logger))

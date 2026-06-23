@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"hestia/server/internal/common/auth"
+	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/common/response"
 
 	"github.com/gin-gonic/gin"
@@ -81,6 +82,10 @@ func (h *Handler) Submit(c *gin.Context) {
 	}
 	result, err := h.service.Submit(c.Request.Context(), user.UserID)
 	if err != nil {
+		if errors.Is(err, businesslock.ErrBusy) {
+			response.Error(c, http.StatusConflict, "onboarding.submit_busy", "初版报告正在生成中，请稍后再试")
+			return
+		}
 		if errors.Is(err, ErrValidation) {
 			response.Error(c, http.StatusBadRequest, "onboarding.validation_failed", "请先完成必要的 onboarding 信息")
 			return
