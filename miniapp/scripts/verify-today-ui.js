@@ -2,103 +2,76 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
+const homePath = path.join(root, "pages/home/home.js");
+const apiPath = path.join(root, "utils/api.js");
 
 function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
 }
 
-function assertIncludes(file, content, expected) {
-  if (!content.includes(expected)) {
-    throw new Error(`${file} should include ${expected}`);
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
   }
 }
 
-const appJson = JSON.parse(read("app.json"));
-const mockSource = read("utils/mock.js");
-const homeJs = read("pages/home/home.js");
+const homeSource = read("pages/home/home.js");
 const homeWxml = read("pages/home/home.wxml");
 const homeWxss = read("pages/home/home.wxss");
-const mock = require(path.join(root, "utils/mock.js"));
+const appJson = JSON.parse(read("app.json"));
 
-let homePageConfig;
-const originalPage = global.Page;
-global.Page = (config) => {
-  homePageConfig = config;
-};
-require(path.join(root, "pages/home/home.js"));
-global.Page = originalPage;
+assert(homeSource.includes("../../utils/api"), "home page should import shared api client");
+assert(!homeSource.includes("utils/mock"), "home page should not import mock data");
+assert(homeWxml.includes("{{!hasReport}}"), "home page should render empty report state");
+assert(homeWxml.includes("data-action=\"{{item.action}}\""), "home page should send feedback action");
+assert(homeWxss.includes("today-visual"), "home page should keep today visual layout");
 
 const firstTab = appJson.tabBar && appJson.tabBar.list && appJson.tabBar.list[0];
+assert(firstTab && firstTab.text === "今日", "first tab should be 今日");
+assert(firstTab.pagePath === "pages/home/home", "first tab should point to pages/home/home");
 
-if (!firstTab) {
-  throw new Error("app.json should define a first tab");
-}
+let pageConfig;
+const originalPage = global.Page;
+global.Page = (config) => {
+  pageConfig = config;
+};
+require.cache[require.resolve(apiPath)] = {
+  id: apiPath,
+  filename: apiPath,
+  loaded: true,
+  exports: {}
+};
+delete require.cache[require.resolve(homePath)];
+const homeModule = require(homePath);
+global.Page = originalPage;
+delete require.cache[require.resolve(apiPath)];
 
-if (firstTab.text !== "今日") {
-  throw new Error(`first tab should be 今日, got ${firstTab.text}`);
-}
+assert(pageConfig, "home.js should register a Page config");
+assert(typeof pageConfig.loadToday === "function", "home page should define loadToday");
+assert(typeof pageConfig.handlePrimaryAction === "function", "home page should define handlePrimaryAction");
+assert(typeof homeModule.normalizeTodayFromReport === "function", "home.js should export normalizeTodayFromReport");
 
-if (firstTab.pagePath !== "pages/home/home") {
-  throw new Error(`first tab should point to pages/home/home, got ${firstTab.pagePath}`);
-}
-
-assertIncludes("utils/mock.js", mockSource, "todayRecommendation");
-assertIncludes("utils/mock.js", mockSource, "todayPlanSections");
-assertIncludes("utils/mock.js", mockSource, "feedbackOptions");
-assertIncludes("utils/mock.js", mockSource, "今日推荐");
-assertIncludes("utils/mock.js", mockSource, "照这个穿");
-assertIncludes("utils/mock.js", mockSource, "换个场景");
-assertIncludes("pages/home/home.js", homeJs, "todayRecommendation");
-assertIncludes("pages/home/home.js", homeJs, "todayPlanSections");
-assertIncludes("pages/home/home.js", homeJs, "feedbackOptions");
-assertIncludes("pages/home/home.js", homeJs, "handlePrimaryAction");
-assertIncludes("pages/home/home.js", homeJs, "handleSceneChange");
-assertIncludes("pages/home/home.js", homeJs, "handleFeedback");
-assertIncludes("pages/home/home.wxml", homeWxml, "{{todayRecommendation.label}}");
-assertIncludes("pages/home/home.wxml", homeWxml, "{{todayRecommendation.primaryAction}}");
-assertIncludes("pages/home/home.wxml", homeWxml, "{{todayRecommendation.secondaryAction}}");
-assertIncludes("pages/home/home.wxml", homeWxml, "为什么适合今天");
-assertIncludes("pages/home/home.wxml", homeWxml, "wx:for=\"{{todayPlanSections}}\"");
-assertIncludes("pages/home/home.wxml", homeWxml, "wx:for=\"{{feedbackOptions}}\"");
-assertIncludes("pages/home/home.wxml", homeWxml, "bind:tap=\"handleFeedback\"");
-assertIncludes("pages/home/home.wxml", homeWxml, "bind:tap=\"handlePrimaryAction\"");
-assertIncludes("pages/home/home.wxml", homeWxml, "bind:tap=\"handleSceneChange\"");
-assertIncludes("pages/home/home.wxss", homeWxss, "#245d4f");
-assertIncludes("pages/home/home.wxss", homeWxss, "today-visual");
-assertIncludes("pages/home/home.wxss", homeWxss, "feedback-chip");
-
-if (!mock.todayRecommendation || mock.todayRecommendation.label !== "今日推荐") {
-  throw new Error("mock should export todayRecommendation with label 今日推荐");
-}
-
-if (!Array.isArray(mock.todayPlanSections) || mock.todayPlanSections.length < 4) {
-  throw new Error("mock should export at least four todayPlanSections");
-}
-
-if (!Array.isArray(mock.feedbackOptions) || !mock.feedbackOptions.includes("我实际这样穿了")) {
-  throw new Error("mock should export feedbackOptions with real-world feedback");
-}
-
-if (!homePageConfig) {
-  throw new Error("home.js should register a Page config");
-}
-
-if (homePageConfig.data.todayRecommendation !== mock.todayRecommendation) {
-  throw new Error("home page data should use exported todayRecommendation");
-}
-
-if (homePageConfig.data.todayPlanSections !== mock.todayPlanSections) {
-  throw new Error("home page data should use exported todayPlanSections");
-}
-
-if (homePageConfig.data.feedbackOptions !== mock.feedbackOptions) {
-  throw new Error("home page data should use exported feedbackOptions");
-}
-
-["handlePrimaryAction", "handleSceneChange", "handleFeedback"].forEach((handlerName) => {
-  if (typeof homePageConfig[handlerName] !== "function") {
-    throw new Error(`home page should define ${handlerName}`);
-  }
+const normalized = homeModule.normalizeTodayFromReport({
+  title: "初版个人形象报告",
+  summary: "稳定第一印象。",
+  content_json: {
+    action_items: ["固定一套通勤模板"],
+    wardrobe_gaps: ["浅色短外套"]
+  },
+  routes: [
+    {
+      public_id: "irt_test",
+      name: "干净 + 有气质",
+      route_role: "primary",
+      target_impression: ["干净"],
+      reason: ["适合通勤和见客户"]
+    }
+  ]
 });
+
+assert(normalized.hasReport, "normalized today data should mark report as available");
+assert(normalized.routePublicID === "irt_test", "normalized today data should keep route public id");
+assert(normalized.todayRecommendation.title === "干净 + 有气质", "today title should come from server route");
+assert(normalized.todayPlanSections.length >= 2, "today plan should include server-derived sections");
 
 console.log("today ui verification passed");

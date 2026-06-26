@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"hestia/server/internal/infra/config"
+	"hestia/server/internal/infra/migration"
 )
 
 func TestNewDepsIncludesDBWhenDatabaseDSNIsConfigured(t *testing.T) {
@@ -39,5 +40,11 @@ func TestNewDepsAllowsEmptyDatabaseDSN(t *testing.T) {
 	}
 	if deps.DB != nil {
 		t.Fatalf("expected nil db, got %#v", deps.DB)
+	}
+}
+
+func TestNewServerMigrationRunnerUsesMySQLRunner(t *testing.T) {
+	if _, ok := newServerMigrationRunner().(migration.MySQLRunner); !ok {
+		t.Fatalf("expected server startup to use MySQL migration runner")
 	}
 }

@@ -1,9 +1,20 @@
 <view class="page">
+  <view wx:if="{{loading}}" class="card state-card">
+    <text class="muted">正在读取你的报告...</text>
+  </view>
+
+  <view wx:elif="{{errorMessage}}" class="card state-card">
+    <text class="title">{{empty ? "还没有初版报告" : "报告读取失败"}}</text>
+    <text class="summary">{{empty ? "完成 onboarding 后，这里会展示服务端生成的初版个人形象报告。" : errorMessage}}</text>
+    <button class="primary-button" bind:tap="loadLatestReport">{{empty ? "刷新报告" : "重新读取"}}</button>
+  </view>
+
+  <block wx:else>
   <view class="card report-head">
     <text wx:if="{{updatedAt}}" class="muted">报告更新时间：{{updatedAt}}</text>
     <text class="title">{{title}}</text>
     <text class="summary">{{summary}}</text>
-    <button class="primary-button">按这个生成明天搭配</button>
+    <text wx:if="{{referenceStyleLogic}}" class="muted">{{referenceStyleLogic}}</text>
   </view>
 
   <view class="card routes" wx:if="{{routes.length}}">
@@ -38,4 +49,5 @@
       </view>
     </block>
   </view>
+  </block>
 </view>

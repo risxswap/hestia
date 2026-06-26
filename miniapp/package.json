@@ -4,7 +4,12 @@
   "version": "0.1.0",
   "scripts": {
     "build:npm": "echo \"请在微信开发者工具中执行：工具 -> 构建 npm\"",
+    "patch:tdesign-icon-font": "node scripts/patch-tdesign-icon-font.js",
+    "postinstall": "node scripts/patch-tdesign-icon-font.js",
+    "verify:api-client": "node scripts/verify-api-client.js",
+    "verify:api-integration": "node scripts/verify-miniapp-api-integration.js",
     "verify:report-page": "node scripts/verify-report-page.js",
+    "verify:tdesign-icon-font": "node scripts/verify-tdesign-icon-font.js",
     "verify:today-ui": "node scripts/verify-today-ui.js"
   },
   "dependencies": {

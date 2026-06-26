@@ -2,6 +2,9 @@
   <view class="card block">
     <text class="title">我的</text>
     <text class="muted">管理偏好、反馈和数据删除请求。</text>
+    <text wx:if="{{loading}}" class="muted">正在读取登录状态...</text>
+    <text wx:elif="{{errorMessage}}" class="muted">{{errorMessage}}</text>
+    <text wx:elif="{{tokenReady}}" class="muted">用户：{{userPublicID}} · onboarding：{{onboardingStatus || "未知"}}</text>
   </view>
   <view class="card menu">
     <block wx:for="{{items}}" wx:key="*this">

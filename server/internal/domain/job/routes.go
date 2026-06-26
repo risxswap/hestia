@@ -8,11 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterAdminRoutes(group *gin.RouterGroup, _ *baseapp.Deps) {
-	handler := NewHandler(NewService())
-	group.GET("", handler.List)
-}
-
 func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 	var repo Repository
 	if deps != nil {

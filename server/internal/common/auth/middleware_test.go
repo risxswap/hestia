@@ -96,7 +96,7 @@ func TestRequireUserSessionRejectsNonUserSurface(t *testing.T) {
 		session: auth.Session{
 			UserID:       12,
 			UserPublicID: "usr_test",
-			Surface:      "admin",
+			Surface:      "other",
 			CreatedAt:    time.Now(),
 		},
 	}
@@ -104,7 +104,7 @@ func TestRequireUserSessionRejectsNonUserSurface(t *testing.T) {
 		c.Status(http.StatusNoContent)
 	})
 	request := httptest.NewRequest(http.MethodGet, "/me", nil)
-	request.Header.Set("Authorization", "Bearer admin_token")
+	request.Header.Set("Authorization", "Bearer other_token")
 	recorder := httptest.NewRecorder()
 
 	router.ServeHTTP(recorder, request)

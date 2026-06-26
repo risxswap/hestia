@@ -23,23 +23,6 @@ CREATE TABLE IF NOT EXISTS `users` (
   KEY `idx_users_last_active_at` (`last_active_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS `admin_users` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `public_id` varchar(32) NOT NULL,
-  `username` varchar(64) NOT NULL,
-  `password_hash` varchar(255) NOT NULL,
-  `display_name` varchar(128) NOT NULL,
-  `is_super_admin` tinyint(1) NOT NULL DEFAULT 0,
-  `status` varchar(32) NOT NULL DEFAULT 'active',
-  `last_login_at` datetime(3) DEFAULT NULL,
-  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_admin_users_public_id` (`public_id`),
-  UNIQUE KEY `uk_admin_users_username` (`username`),
-  KEY `idx_admin_users_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 CREATE TABLE IF NOT EXISTS `profiles` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `public_id` varchar(32) NOT NULL,
@@ -211,7 +194,6 @@ CREATE TABLE IF NOT EXISTS `style_subjects` (
   `gender` varchar(32) DEFAULT NULL,
   `description` text,
   `status` varchar(32) NOT NULL DEFAULT 'draft',
-  `created_by_admin_id` bigint unsigned DEFAULT NULL,
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `deleted_at` datetime(3) DEFAULT NULL,
@@ -236,8 +218,6 @@ CREATE TABLE IF NOT EXISTS `style_samples` (
   `suitable_profile_notes` text,
   `status` varchar(32) NOT NULL DEFAULT 'draft',
   `published_at` datetime(3) DEFAULT NULL,
-  `created_by_admin_id` bigint unsigned DEFAULT NULL,
-  `updated_by_admin_id` bigint unsigned DEFAULT NULL,
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `deleted_at` datetime(3) DEFAULT NULL,
@@ -670,7 +650,6 @@ CREATE TABLE IF NOT EXISTS `system_configs` (
   `value_type` varchar(32) NOT NULL,
   `description` text,
   `status` varchar(32) NOT NULL DEFAULT 'active',
-  `updated_by_admin_id` bigint unsigned DEFAULT NULL,
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),

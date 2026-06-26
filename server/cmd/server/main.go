@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -8,6 +9,7 @@ import (
 	userapp "hestia/server/internal/app/user"
 	"hestia/server/internal/infra/config"
 	"hestia/server/internal/infra/logger"
+	"hestia/server/internal/infra/migration"
 	mysqlinfra "hestia/server/internal/infra/mysql"
 
 	"github.com/redis/go-redis/v9"
@@ -19,18 +21,26 @@ func main() {
 		panic(err)
 	}
 	log := logger.New()
+	if err := migration.RunOnStartup(context.Background(), cfg, newServerMigrationRunner()); err != nil {
+		log.Error("server migration failed", "error", err)
+		panic(err)
+	}
 	deps, cleanup, err := newDeps(cfg, log)
 	if err != nil {
-		log.Error("user-server deps init failed", "error", err)
+		log.Error("server deps init failed", "error", err)
 		panic(err)
 	}
 	defer cleanup()
 	router := userapp.NewRouter(deps)
-	log.Info("user-server listening", "port", cfg.UserPort)
-	if err := http.ListenAndServe(":"+cfg.UserPort, router); err != nil {
-		log.Error("user-server stopped", "error", err)
+	log.Info("server listening", "port", cfg.Port)
+	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {
+		log.Error("server stopped", "error", err)
 		panic(err)
 	}
+}
+
+func newServerMigrationRunner() migration.Runner {
+	return migration.NewMySQLRunner()
 }
 
 func newDeps(cfg *config.Config, log *slog.Logger) (*baseapp.Deps, func(), error) {

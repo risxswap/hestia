@@ -1,12 +1,50 @@
-<view class="page">
+<view class="page onboarding-page">
   <view class="card block">
-    <text class="title">8 分钟建立初始形象档案</text>
-    <text class="muted">照片只用于生成个人建议，你可以随时删除。</text>
-    <button class="primary-button">开始</button>
+    <text class="title">建立初始形象档案</text>
+    <text class="muted">这些信息会保存到服务端草稿，并用于生成第一版行动型形象报告。</text>
+    <text wx:if="{{loading}}" class="muted">正在同步草稿...</text>
+    <text wx:if="{{statusMessage}}" class="status-text">{{statusMessage}}</text>
+    <text wx:if="{{errorMessage}}" class="error-text">{{errorMessage}}</text>
   </view>
-  <view class="card steps">
-    <block wx:for="{{steps}}" wx:key="*this">
-      <text class="step">{{index + 1}}. {{item}}</text>
-    </block>
+
+  <view class="card form-card">
+    <view class="section-head">
+      <text class="section-label">基础特征</text>
+      <text class="section-title">只填写你愿意提供的部分</text>
+    </view>
+    <input class="field" placeholder="性别或表达方式，例如 female / neutral" value="{{basic.gender}}" data-field="gender" bindinput="handleBasicInput" />
+    <input class="field" type="number" placeholder="身高 cm，例如 168" value="{{basic.height_cm}}" data-field="height_cm" bindinput="handleBasicInput" />
+    <textarea class="textarea" placeholder="身材相关中性备注，例如肩线、比例、常见困扰" value="{{basic.body_notes}}" data-field="body_notes" bindinput="handleBasicInput" />
+    <textarea class="textarea" placeholder="肤色或妆容备注，可留空" value="{{basic.skin_notes}}" data-field="skin_notes" bindinput="handleBasicInput" />
+    <textarea class="textarea" placeholder="发型、发量、长度或打理习惯，可留空" value="{{basic.hair_notes}}" data-field="hair_notes" bindinput="handleBasicInput" />
+  </view>
+
+  <view class="card form-card">
+    <view class="section-head">
+      <text class="section-label">目标与禁忌</text>
+      <text class="section-title">用逗号或换行分隔</text>
+    </view>
+    <textarea class="textarea" placeholder="风格目标，例如 干净利落，通勤有气质" value="{{styleGoal.goalsText}}" data-field="goalsText" bindinput="handleStyleInput" />
+    <textarea class="textarea" placeholder="不喜欢或不想尝试，例如 过度甜美，太紧身" value="{{styleGoal.avoidancesText}}" data-field="avoidancesText" bindinput="handleStyleInput" />
+    <textarea class="textarea" placeholder="真实场景，例如 工作日通勤，见客户，周末约会" value="{{styleGoal.scenariosText}}" data-field="scenariosText" bindinput="handleStyleInput" />
+    <textarea class="textarea" placeholder="参考风格，例如 某位明星的通勤造型逻辑，或你喜欢的关键词" value="{{styleGoal.referenceStylesText}}" data-field="referenceStylesText" bindinput="handleStyleInput" />
+  </view>
+
+  <view class="card form-card">
+    <view class="section-head">
+      <text class="section-label">核心衣橱</text>
+      <text class="section-title">每行一件：名称，类别，颜色</text>
+    </view>
+    <textarea
+      class="textarea wardrobe-textarea"
+      placeholder="米白衬衫，top，米白&#10;直筒牛仔裤，bottom，蓝色"
+      value="{{wardrobeText}}"
+      bindinput="handleWardrobeInput"
+    />
+  </view>
+
+  <view class="actions">
+    <button class="secondary-button" loading="{{loading}}" bind:tap="handleSave">保存草稿</button>
+    <button class="primary-button" loading="{{submitting}}" bind:tap="handleSubmit">生成初版报告</button>
   </view>
 </view>

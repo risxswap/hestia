@@ -3,38 +3,57 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"hestia/server/internal/infra/config"
 )
 
 func TestLoadUsesDefaultPorts(t *testing.T) {
-	unsetenv(t, "USER_SERVER_PORT")
-	unsetenv(t, "ADMIN_SERVER_PORT")
+	unsetenv(t, "SERVER_PORT")
 
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
 
-	if cfg.UserPort != "8080" {
-		t.Fatalf("expected user port 8080, got %q", cfg.UserPort)
-	}
-	if cfg.AdminPort != "8081" {
-		t.Fatalf("expected admin port 8081, got %q", cfg.AdminPort)
+	if cfg.Port != "8080" {
+		t.Fatalf("expected port 8080, got %q", cfg.Port)
 	}
 }
 
 func TestLoadUsesEnvironmentOverride(t *testing.T) {
-	t.Setenv("USER_SERVER_PORT", "18080")
+	t.Setenv("SERVER_PORT", "18080")
 
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
 
-	if cfg.UserPort != "18080" {
-		t.Fatalf("expected user port 18080, got %q", cfg.UserPort)
+	if cfg.Port != "18080" {
+		t.Fatalf("expected port 18080, got %q", cfg.Port)
+	}
+}
+
+func TestConfigExposesOnlyRuntimeFields(t *testing.T) {
+	cfgType := reflect.TypeOf(config.Config{})
+	expected := []string{
+		"AppEnv",
+		"Port",
+		"DatabaseDSN",
+		"RedisAddr",
+		"RedisPassword",
+		"RedisDB",
+		"LLMProvider",
+	}
+
+	if cfgType.NumField() != len(expected) {
+		t.Fatalf("expected %d config fields, got %d", len(expected), cfgType.NumField())
+	}
+	for _, name := range expected {
+		if _, ok := cfgType.FieldByName(name); !ok {
+			t.Fatalf("expected config field %s", name)
+		}
 	}
 }
 

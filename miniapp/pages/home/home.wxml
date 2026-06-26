@@ -1,4 +1,17 @@
 <view class="page home-page today-page">
+  <view wx:if="{{loading}}" class="today-section">
+    <text class="plan-body">正在读取最新报告...</text>
+  </view>
+
+  <view wx:elif="{{!hasReport}}" class="today-section">
+    <view class="section-head">
+      <text class="section-kicker">今日建议</text>
+      <text class="section-title">还没有可用报告</text>
+    </view>
+    <text class="plan-body">{{errorMessage || "完成 onboarding 后，这里会显示从服务端报告派生的今日建议。"}}</text>
+  </view>
+
+  <block wx:else>
   <view class="today-hero">
     <view class="today-topline">
       <text class="today-brand">Hestia</text>
@@ -50,13 +63,14 @@
     </view>
 
     <view class="feedback-grid">
-      <block wx:for="{{feedbackOptions}}" wx:key="*this">
-        <button class="feedback-chip" data-value="{{item}}" bind:tap="handleFeedback">
-          {{item}}
+      <block wx:for="{{feedbackOptions}}" wx:key="label">
+        <button class="feedback-chip" data-value="{{item.label}}" data-action="{{item.action}}" bind:tap="handleFeedback">
+          {{item.label}}
         </button>
       </block>
     </view>
 
     <text wx:if="{{memoryToast}}" class="memory-toast">{{memoryToast}}</text>
   </view>
+  </block>
 </view>

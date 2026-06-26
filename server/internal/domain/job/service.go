@@ -28,10 +28,6 @@ func NewService(repo ...Repository) *Service {
 	return &Service{repo: selected}
 }
 
-func (s *Service) List() ListJobsResult {
-	return ListJobsResult{Items: []JobSummary{}}
-}
-
 func (s *Service) CreateInitialReportJob(ctx context.Context, userID int64, input map[string]any) (Job, error) {
 	startedAt := time.Now().UTC()
 	item := Job{

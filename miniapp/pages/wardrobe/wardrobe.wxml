@@ -1,10 +1,13 @@
 <view class="page">
   <view class="card block">
     <text class="title">核心衣橱</text>
-    <text class="muted">第一版只维护推荐所需的高频核心单品和关键缺口。</text>
+    <text class="muted">这里展示服务端报告识别出的关键缺口。</text>
   </view>
   <view class="card block">
     <text class="subtitle">关键缺口</text>
+    <text wx:if="{{loading}}" class="muted">正在读取最新报告...</text>
+    <text wx:elif="{{errorMessage}}" class="muted">{{errorMessage}}</text>
+    <text wx:elif="{{!gaps.length}}" class="muted">暂无缺口单品。完成初版报告后会自动更新。</text>
     <block wx:for="{{gaps}}" wx:key="*this">
       <text class="gap">{{item}}</text>
     </block>

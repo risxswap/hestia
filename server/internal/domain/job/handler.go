@@ -17,10 +17,6 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) List(c *gin.Context) {
-	response.OK(c, h.service.List())
-}
-
 func (h *Handler) GetForUser(c *gin.Context) {
 	user, ok := auth.UserFromContext(c)
 	if !ok {

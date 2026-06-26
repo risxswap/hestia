@@ -12,8 +12,7 @@ import (
 
 type Config struct {
 	AppEnv        string `env:"APP_ENV" envDefault:"development"`
-	UserPort      string `env:"USER_SERVER_PORT" envDefault:"8080"`
-	AdminPort     string `env:"ADMIN_SERVER_PORT" envDefault:"8081"`
+	Port          string `env:"SERVER_PORT" envDefault:"8080"`
 	DatabaseDSN   string `env:"DATABASE_DSN"`
 	RedisAddr     string `env:"REDIS_ADDR"`
 	RedisPassword string `env:"REDIS_PASSWORD"`
@@ -25,9 +24,8 @@ func Load() (*Config, error) {
 	_ = godotenv.Load(".env", "server/.env")
 
 	cfg := Config{
-		AppEnv:    "development",
-		UserPort:  "8080",
-		AdminPort: "8081",
+		AppEnv: "development",
+		Port:   "8080",
 	}
 	if err := applyTOMLConfig(&cfg); err != nil {
 		return nil, err
@@ -35,11 +33,8 @@ func Load() (*Config, error) {
 	if err := env.Parse(&cfg); err != nil {
 		return nil, err
 	}
-	if cfg.UserPort == "" {
-		return nil, errors.New("USER_SERVER_PORT cannot be empty")
-	}
-	if cfg.AdminPort == "" {
-		return nil, errors.New("ADMIN_SERVER_PORT cannot be empty")
+	if cfg.Port == "" {
+		return nil, errors.New("SERVER_PORT cannot be empty")
 	}
 	return &cfg, nil
 }

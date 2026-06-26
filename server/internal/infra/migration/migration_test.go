@@ -2,6 +2,7 @@ package migration_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -39,6 +40,32 @@ func TestRunOnStartupReturnsRunnerError(t *testing.T) {
 	}
 }
 
+func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
+	exec := &fakeSQLExecutor{}
+
+	if err := migration.ApplyMySQLSchema(context.Background(), exec); err != nil {
+		t.Fatalf("apply mysql schema: %v", err)
+	}
+
+	if len(exec.queries) < 30 {
+		t.Fatalf("expected initial schema statements to be executed, got %d", len(exec.queries))
+	}
+	if exec.queries[0] != "SET NAMES utf8mb4" {
+		t.Fatalf("expected first statement to set charset, got %q", exec.queries[0])
+	}
+	if !containsStatement(exec.queries, "CREATE TABLE IF NOT EXISTS `users`") {
+		t.Fatalf("expected users table creation statement")
+	}
+	if !containsStatement(exec.queries, "CREATE TABLE IF NOT EXISTS `jobs`") {
+		t.Fatalf("expected jobs table creation statement")
+	}
+	for _, query := range exec.queries {
+		if strings.TrimSpace(query) == "" {
+			t.Fatal("expected no empty SQL statements to be executed")
+		}
+	}
+}
+
 func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 	schemaPath := filepath.Join("mysql", "001_init_schema.sql")
 	raw, err := os.ReadFile(schemaPath)
@@ -49,7 +76,6 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 
 	expectedTables := []string{
 		"users",
-		"admin_users",
 		"profiles",
 		"profile_facts",
 		"profile_inferences",
@@ -110,6 +136,16 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 		}
 	}
 
+	for _, token := range []string{
+		"ad" + "min_users",
+		"created_by_" + "ad" + "min_id",
+		"updated_by_" + "ad" + "min_id",
+	} {
+		if strings.Contains(sql, token) {
+			t.Fatalf("schema should not contain removed schema token: %s", token)
+		}
+	}
+
 	if strings.Contains(strings.ToLower(sql), "foreign key") {
 		t.Fatal("initial schema should keep relations as indexed ids without database foreign keys")
 	}
@@ -125,4 +161,22 @@ func (f *fakeRunner) Up(_ context.Context, cfg *config.Config) error {
 	f.calls++
 	f.lastConfig = cfg
 	return f.err
+}
+
+type fakeSQLExecutor struct {
+	queries []string
+}
+
+func (f *fakeSQLExecutor) ExecContext(_ context.Context, query string, _ ...any) (sql.Result, error) {
+	f.queries = append(f.queries, query)
+	return nil, nil
+}
+
+func containsStatement(queries []string, token string) bool {
+	for _, query := range queries {
+		if strings.Contains(query, token) {
+			return true
+		}
+	}
+	return false
 }

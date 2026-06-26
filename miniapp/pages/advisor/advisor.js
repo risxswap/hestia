@@ -1,3 +1,5 @@
+const api = require("../../utils/api");
+
 Page({
   data: {
     quickScenes: ["通勤怎么穿", "拍照问搭配", "约会建议", "见客户"],
@@ -128,21 +130,59 @@ Page({
     }, () => {
       this.syncChatItems();
     });
-    this.mockAdvisorReply(content);
+    this.sendToAgent(content);
   },
-  mockAdvisorReply(content) {
-    const reply = {
-      id: `assistant-${Date.now()}`,
-      role: "assistant",
-      content: `收到。关于“${content}”，我会先结合你的场景、偏好和已记录禁忌给出可执行建议。`
-    };
-    setTimeout(() => {
+  async sendToAgent(content) {
+    try {
+      const events = await api.sendAgentMessage(content);
+      const assistantText = assistantTextFromEvents(events);
+      const reply = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        content: assistantText || "服务端没有返回可展示内容。"
+      };
       this.setData({
         messages: this.data.messages.concat(reply),
         thinking: false
       }, () => {
         this.syncChatItems();
       });
-    }, 600);
+    } catch (error) {
+      const reply = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        status: "error",
+        content: error && error.message ? error.message : "顾问服务请求失败"
+      };
+      this.setData({
+        messages: this.data.messages.concat(reply),
+        thinking: false
+      }, () => {
+        this.syncChatItems();
+      });
+    }
   }
 });
+
+function assistantTextFromEvents(events) {
+  if (!Array.isArray(events)) {
+    return "";
+  }
+
+  return events
+    .map((item) => {
+      const data = item.data || {};
+      if (typeof data === "string") {
+        return data;
+      }
+      return data.text || data.content || data.message || "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+if (typeof module !== "undefined") {
+  module.exports = {
+    assistantTextFromEvents
+  };
+}
