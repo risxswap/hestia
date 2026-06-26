@@ -1,50 +1,226 @@
 <view class="page onboarding-page">
-  <view class="card block">
-    <text class="title">建立初始形象档案</text>
-    <text class="muted">这些信息会保存到服务端草稿，并用于生成第一版行动型形象报告。</text>
-    <text wx:if="{{loading}}" class="muted">正在同步草稿...</text>
-    <text wx:if="{{statusMessage}}" class="status-text">{{statusMessage}}</text>
-    <text wx:if="{{errorMessage}}" class="error-text">{{errorMessage}}</text>
-  </view>
-
-  <view class="card form-card">
-    <view class="section-head">
-      <text class="section-label">基础特征</text>
-      <text class="section-title">只填写你愿意提供的部分</text>
+  <view class="onboarding-shell">
+    <view class="topbar">
+      <text class="topbar-title">Hestia 形象档案</text>
+      <text class="topbar-meta">{{topbarMeta}}</text>
     </view>
-    <input class="field" placeholder="性别或表达方式，例如 female / neutral" value="{{basic.gender}}" data-field="gender" bindinput="handleBasicInput" />
-    <input class="field" type="number" placeholder="身高 cm，例如 168" value="{{basic.height_cm}}" data-field="height_cm" bindinput="handleBasicInput" />
-    <textarea class="textarea" placeholder="身材相关中性备注，例如肩线、比例、常见困扰" value="{{basic.body_notes}}" data-field="body_notes" bindinput="handleBasicInput" />
-    <textarea class="textarea" placeholder="肤色或妆容备注，可留空" value="{{basic.skin_notes}}" data-field="skin_notes" bindinput="handleBasicInput" />
-    <textarea class="textarea" placeholder="发型、发量、长度或打理习惯，可留空" value="{{basic.hair_notes}}" data-field="hair_notes" bindinput="handleBasicInput" />
-  </view>
 
-  <view class="card form-card">
-    <view class="section-head">
-      <text class="section-label">目标与禁忌</text>
-      <text class="section-title">用逗号或换行分隔</text>
+    <view class="progress" wx:if="{{currentStep != 'welcome'}}">
+      <view class="progress-fill progress-fill--goals" wx:if="{{currentStep == 'goals'}}"></view>
+      <view class="progress-fill progress-fill--scenarios" wx:elif="{{currentStep == 'scenarios'}}"></view>
+      <view class="progress-fill progress-fill--basic" wx:elif="{{currentStep == 'basic'}}"></view>
+      <view class="progress-fill progress-fill--wardrobe" wx:elif="{{currentStep == 'wardrobe'}}"></view>
+      <view class="progress-fill progress-fill--submit" wx:else></view>
     </view>
-    <textarea class="textarea" placeholder="风格目标，例如 干净利落，通勤有气质" value="{{styleGoal.goalsText}}" data-field="goalsText" bindinput="handleStyleInput" />
-    <textarea class="textarea" placeholder="不喜欢或不想尝试，例如 过度甜美，太紧身" value="{{styleGoal.avoidancesText}}" data-field="avoidancesText" bindinput="handleStyleInput" />
-    <textarea class="textarea" placeholder="真实场景，例如 工作日通勤，见客户，周末约会" value="{{styleGoal.scenariosText}}" data-field="scenariosText" bindinput="handleStyleInput" />
-    <textarea class="textarea" placeholder="参考风格，例如 某位明星的通勤造型逻辑，或你喜欢的关键词" value="{{styleGoal.referenceStylesText}}" data-field="referenceStylesText" bindinput="handleStyleInput" />
-  </view>
 
-  <view class="card form-card">
-    <view class="section-head">
-      <text class="section-label">核心衣橱</text>
-      <text class="section-title">每行一件：名称，类别，颜色</text>
+    <view class="message-stack" wx:if="{{loading || statusMessage || errorMessage}}">
+      <text wx:if="{{loading}}" class="state-text state-text--muted">正在同步草稿...</text>
+      <text wx:if="{{statusMessage}}" class="state-text state-text--success">{{statusMessage}}</text>
+      <text wx:if="{{errorMessage}}" class="state-text state-text--error">{{errorMessage}}</text>
     </view>
-    <textarea
-      class="textarea wardrobe-textarea"
-      placeholder="米白衬衫，top，米白&#10;直筒牛仔裤，bottom，蓝色"
-      value="{{wardrobeText}}"
-      bindinput="handleWardrobeInput"
-    />
+
+    <view class="card onboarding-card" wx:if="{{currentStep == 'welcome'}}">
+      <view class="card-head">
+        <text class="eyebrow">轻量 onboarding</text>
+        <text class="card-title">先建立一个会进化的形象档案</text>
+        <text class="card-desc">只记录会影响建议的关键信息：目标、真实场景、基础特征和几件核心单品。你可以跳过暂时不想提供的内容，后续反馈会继续修正档案。</text>
+      </view>
+
+      <view class="intro-list">
+        <view class="intro-item">
+          <text class="intro-index">01</text>
+          <text class="intro-text">生成第一版行动型形象报告</text>
+        </view>
+        <view class="intro-item">
+          <text class="intro-index">02</text>
+          <text class="intro-text">沉淀偏好、禁忌和场景需求</text>
+        </view>
+        <view class="intro-item">
+          <text class="intro-index">03</text>
+          <text class="intro-text">用真实反馈持续更新长期记忆</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="card onboarding-card" wx:elif="{{currentStep == 'goals'}}">
+      <view class="card-head">
+        <text class="eyebrow">目标</text>
+        <text class="card-title">你最想先改善什么？</text>
+        <text class="card-desc">可以多选，也可以写自己的说法。这里不会做“颜值承诺”，只会转成可执行的造型方向。</text>
+      </view>
+
+      <view class="chip-grid">
+        <button wx:for="{{goalOptions}}" wx:key="value" class="chip {{item.active ? 'chip--active' : ''}}" data-value="{{item.value}}" bind:tap="handleGoalToggle">{{item.label}}</button>
+      </view>
+
+      <view class="field-block">
+        <text class="field-label">补充目标</text>
+        <textarea class="textarea textarea--compact" maxlength="160" placeholder="例如：想保留休闲感，但开会时更利落" value="{{customGoal}}" bindinput="handleCustomInput" />
+      </view>
+
+      <view class="selected-panel" wx:if="{{selectedGoals.length || customGoal}}">
+        <text class="selected-title">已记录</text>
+        <view class="selected-tags" wx:if="{{selectedGoals.length}}">
+          <text class="selected-tag" wx:for="{{selectedGoals}}" wx:key="*this">{{item}}</text>
+        </view>
+        <text class="selected-note" wx:if="{{customGoal}}">{{customGoal}}</text>
+      </view>
+    </view>
+
+    <view class="card onboarding-card" wx:elif="{{currentStep == 'scenarios'}}">
+      <view class="card-head">
+        <text class="eyebrow">场景与禁忌</text>
+        <text class="card-title">建议要服务真实生活</text>
+        <text class="card-desc">选择最常出现的场景和明确不想尝试的方向。禁忌会优先于风格匹配。</text>
+      </view>
+
+      <view class="section-block">
+        <text class="field-label">常见场景</text>
+        <view class="chip-grid">
+          <button wx:for="{{scenarioOptions}}" wx:key="value" class="chip {{item.active ? 'chip--active' : ''}}" data-value="{{item.value}}" bind:tap="handleScenarioToggle">{{item.label}}</button>
+        </view>
+      </view>
+
+      <view class="section-block">
+        <text class="field-label">暂时不想尝试</text>
+        <view class="chip-grid">
+          <button wx:for="{{avoidanceOptions}}" wx:key="value" class="chip chip--avoid {{item.active ? 'chip--active' : ''}}" data-value="{{item.value}}" bind:tap="handleAvoidanceToggle">{{item.label}}</button>
+        </view>
+      </view>
+
+      <view class="selected-panel" wx:if="{{selectedScenarios.length || selectedAvoidances.length}}">
+        <text class="selected-title">当前沉淀</text>
+        <view class="selected-line" wx:if="{{selectedScenarios.length}}">
+          <text class="selected-label">场景</text>
+          <view class="selected-tags">
+            <text class="selected-tag" wx:for="{{selectedScenarios}}" wx:key="*this">{{item}}</text>
+          </view>
+        </view>
+        <view class="selected-line" wx:if="{{selectedAvoidances.length}}">
+          <text class="selected-label">避开</text>
+          <view class="selected-tags">
+            <text class="selected-tag selected-tag--avoid" wx:for="{{selectedAvoidances}}" wx:key="*this">{{item}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card onboarding-card" wx:elif="{{currentStep == 'basic'}}">
+      <view class="card-head">
+        <text class="eyebrow">基础特征</text>
+        <text class="card-title">只填写你愿意提供的部分</text>
+        <text class="card-desc">这些描述用于调整比例、廓形、发型和色彩建议。请用中性事实或体验表达，不需要自我评价。</text>
+      </view>
+
+      <view class="form-grid">
+        <view class="field-block">
+          <text class="field-label">性别或表达方式</text>
+          <input class="field" placeholder="例如：女 / 男 / 中性 / 不填写" value="{{basic.gender}}" data-field="gender" bindinput="handleBasicInput" />
+        </view>
+        <view class="field-block">
+          <text class="field-label">身高 cm</text>
+          <input class="field" type="number" placeholder="例如：168" value="{{basic.height_cm}}" data-field="height_cm" bindinput="handleBasicInput" />
+        </view>
+        <view class="field-block">
+          <text class="field-label">发型与打理习惯</text>
+          <textarea class="textarea" maxlength="180" placeholder="例如：锁骨发，早上只有 5 分钟整理" value="{{basic.hair_notes}}" data-field="hair_notes" bindinput="handleBasicInput" />
+        </view>
+        <view class="field-block">
+          <text class="field-label">肤色或妆容备注</text>
+          <textarea class="textarea" maxlength="180" placeholder="例如：素颜偏多，想让气色更清爽" value="{{basic.skin_notes}}" data-field="skin_notes" bindinput="handleBasicInput" />
+        </view>
+        <view class="field-block">
+          <text class="field-label">身形相关备注</text>
+          <textarea class="textarea" maxlength="220" placeholder="例如：肩线较直，想优化上下身比例" value="{{basic.body_notes}}" data-field="body_notes" bindinput="handleBasicInput" />
+        </view>
+      </view>
+    </view>
+
+    <view class="card onboarding-card" wx:elif="{{currentStep == 'wardrobe'}}">
+      <view class="card-head">
+        <text class="eyebrow">核心衣橱</text>
+        <text class="card-title">先添加几件最常穿的单品</text>
+        <text class="card-desc">不需要完整库存。录入 1-5 件高频单品，就能让第一版建议更贴近你现在真的拥有的衣服。</text>
+      </view>
+
+      <view class="field-block">
+        <text class="field-label">单品名称</text>
+        <input class="field" placeholder="例如：白衬衫 / 直筒牛仔裤" value="{{wardrobeDraft.name}}" data-field="name" bindinput="handleWardrobeDraftInput" />
+      </view>
+
+      <view class="field-block">
+        <text class="field-label">类别</text>
+        <view class="chip-grid chip-grid--compact">
+          <button wx:for="{{wardrobeCategoryOptions}}" wx:key="value" class="chip {{item.active ? 'chip--active' : ''}}" data-value="{{item.value}}" bind:tap="handleWardrobeCategory">{{item.label}}</button>
+        </view>
+      </view>
+
+      <view class="field-block">
+        <text class="field-label">颜色或特征</text>
+        <input class="field" placeholder="例如：米白 / 黑色 / 微宽松" value="{{wardrobeDraft.color}}" data-field="color" bindinput="handleWardrobeDraftInput" />
+      </view>
+
+      <button class="add-button" bind:tap="handleAddWardrobeItem">添加到核心衣橱</button>
+
+      <view class="wardrobe-list" wx:if="{{wardrobeItems.length}}">
+        <view class="wardrobe-item" wx:for="{{wardrobeItems}}" wx:key="viewKey">
+          <view class="wardrobe-copy">
+            <text class="wardrobe-name">{{item.name}}</text>
+            <text class="wardrobe-meta">{{item.displayMeta}}</text>
+          </view>
+          <button class="remove-button" data-index="{{index}}" bind:tap="handleRemoveWardrobeItem">删除</button>
+        </view>
+      </view>
+
+      <view class="empty-list" wx:else>
+        <text>还没有添加单品。至少添加一件，才能生成初版报告。</text>
+      </view>
+    </view>
+
+    <view class="card onboarding-card" wx:else>
+      <view class="card-head">
+        <text class="eyebrow">完成</text>
+        <text class="card-title">档案已经可以用于生成报告</text>
+        <text class="card-desc">如果已经提交，报告页会读取最新结果；如果还没提交，可以返回检查目标和核心衣橱后再生成。</text>
+      </view>
+
+      <view class="summary-list">
+        <view class="summary-row">
+          <text class="summary-label">目标</text>
+          <text class="summary-value">{{selectedGoalsText}}</text>
+        </view>
+        <view class="summary-row">
+          <text class="summary-label">场景</text>
+          <text class="summary-value">{{selectedScenariosText}}</text>
+        </view>
+        <view class="summary-row">
+          <text class="summary-label">禁忌</text>
+          <text class="summary-value">{{selectedAvoidancesText}}</text>
+        </view>
+        <view class="summary-row">
+          <text class="summary-label">衣橱</text>
+          <text class="summary-value">{{wardrobeItems.length}} 件核心单品</text>
+        </view>
+      </view>
+    </view>
   </view>
 
-  <view class="actions">
-    <button class="secondary-button" loading="{{loading}}" bind:tap="handleSave">保存草稿</button>
-    <button class="primary-button" loading="{{submitting}}" bind:tap="handleSubmit">生成初版报告</button>
+  <view class="bottom-actions">
+    <block wx:if="{{currentStep == 'welcome'}}">
+      <button class="secondary-button action-button" bind:tap="handleSkip">先逛逛</button>
+      <button class="primary-button action-button" loading="{{loading}}" bind:tap="handleStart">开始建立</button>
+    </block>
+    <block wx:elif="{{currentStep == 'submit'}}">
+      <button class="secondary-button action-button" loading="{{loading}}" bind:tap="handleBack">返回检查</button>
+      <navigator class="primary-button action-button action-link" url="/pages/report/report" hover-class="none">查看状态</navigator>
+    </block>
+    <block wx:elif="{{currentStep == 'wardrobe'}}">
+      <button class="secondary-button action-button" loading="{{loading}}" bind:tap="handleBack">上一页</button>
+      <button class="primary-button action-button" loading="{{submitting}}" bind:tap="handleSubmit">生成报告</button>
+    </block>
+    <block wx:else>
+      <button class="secondary-button action-button" loading="{{loading}}" bind:tap="handleBack">上一页</button>
+      <button class="primary-button action-button" loading="{{loading}}" bind:tap="handleNext">下一步</button>
+    </block>
   </view>
 </view>

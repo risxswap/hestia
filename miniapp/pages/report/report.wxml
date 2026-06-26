@@ -6,7 +6,8 @@
   <view wx:elif="{{errorMessage}}" class="card state-card">
     <text class="title">{{empty ? "还没有初版报告" : "报告读取失败"}}</text>
     <text class="summary">{{empty ? "完成 onboarding 后，这里会展示服务端生成的初版个人形象报告。" : errorMessage}}</text>
-    <button class="primary-button" bind:tap="loadLatestReport">{{empty ? "刷新报告" : "重新读取"}}</button>
+    <button wx:if="{{empty}}" class="primary-button" bind:tap="handleStartOnboarding">继续建立形象档案</button>
+    <button wx:else class="primary-button" bind:tap="loadLatestReport">重新读取</button>
   </view>
 
   <block wx:else>

@@ -79,6 +79,13 @@ function normalizeRouteRole(role) {
 }
 
 function normalizeReportResponse(report) {
+  if (!report) {
+    return Object.assign({}, emptyReportData, {
+      empty: true,
+      errorMessage: "完成 onboarding 后，这里会展示服务端生成的初版个人形象报告。"
+    });
+  }
+
   const content = report && report.content_json ? report.content_json : {};
 
   return {
@@ -117,6 +124,14 @@ const reportPageConfig = {
         empty: error && error.code === "report.not_found",
         errorMessage: error && error.message ? error.message : "读取报告失败"
       }));
+    }
+  },
+
+  handleStartOnboarding() {
+    if (typeof wx !== "undefined" && wx.navigateTo) {
+      wx.navigateTo({
+        url: "/pages/onboarding/onboarding"
+      });
     }
   }
 };

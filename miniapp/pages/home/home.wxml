@@ -9,6 +9,7 @@
       <text class="section-title">还没有可用报告</text>
     </view>
     <text class="plan-body">{{errorMessage || "完成 onboarding 后，这里会显示从服务端报告派生的今日建议。"}}</text>
+    <button class="primary-button today-button" bind:tap="handleStartOnboarding">继续建立形象档案</button>
   </view>
 
   <block wx:else>

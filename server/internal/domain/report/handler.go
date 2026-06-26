@@ -32,7 +32,7 @@ func (h *Handler) Latest(c *gin.Context) {
 	result, err := h.service.LatestForUser(c.Request.Context(), user.UserID)
 	if err != nil {
 		if errors.Is(err, ErrReportNotFound) {
-			response.Error(c, http.StatusNotFound, "report.not_found", "报告不存在")
+			response.OK(c, nil)
 			return
 		}
 		h.logger.Error("get latest report failed", "error", err, "user_id", user.UserID)

@@ -399,7 +399,7 @@ func TestSubmitOnboardingDoesNotExposeReadyReportWhenAttachRoutesFails(t *testin
 	if got.Status != "failed" {
 		t.Fatalf("expected failed job, got %q", got.Status)
 	}
-	assertLatestReportStatus(t, env.router, http.StatusNotFound)
+	assertLatestReportEmpty(t, env.router)
 }
 
 func TestSubmitOnboardingRollsBackBusinessWritesWhenMarkSucceededFails(t *testing.T) {
@@ -419,7 +419,7 @@ func TestSubmitOnboardingRollsBackBusinessWritesWhenMarkSucceededFails(t *testin
 
 	submitOnboarding(t, env.router, http.StatusInternalServerError)
 
-	assertLatestReportStatus(t, env.router, http.StatusNotFound)
+	assertLatestReportEmpty(t, env.router)
 	if len(env.assets.created) != 0 {
 		t.Fatalf("expected asset writes to roll back, got %#v", env.assets.created)
 	}
@@ -667,15 +667,28 @@ func getLatestReport(t *testing.T, router *gin.Engine) reportResponse {
 	return body.Data
 }
 
-func assertLatestReportStatus(t *testing.T, router *gin.Engine, expectedStatus int) {
+func assertLatestReportEmpty(t *testing.T, router *gin.Engine) {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/api/user/reports/latest", nil)
 	recorder := httptest.NewRecorder()
 
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != expectedStatus {
-		t.Fatalf("expected status %d, got %d, body=%s", expectedStatus, recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+		Data any    `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "ok" {
+		t.Fatalf("expected code ok, got %q", body.Code)
+	}
+	if body.Data != nil {
+		t.Fatalf("expected empty latest report data, got %#v", body.Data)
 	}
 }
 

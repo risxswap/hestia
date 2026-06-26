@@ -58,6 +58,13 @@ function strategyText(strategy) {
 }
 
 function normalizeTodayFromReport(report) {
+  if (!report) {
+    return Object.assign({}, emptyToday, {
+      hasReport: false,
+      errorMessage: "完成 onboarding 后，这里会显示从服务端报告派生的今日建议。"
+    });
+  }
+
   const content = report && report.content_json ? report.content_json : {};
   const routes = Array.isArray(report && report.routes) ? report.routes : [];
   const route = routes[0] || {};
@@ -171,6 +178,14 @@ const homePageConfig = {
     if (typeof wx !== "undefined" && wx.switchTab) {
       wx.switchTab({
         url: "/pages/advisor/advisor"
+      });
+    }
+  },
+
+  handleStartOnboarding() {
+    if (typeof wx !== "undefined" && wx.navigateTo) {
+      wx.navigateTo({
+        url: "/pages/onboarding/onboarding"
       });
     }
   },
