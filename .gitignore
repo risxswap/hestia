@@ -49,3 +49,5 @@ project.private.config.json
 tmp/
 temp/
 *.tmp
+
+__debug_*
