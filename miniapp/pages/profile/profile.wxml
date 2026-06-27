@@ -36,7 +36,7 @@
 
   <view class="quick-grid">
     <block wx:for="{{quickEntries}}" wx:key="key">
-      <button class="quick-entry" data-key="{{item.key}}" bind:tap="handleQuickEntry">
+      <button class="quick-entry {{activeSection === item.key ? 'quick-entry--active' : ''}}" data-key="{{item.key}}" bind:tap="handleQuickEntry">
         <text class="quick-title">{{item.title}}</text>
         <text class="quick-summary">{{item.summary}}</text>
         <text class="quick-action">{{item.action || "进入"}}</text>
@@ -44,7 +44,7 @@
     </block>
   </view>
 
-  <view class="card edit-panel">
+  <view id="profile-section" class="card edit-panel {{activeSection === 'profile' ? 'edit-panel--active' : ''}}">
     <view class="section-head">
       <text class="section-title">基础档案</text>
       <text class="muted">只记录会影响穿搭、发型和场景建议的信息。</text>
@@ -85,7 +85,7 @@
     <button class="primary-button save-button" loading="{{savingProfile}}" bind:tap="handleSaveProfile">保存基础档案</button>
   </view>
 
-  <view class="card edit-panel">
+  <view id="preferences-section" class="card edit-panel {{activeSection === 'preferences' ? 'edit-panel--active' : ''}}">
     <view class="section-head">
       <text class="section-title">偏好与禁忌</text>
       <text class="muted">用顿号、逗号或换行分隔。真实反馈会优先更新长期记忆。</text>
@@ -107,7 +107,7 @@
     <button class="primary-button save-button" loading="{{savingPreferences}}" bind:tap="handleSavePreferences">保存偏好</button>
   </view>
 
-  <view class="card privacy-panel">
+  <view id="privacy-section" class="card privacy-panel {{activeSection === 'privacy' ? 'privacy-panel--active' : ''}}">
     <view class="section-head">
       <text class="section-title">隐私与本地登录</text>
       <text class="muted">自拍、衣橱、偏好和反馈都属于敏感个人数据。服务端删除会在后续版本接入审核与确认流程。</text>

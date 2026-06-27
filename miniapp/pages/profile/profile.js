@@ -18,30 +18,35 @@ const emptyPreferencesDraft = {
 
 const fallbackQuickEntries = [
   {
+    key: "profile",
+    title: "我的档案",
+    summary: "基础信息与场景",
+    action: "编辑"
+  },
+  {
+    key: "preferences",
+    title: "偏好与禁忌",
+    summary: "风格目标与不想要的方向",
+    action: "编辑"
+  },
+  {
     key: "report",
-    title: "初版报告",
+    title: "报告与路线",
     summary: "查看当前行动建议",
     action: "查看"
   },
   {
-    key: "today",
-    title: "今日建议",
-    summary: "按真实场景生成",
-    action: "进入"
-  },
-  {
-    key: "wardrobe",
-    title: "核心衣橱",
-    summary: "补充会影响建议的衣服",
-    action: "管理"
-  },
-  {
-    key: "onboarding",
-    title: "补充档案",
-    summary: "更新偏好和禁忌",
-    action: "完善"
+    key: "privacy",
+    title: "隐私与数据",
+    summary: "本地登录与删除入口",
+    action: "查看"
   }
 ];
+
+const quickEntryFallbackByKey = fallbackQuickEntries.reduce((result, entry) => {
+  result[entry.key] = entry;
+  return result;
+}, {});
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -68,7 +73,7 @@ function joinList(value) {
 function normalizeQuickEntries(entries) {
   const source = Array.isArray(entries) && entries.length ? entries : fallbackQuickEntries;
   return source.slice(0, 4).map((entry, index) => {
-    const fallback = fallbackQuickEntries[index] || fallbackQuickEntries[0];
+    const fallback = quickEntryFallbackByKey[entry.key] || fallbackQuickEntries[index] || fallbackQuickEntries[0];
     return {
       key: entry.key || fallback.key,
       title: entry.title || fallback.title,
@@ -191,6 +196,7 @@ const profilePageConfig = {
     },
     profile: null,
     latestReport: null,
+    activeSection: "",
     quickEntries: fallbackQuickEntries,
     memoryItems: normalizeMemorySummary(),
     profileDraft: Object.assign({}, emptyProfileDraft),
@@ -268,6 +274,7 @@ const profilePageConfig = {
   },
 
   async handleSavePreferences() {
+    const submittedDraft = Object.assign({}, this.data.preferencesDraft);
     this.setData({
       savingPreferences: true,
       errorMessage: ""
@@ -275,7 +282,9 @@ const profilePageConfig = {
 
     try {
       const summary = await api.updateProfilePreferences(preferencesPayloadFromDraft(this.data.preferencesDraft));
-      this.setData(normalizeProfileSummary(summary));
+      this.setData(Object.assign({}, normalizeProfileSummary(summary), {
+        preferencesDraft: submittedDraft
+      }));
       showToast("偏好已保存", "success");
     } catch (error) {
       this.setData({
@@ -289,15 +298,32 @@ const profilePageConfig = {
     const key = event && event.currentTarget && event.currentTarget.dataset
       ? event.currentTarget.dataset.key
       : "";
-    const routeMap = {
-      report: "/pages/report/report",
-      today: "/pages/home/home",
-      wardrobe: "/pages/wardrobe/wardrobe",
-      onboarding: "/pages/onboarding/onboarding"
+
+    if (key === "report") {
+      if (typeof wx !== "undefined" && wx.navigateTo) {
+        wx.navigateTo({ url: "/pages/report/report" });
+      }
+      return;
+    }
+
+    const sectionSelectorMap = {
+      profile: "#profile-section",
+      preferences: "#preferences-section",
+      privacy: "#privacy-section"
     };
-    const url = routeMap[key];
-    if (url && typeof wx !== "undefined" && wx.navigateTo) {
-      wx.navigateTo({ url });
+    const selector = sectionSelectorMap[key];
+    if (!selector) {
+      return;
+    }
+
+    this.setData({
+      activeSection: key
+    });
+    if (typeof wx !== "undefined" && wx.pageScrollTo) {
+      wx.pageScrollTo({
+        selector,
+        duration: 240
+      });
     }
   },
 

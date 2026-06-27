@@ -84,10 +84,10 @@ const initialSummary = {
     generated_at: "2026-06-27T06:00:00Z"
   },
   quick_entries: [
-    { key: "report", title: "初版报告", summary: "已生成" },
-    { key: "today", title: "今日建议", summary: "按场景生成" },
-    { key: "wardrobe", title: "核心衣橱", summary: "补充照片" },
-    { key: "onboarding", title: "补充档案", summary: "继续完善" }
+    { key: "profile", title: "我的档案", summary: "基础信息与场景" },
+    { key: "preferences", title: "偏好与禁忌", summary: "风格目标与不想要的方向" },
+    { key: "report", title: "报告与路线", summary: "初版报告已生成" },
+    { key: "privacy", title: "隐私与数据", summary: "本地登录与删除入口" }
   ]
 };
 
@@ -115,8 +115,7 @@ async function main() {
       return Promise.resolve(Object.assign({}, clone(initialSummary), {
         profile: Object.assign({}, initialSummary.profile, {
           style_goal_summary: data.style_goals.join("、")
-        }),
-        preferences: Object.assign({}, data)
+        })
       }));
     }
   };
@@ -133,6 +132,10 @@ async function main() {
   const normalizedEmpty = exported.normalizeProfileSummary(null);
   assert(normalizedEmpty.empty === true, "normalizeProfileSummary should mark missing summary as empty");
   assert(normalizedEmpty.quickEntries.length === 4, "normalizeProfileSummary should provide four fallback quick entries");
+  assert(
+    normalizedEmpty.quickEntries.map((entry) => entry.key).join(",") === "profile,preferences,report,privacy",
+    "normalizeProfileSummary fallback quick entries should match profile contract"
+  );
 
   const page = createPageInstance(pageConfig);
   await page.loadProfile.call(page);
@@ -146,7 +149,35 @@ async function main() {
   assert(page.data.profileDraft.scenarioText === "通勤、周末见朋友", "loadProfile should normalize scenario draft text");
   assert(page.data.preferencesDraft.styleGoalsText === "更利落", "loadProfile should prepare style goals draft");
   assert(page.data.quickEntries.length === 4, "loadProfile should expose four quick entries");
+  assert(
+    page.data.quickEntries.map((entry) => entry.key).join(",") === "profile,preferences,report,privacy",
+    "loadProfile should keep profile quick entry contract"
+  );
   assert(page.data.memoryItems.length === 5, "loadProfile should normalize memory summary items");
+
+  const navigations = [];
+  const scrolls = [];
+  const originalWxForQuickEntries = global.wx;
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options);
+    },
+    pageScrollTo(options) {
+      scrolls.push(options);
+    }
+  };
+  page.handleQuickEntry.call(page, { currentTarget: { dataset: { key: "profile" } } });
+  assert(page.data.activeSection === "profile", "profile quick entry should activate profile section");
+  assert(scrolls[0].selector === "#profile-section", "profile quick entry should scroll to profile section");
+  page.handleQuickEntry.call(page, { currentTarget: { dataset: { key: "preferences" } } });
+  assert(page.data.activeSection === "preferences", "preferences quick entry should activate preferences section");
+  assert(scrolls[1].selector === "#preferences-section", "preferences quick entry should scroll to preferences section");
+  page.handleQuickEntry.call(page, { currentTarget: { dataset: { key: "privacy" } } });
+  assert(page.data.activeSection === "privacy", "privacy quick entry should activate privacy section");
+  assert(scrolls[2].selector === "#privacy-section", "privacy quick entry should scroll to privacy section");
+  page.handleQuickEntry.call(page, { currentTarget: { dataset: { key: "report" } } });
+  assert(navigations[0].url === "/pages/report/report", "report quick entry should navigate to report page");
+  global.wx = originalWxForQuickEntries;
 
   page.setData({
     profileDraft: Object.assign({}, page.data.profileDraft, {
@@ -180,6 +211,9 @@ async function main() {
   assert(preferencesSave.data.avoidances.length === 2, "handleSavePreferences should split avoidances");
   assert(preferencesSave.data.scenario_preferences.length === 2, "handleSavePreferences should split scenario preferences");
   assert(page.data.savingPreferences === false, "handleSavePreferences should clear savingPreferences");
+  assert(page.data.preferencesDraft.styleGoalsText === "更利落、轻松", "handleSavePreferences should keep submitted style goals draft");
+  assert(page.data.preferencesDraft.avoidancesText === "过甜 / 太紧身", "handleSavePreferences should keep submitted avoidances draft");
+  assert(page.data.preferencesDraft.scenarioPreferencesText === "通勤，周末", "handleSavePreferences should keep submitted scenario preferences draft");
 
   const removedKeys = [];
   const toastCalls = [];
