@@ -55,7 +55,10 @@ async function main() {
     "deleteWardrobeItem",
     "createAssetUploadToken",
     "confirmAssetUpload",
-    "uploadAssetToQiniu"
+    "uploadAssetToQiniu",
+    "getProfileSummary",
+    "updateProfile",
+    "updateProfilePreferences"
   ].forEach((name) => {
     assert(typeof api[name] === "function", `api.js should export ${name}`);
   });
@@ -184,6 +187,42 @@ async function main() {
   assert(wardrobeCalls[3].data.color === "米白", "updateWardrobeItem should pass update payload");
   assert(wardrobeCalls[4].method === "DELETE", "deleteWardrobeItem should use DELETE");
   assert(wardrobePaths[4] === "/api/user/wardrobe/items/wdi_test", `wardrobe delete path mismatch: ${wardrobePaths[4]}`);
+
+  const profileCalls = [];
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "profile_token";
+      },
+      request(options) {
+        profileCalls.push(options);
+        options.success({
+          statusCode: 200,
+          data: {
+            code: "ok",
+            data: {
+              ok: true
+            }
+          }
+        });
+      }
+    }
+  }, async () => {
+    await api.getProfileSummary();
+    await api.updateProfile({ nickname: "明明" });
+    await api.updateProfilePreferences({ style_goals: ["更利落"] });
+  });
+
+  const profilePaths = profileCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
+  assert(profileCalls[0].method === "GET", "getProfileSummary should use GET");
+  assert(profilePaths[0] === "/api/user/profile/summary", `profile summary path mismatch: ${profilePaths[0]}`);
+  assert(profileCalls[1].method === "PATCH", "updateProfile should use PATCH");
+  assert(profilePaths[1] === "/api/user/profile", `update profile path mismatch: ${profilePaths[1]}`);
+  assert(profileCalls[1].data.nickname === "明明", "updateProfile should pass profile payload");
+  assert(profileCalls[2].method === "PATCH", "updateProfilePreferences should use PATCH");
+  assert(profilePaths[2] === "/api/user/profile/preferences", `update preferences path mismatch: ${profilePaths[2]}`);
+  assert(profileCalls[2].data.style_goals[0] === "更利落", "updateProfilePreferences should pass preferences payload");
 
   let rejected = false;
   await withGlobals({

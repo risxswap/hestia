@@ -136,6 +136,28 @@ function getLatestReport() {
   });
 }
 
+function getProfileSummary() {
+  return authorizedRequest({
+    path: "/api/user/profile/summary"
+  });
+}
+
+function updateProfile(data) {
+  return authorizedRequest({
+    path: "/api/user/profile",
+    method: "PATCH",
+    data
+  });
+}
+
+function updateProfilePreferences(data) {
+  return authorizedRequest({
+    path: "/api/user/profile/preferences",
+    method: "PATCH",
+    data
+  });
+}
+
 function getWardrobeItems(filters) {
   const params = filters || {};
   const query = Object.keys(params)
@@ -484,6 +506,9 @@ module.exports = {
   request,
   ensureDevSession,
   getLatestReport,
+  getProfileSummary,
+  updateProfile,
+  updateProfilePreferences,
   getWardrobeItems,
   createWardrobeItem,
   updateWardrobeItem,
