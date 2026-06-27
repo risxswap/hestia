@@ -317,7 +317,17 @@ const wardrobePageConfig = {
     this.setData({
       editorVisible: true,
       editingPublicID: "",
-      draft: cloneDraft()
+      draft: cloneDraft(),
+      errorMessage: ""
+    });
+  },
+
+  handleCloseEditor() {
+    this.setData({
+      editorVisible: false,
+      editingPublicID: "",
+      draft: cloneDraft(),
+      errorMessage: ""
     });
   },
 

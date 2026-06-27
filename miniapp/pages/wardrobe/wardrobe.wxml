@@ -68,75 +68,81 @@
     </block>
   </view>
 
-  <view wx:if="{{editorVisible}}" class="card editor-panel">
-    <view class="editor-header">
-      <view>
-        <text class="section-title">{{editingPublicID ? '编辑单品' : '新增单品'}}</text>
-        <text class="muted">只记录会影响建议的关键信息，不需要完整盘点衣橱。</text>
+  <view wx:if="{{editorVisible}}" class="modal-layer">
+    <view class="modal-backdrop" catchtap="handleCloseEditor"></view>
+    <view class="modal-sheet">
+      <view class="editor-header modal-header">
+        <view>
+          <text class="section-title">{{editingPublicID ? '编辑单品' : '新增单品'}}</text>
+          <text class="muted">只记录会影响建议的关键信息，不需要完整盘点衣橱。</text>
+        </view>
+        <button class="secondary-button modal-close" bind:tap="handleCloseEditor">取消</button>
       </view>
-    </view>
 
-    <view class="form-grid">
-      <label class="field-group">
-        <text class="field-label">名称</text>
-        <input class="field" placeholder="例如：米白衬衫" value="{{draft.name}}" data-field="name" bindinput="handleDraftInput" />
-      </label>
-      <label class="field-group">
-        <text class="field-label">分类</text>
-        <input class="field" placeholder="top / bottom / outerwear" value="{{draft.category}}" data-field="category" bindinput="handleDraftInput" />
-      </label>
-      <label class="field-group">
-        <text class="field-label">颜色</text>
-        <input class="field" placeholder="例如：米白、深蓝" value="{{draft.color}}" data-field="color" bindinput="handleDraftInput" />
-      </label>
-      <label class="field-group">
-        <text class="field-label">廓形</text>
-        <input class="field" placeholder="例如：微宽松、直筒" value="{{draft.silhouette}}" data-field="silhouette" bindinput="handleDraftInput" />
-      </label>
-      <label class="field-group">
-        <text class="field-label">材质</text>
-        <input class="field" placeholder="例如：棉、羊毛、牛仔" value="{{draft.material}}" data-field="material" bindinput="handleDraftInput" />
-      </label>
-      <label class="field-group">
-        <text class="field-label">季节</text>
-        <input class="field" placeholder="例如：春秋、四季" value="{{draft.season}}" data-field="season" bindinput="handleDraftInput" />
-      </label>
-      <label class="field-group">
-        <text class="field-label">主图资产 ID</text>
-        <input class="field" placeholder="可选：已上传图片 public_id" value="{{draft.primary_asset_public_id}}" data-field="primary_asset_public_id" bindinput="handleDraftInput" />
-      </label>
-    </view>
+      <scroll-view class="modal-scroll" scroll-y="true">
+        <view class="form-grid">
+          <label class="field-group">
+            <text class="field-label">名称</text>
+            <input class="field" placeholder="例如：米白衬衫" value="{{draft.name}}" data-field="name" bindinput="handleDraftInput" />
+          </label>
+          <label class="field-group">
+            <text class="field-label">分类</text>
+            <input class="field" placeholder="top / bottom / outerwear" value="{{draft.category}}" data-field="category" bindinput="handleDraftInput" />
+          </label>
+          <label class="field-group">
+            <text class="field-label">颜色</text>
+            <input class="field" placeholder="例如：米白、深蓝" value="{{draft.color}}" data-field="color" bindinput="handleDraftInput" />
+          </label>
+          <label class="field-group">
+            <text class="field-label">廓形</text>
+            <input class="field" placeholder="例如：微宽松、直筒" value="{{draft.silhouette}}" data-field="silhouette" bindinput="handleDraftInput" />
+          </label>
+          <label class="field-group">
+            <text class="field-label">材质</text>
+            <input class="field" placeholder="例如：棉、羊毛、牛仔" value="{{draft.material}}" data-field="material" bindinput="handleDraftInput" />
+          </label>
+          <label class="field-group">
+            <text class="field-label">季节</text>
+            <input class="field" placeholder="例如：春秋、四季" value="{{draft.season}}" data-field="season" bindinput="handleDraftInput" />
+          </label>
+          <label class="field-group">
+            <text class="field-label">主图资产 ID</text>
+            <input class="field" placeholder="可选：已上传图片 public_id" value="{{draft.primary_asset_public_id}}" data-field="primary_asset_public_id" bindinput="handleDraftInput" />
+          </label>
+        </view>
 
-    <label class="field-group">
-      <text class="field-label">适用场景</text>
-      <textarea class="textarea" maxlength="160" placeholder="例如：通勤，约会，周末" value="{{draft.sceneText}}" bindinput="handleSceneInput" />
-    </label>
+        <label class="field-group">
+          <text class="field-label">适用场景</text>
+          <textarea class="textarea" maxlength="160" placeholder="例如：通勤，约会，周末" value="{{draft.sceneText}}" bindinput="handleSceneInput" />
+        </label>
 
-    <label class="field-group">
-      <text class="field-label">备注</text>
-      <textarea class="textarea" maxlength="220" placeholder="例如：肩线合适，但下摆需要扎进去" value="{{draft.user_notes}}" data-field="user_notes" bindinput="handleDraftInput" />
-    </label>
+        <label class="field-group">
+          <text class="field-label">备注</text>
+          <textarea class="textarea" maxlength="220" placeholder="例如：肩线合适，但下摆需要扎进去" value="{{draft.user_notes}}" data-field="user_notes" bindinput="handleDraftInput" />
+        </label>
 
-    <view class="status-group">
-      <text class="field-label">推荐状态</text>
-      <view class="status-actions">
-        <button class="status-button {{draft.recommendation_status === 'preferred' ? 'status-button--active' : ''}}" data-status="preferred" bind:tap="handleRecommendationStatus">优先推荐</button>
-        <button class="status-button {{draft.recommendation_status === 'normal' ? 'status-button--active' : ''}}" data-status="normal" bind:tap="handleRecommendationStatus">正常推荐</button>
-        <button class="status-button {{draft.recommendation_status === 'paused' ? 'status-button--active status-button--paused' : ''}}" data-status="paused" bind:tap="handleRecommendationStatus">暂不推荐</button>
+        <view class="status-group">
+          <text class="field-label">推荐状态</text>
+          <view class="status-actions">
+            <button class="status-button {{draft.recommendation_status === 'preferred' ? 'status-button--active' : ''}}" data-status="preferred" bind:tap="handleRecommendationStatus">优先推荐</button>
+            <button class="status-button {{draft.recommendation_status === 'normal' ? 'status-button--active' : ''}}" data-status="normal" bind:tap="handleRecommendationStatus">正常推荐</button>
+            <button class="status-button {{draft.recommendation_status === 'paused' ? 'status-button--active status-button--paused' : ''}}" data-status="paused" bind:tap="handleRecommendationStatus">暂不推荐</button>
+          </view>
+        </view>
+
+        <view class="core-row">
+          <view class="core-copy">
+            <text class="field-label">核心单品</text>
+            <text class="muted">开启后会更常进入每日建议。</text>
+          </view>
+          <switch checked="{{draft.is_core}}" bindchange="handleCoreToggle" color="#27231f" />
+        </view>
+      </scroll-view>
+
+      <view class="editor-actions modal-actions {{editingPublicID ? '' : 'editor-actions--single'}}">
+        <button wx:if="{{editingPublicID}}" class="danger-button" data-public-id="{{editingPublicID}}" bind:tap="handleDeleteItem">删除</button>
+        <button class="primary-button save-button" loading="{{saving}}" bind:tap="handleSaveItem">保存</button>
       </view>
-    </view>
-
-    <view class="core-row">
-      <view class="core-copy">
-        <text class="field-label">核心单品</text>
-        <text class="muted">开启后会更常进入每日建议。</text>
-      </view>
-      <switch checked="{{draft.is_core}}" bindchange="handleCoreToggle" color="#27231f" />
-    </view>
-
-    <view class="editor-actions {{editingPublicID ? '' : 'editor-actions--single'}}">
-      <button wx:if="{{editingPublicID}}" class="danger-button" data-public-id="{{editingPublicID}}" bind:tap="handleDeleteItem">删除</button>
-      <button class="primary-button save-button" loading="{{saving}}" bind:tap="handleSaveItem">保存</button>
     </view>
   </view>
 

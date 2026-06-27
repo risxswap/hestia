@@ -550,6 +550,7 @@ async function main() {
   assert(typeof wardrobe.config.loadWardrobe === "function", "wardrobe should load core wardrobe items");
   assert(typeof wardrobe.config.handleCategoryFilter === "function", "wardrobe should filter by category");
   assert(typeof wardrobe.config.handleOpenCreate === "function", "wardrobe should open create form");
+  assert(typeof wardrobe.config.handleCloseEditor === "function", "wardrobe should close item editor modal");
   assert(typeof wardrobe.config.handleSaveItem === "function", "wardrobe should save item");
   assert(typeof wardrobe.config.handleDeleteItem === "function", "wardrobe should delete item");
   assert(typeof wardrobe.config.loadWardrobeGaps === "function", "wardrobe should load gaps from latest report");
@@ -602,6 +603,12 @@ async function main() {
   assert(wardrobeInstance.data.visibleItems.length === 1, "wardrobe category=top should show one item");
   assert(wardrobeInstance.data.visibleItems[0].public_id === "wdi_shirt", "wardrobe category=top should keep top item");
 
+  wardrobe.config.handleOpenCreate.call(wardrobeInstance);
+  assert(wardrobeInstance.data.editorVisible === true, "wardrobe create should open editor modal");
+  wardrobe.config.handleCloseEditor.call(wardrobeInstance);
+  assert(wardrobeInstance.data.editorVisible === false, "wardrobe close should hide editor modal");
+  assert(wardrobeInstance.data.editingPublicID === "", "wardrobe close should clear editingPublicID");
+  assert(wardrobeInstance.data.draft.name === "", "wardrobe close should reset draft");
   wardrobe.config.handleOpenCreate.call(wardrobeInstance);
   wardrobe.config.handleDraftInput.call(wardrobeInstance, {
     currentTarget: {
@@ -714,6 +721,11 @@ async function main() {
   assert(wardrobeMarkup.includes("handleSaveItem"), "wardrobe page should bind save item action");
   assert(wardrobeMarkup.includes("handleCategoryFilter"), "wardrobe page should bind category filter action");
   assert(wardrobeMarkup.includes("handleEditItem"), "wardrobe page should bind edit item action");
+  assert(wardrobeMarkup.includes("modal-layer"), "wardrobe editor should render as modal layer");
+  assert(wardrobeMarkup.includes("modal-backdrop"), "wardrobe editor should include a backdrop");
+  assert(wardrobeMarkup.includes("modal-sheet"), "wardrobe editor should use a bottom sheet");
+  assert(wardrobeMarkup.includes("handleCloseEditor"), "wardrobe page should bind close editor action");
+  assert(!wardrobeMarkup.includes("class=\"card editor-panel\""), "wardrobe editor should not render as inline card");
   assert(wardrobeMarkup.includes("handleRecommendationStatus"), "wardrobe page should bind recommendation status action");
   assert(wardrobeMarkup.includes("handleCoreToggle"), "wardrobe page should bind core item toggle action");
   assert(wardrobeMarkup.includes("primaryImageSrc"), "wardrobe page should render normalized primary image source");
