@@ -14,6 +14,20 @@ function assert(condition, message) {
   }
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return {
+    promise,
+    resolve,
+    reject
+  };
+}
+
 function loadPage(relativePath, fakeApi) {
   const pagePath = path.join(root, relativePath);
   const originalPage = global.Page;
@@ -513,6 +527,8 @@ async function main() {
   );
 
   const wardrobeApiCalls = [];
+  const wardrobeUploadCalls = [];
+  const wardrobeUploads = [];
   const wardrobe = loadPage("pages/wardrobe/wardrobe.js", {
     getWardrobeItems: async () => ({
       items: [
@@ -551,6 +567,12 @@ async function main() {
     deleteWardrobeItem: async (publicID) => {
       wardrobeApiCalls.push(["delete", publicID]);
       return { public_id: publicID };
+    },
+    uploadAssetToQiniu: async (file, options) => {
+      wardrobeUploadCalls.push(["upload", file, options]);
+      const upload = createDeferred();
+      wardrobeUploads.push(upload);
+      return upload.promise;
     }
   });
   assert(wardrobe.config, "wardrobe.js should register a Page config");
@@ -562,6 +584,8 @@ async function main() {
   assert(typeof wardrobe.config.handleOpenDetail === "function", "wardrobe should open item detail page");
   assert(typeof wardrobe.config.handleSaveItem === "function", "wardrobe should save item");
   assert(typeof wardrobe.config.handleDeleteItem === "function", "wardrobe should delete item");
+  assert(typeof wardrobe.config.handleImageUpload === "function", "wardrobe should handle public image upload");
+  assert(typeof wardrobe.config.handleImageRemove === "function", "wardrobe should remove uploaded public image");
   assert(typeof wardrobe.config.loadWardrobeGaps === "function", "wardrobe should load gaps from latest report");
   assert(typeof wardrobe.mod.priorityItems === "function", "wardrobe should export priorityItems helper");
   assert(
@@ -653,11 +677,37 @@ async function main() {
 
   wardrobe.config.handleOpenCreate.call(wardrobeInstance);
   assert(wardrobeInstance.data.editorVisible === true, "wardrobe create should open editor modal");
+  assert(Array.isArray(wardrobeInstance.data.imageFiles) && wardrobeInstance.data.imageFiles.length === 0, "wardrobe create should initialize empty imageFiles");
   wardrobe.config.handleCloseEditor.call(wardrobeInstance);
   assert(wardrobeInstance.data.editorVisible === false, "wardrobe close should hide editor modal");
   assert(wardrobeInstance.data.editingPublicID === "", "wardrobe close should clear editingPublicID");
   assert(wardrobeInstance.data.draft.name === "", "wardrobe close should reset draft");
+  assert(Array.isArray(wardrobeInstance.data.imageFiles) && wardrobeInstance.data.imageFiles.length === 0, "wardrobe close should clear imageFiles");
   wardrobe.config.handleOpenCreate.call(wardrobeInstance);
+  const pendingWardrobeUpload = wardrobe.config.handleImageUpload.call(wardrobeInstance, {
+    detail: {
+      files: [{ url: "wxfile://wardrobe-create.jpg", size: 2048, type: "image/jpeg" }]
+    }
+  });
+  const duplicateWardrobeUpload = wardrobe.config.handleImageUpload.call(wardrobeInstance, {
+    detail: {
+      files: [{ url: "wxfile://wardrobe-create.jpg", size: 2048, type: "image/jpeg" }]
+    }
+  });
+  assert(wardrobeUploadCalls.length === 1, "wardrobe image upload should avoid duplicate add/success uploads while uploading");
+  assert(wardrobeUploadCalls[0][2].assetType === "wardrobe_item_photo", "wardrobe image upload should use wardrobe_item_photo asset type");
+  await wardrobe.config.handleSaveItem.call(wardrobeInstance);
+  assert(wardrobeInstance.data.errorMessage === "图片还在上传，请稍后再保存", "wardrobe save should be blocked while image is uploading");
+  wardrobeUploads[0].resolve({
+    asset_public_id: "ast_create",
+    url: "https://cdn.example.com/wardrobe-create.jpg",
+    object_key: "users/u1/assets/ast_create.jpg"
+  });
+  await pendingWardrobeUpload;
+  await duplicateWardrobeUpload;
+  assert(wardrobeInstance.data.draft.primary_asset_public_id === "ast_create", "wardrobe upload success should set draft primary asset id");
+  assert(wardrobeInstance.data.imageFiles[0].url === "https://cdn.example.com/wardrobe-create.jpg", "wardrobe upload success should show uploaded image url");
+  assert(wardrobeInstance.data.imageUploadError === "", "wardrobe upload success should clear image error");
   wardrobe.config.handleDraftInput.call(wardrobeInstance, {
     currentTarget: {
       dataset: {
@@ -680,10 +730,28 @@ async function main() {
   });
   await wardrobe.config.handleSaveItem.call(wardrobeInstance);
   assert(wardrobeApiCalls[0][0] === "create", "wardrobe save should create a new item");
+  assert(wardrobeApiCalls[0][1].primary_asset_public_id === "ast_create", "wardrobe create payload should include uploaded primary asset id");
   assert(
     wardrobeApiCalls[0][1].recommendation_status === "normal",
     "wardrobe create payload should default recommendation_status to normal"
   );
+  wardrobe.config.handleOpenCreate.call(wardrobeInstance);
+  const removedWardrobeUpload = wardrobe.config.handleImageUpload.call(wardrobeInstance, {
+    detail: {
+      files: [{ url: "wxfile://wardrobe-removed.jpg", size: 2048, type: "image/jpeg" }]
+    }
+  });
+  assert(wardrobeInstance.data.imageUploading === true, "wardrobe remove guard should start from uploading state");
+  wardrobe.config.handleImageRemove.call(wardrobeInstance);
+  assert(wardrobeInstance.data.imageUploading === false, "wardrobe image remove should clear uploading state");
+  wardrobeUploads[1].resolve({
+    asset_public_id: "ast_removed",
+    url: "https://cdn.example.com/removed.jpg",
+    object_key: "users/u1/assets/ast_removed.jpg"
+  });
+  await removedWardrobeUpload;
+  assert(wardrobeInstance.data.draft.primary_asset_public_id === "", "wardrobe removed stale upload should not restore primary asset id");
+  assert(wardrobeInstance.data.imageFiles.length === 0, "wardrobe removed stale upload should not restore imageFiles");
 
   wardrobe.config.handleEditItem.call(wardrobeInstance, {
     currentTarget: {
@@ -692,6 +760,9 @@ async function main() {
       }
     }
   });
+  assert(Array.isArray(wardrobeInstance.data.imageFiles) && wardrobeInstance.data.imageFiles.length === 0, "wardrobe edit should initialize empty imageFiles when item has no primary image");
+  wardrobe.config.handleImageRemove.call(wardrobeInstance);
+  assert(wardrobeInstance.data.draft.primary_asset_public_id === "", "wardrobe image remove should clear draft primary asset id");
   wardrobe.config.handleDraftInput.call(wardrobeInstance, {
     currentTarget: {
       dataset: {
@@ -726,6 +797,10 @@ async function main() {
   assert(updateCall[2].recommendation_status === "paused", "wardrobe edit should include changed recommendation status");
   assert(updateCall[2].is_core === false, "wardrobe edit should include changed core flag");
   assert(updateCall[2].scene_tags.join(",") === "周末,旅行", "wardrobe edit should parse scene tags");
+  assert(
+    Object.prototype.hasOwnProperty.call(updateCall[2], "primary_asset_public_id") && updateCall[2].primary_asset_public_id === "",
+    "wardrobe edit save should keep empty primary_asset_public_id so backend can clear primary image"
+  );
 
   await wardrobe.config.handleDeleteItem.call(wardrobeInstance, {
     currentTarget: {
@@ -785,13 +860,26 @@ async function main() {
   assert(wardrobeMarkup.includes("handleRecommendationStatus"), "wardrobe page should bind recommendation status action");
   assert(wardrobeMarkup.includes("handleCoreToggle"), "wardrobe page should bind core item toggle action");
   assert(wardrobeMarkup.includes("primaryImageSrc"), "wardrobe page should render normalized primary image source");
-  assert(wardrobeMarkup.includes("primary_asset_public_id"), "wardrobe page should provide primary asset public id input");
+  assert(wardrobeMarkup.includes("<t-upload"), "wardrobe editor should render TDesign upload block");
+  assert(wardrobeMarkup.includes("mediaType=\"{{imageMediaType}}\""), "wardrobe upload should restrict media type to image");
+  assert(wardrobeMarkup.includes("gridConfig=\"{{imageGridConfig}}\""), "wardrobe upload should pass TDesign gridConfig prop");
+  assert(wardrobeMarkup.includes("sizeLimit=\"{{imageSizeLimit}}\""), "wardrobe upload should pass TDesign sizeLimit prop");
+  assert(wardrobeMarkup.includes("handleImageUpload"), "wardrobe editor should bind image upload handler");
+  assert(wardrobeMarkup.includes("handleImageRemove"), "wardrobe editor should bind image remove handler");
+  assert(!wardrobeMarkup.includes("主图资产 ID"), "wardrobe editor should not ask users to type primary asset id");
   assert(
     !wardrobeMarkup.includes("这里展示服务端报告识别出的关键缺口"),
     "wardrobe page should remove old report-gap-only copy"
   );
+  const wardrobePageJson = JSON.parse(read("pages/wardrobe/wardrobe.json"));
+  assert(
+    wardrobePageJson.usingComponents && wardrobePageJson.usingComponents["t-upload"] === "/miniprogram_npm/tdesign-miniprogram/upload/upload",
+    "wardrobe page should register TDesign upload component"
+  );
 
   const detailApiCalls = [];
+  const detailUploadCalls = [];
+  let detailRemoveUpload = null;
   const wardrobeDetail = loadPage("pages/wardrobe-detail/wardrobe-detail.js", {
     getWardrobeItems: async () => ({
       items: [
@@ -807,7 +895,11 @@ async function main() {
           is_core: true,
           recommendation_status: "preferred",
           scene_tags: ["通勤", "见客户"],
-          primary_image: { object_key: "wardrobe/wdi_shirt/main.jpg" }
+          primary_image: {
+            asset_public_id: "ast_old",
+            url: "https://cdn.example.com/wardrobe/wdi_shirt/main.jpg",
+            object_key: "wardrobe/wdi_shirt/main.jpg"
+          }
         }
       ]
     }),
@@ -818,12 +910,29 @@ async function main() {
     deleteWardrobeItem: async (publicID) => {
       detailApiCalls.push(["delete", publicID]);
       return { public_id: publicID };
+    },
+    uploadAssetToQiniu: async (file, options) => {
+      detailUploadCalls.push(["upload", file, options]);
+      if (file && file.url === "wxfile://detail-fail.jpg") {
+        throw new Error("七牛上传失败");
+      }
+      if (file && file.url === "wxfile://detail-pending-remove.jpg") {
+        detailRemoveUpload = createDeferred();
+        return detailRemoveUpload.promise;
+      }
+      return {
+        asset_public_id: "ast_detail",
+        url: "https://cdn.example.com/detail.jpg",
+        object_key: "users/u1/assets/ast_detail.jpg"
+      };
     }
   });
   assert(wardrobeDetail.config, "wardrobe detail should register a Page config");
   assert(typeof wardrobeDetail.config.loadWardrobeItem === "function", "wardrobe detail should load item");
   assert(typeof wardrobeDetail.config.handleOpenEdit === "function", "wardrobe detail should open edit modal");
   assert(typeof wardrobeDetail.config.handleSaveItem === "function", "wardrobe detail should save edits");
+  assert(typeof wardrobeDetail.config.handleImageUpload === "function", "wardrobe detail should handle public image upload");
+  assert(typeof wardrobeDetail.config.handleImageRemove === "function", "wardrobe detail should remove uploaded public image");
 
   const detailInstance = createPageInstance(wardrobeDetail.config);
   const originalGetAppForWardrobeDirty = global.getApp;
@@ -838,6 +947,39 @@ async function main() {
   assert(detailInstance.data.item.styleLogic, "wardrobe detail should expose style logic text");
   wardrobeDetail.config.handleOpenEdit.call(detailInstance);
   assert(detailInstance.data.editorVisible === true, "wardrobe detail edit should open editor modal");
+  assert(detailInstance.data.imageFiles[0].url === "https://cdn.example.com/wardrobe/wdi_shirt/main.jpg", "wardrobe detail edit should echo existing primary image");
+  await wardrobeDetail.config.handleImageUpload.call(detailInstance, {
+    detail: {
+      files: [{ url: "wxfile://detail.jpg", size: 4096, type: "image/jpeg" }]
+    }
+  });
+  assert(detailUploadCalls[0][2].assetType === "wardrobe_item_photo", "wardrobe detail image upload should use wardrobe_item_photo asset type");
+  assert(detailInstance.data.draft.primary_asset_public_id === "ast_detail", "wardrobe detail upload success should set draft primary asset id");
+  await wardrobeDetail.config.handleImageUpload.call(detailInstance, {
+    detail: {
+      files: [{ url: "wxfile://detail-fail.jpg", size: 4096, type: "image/jpeg" }]
+    }
+  });
+  assert(detailInstance.data.imageUploadError === "七牛上传失败", "wardrobe detail upload failure should show error");
+  assert(detailInstance.data.imageFiles[0].status === "failed", "wardrobe detail upload failure should mark imageFiles failed");
+  assert(detailInstance.data.draft.primary_asset_public_id === "ast_detail", "wardrobe detail upload failure should not overwrite existing uploaded asset id");
+  wardrobeDetail.config.handleImageRemove.call(detailInstance);
+  assert(detailInstance.data.imageFiles.length === 0, "wardrobe detail remove should clear imageFiles");
+  assert(detailInstance.data.draft.primary_asset_public_id === "", "wardrobe detail remove should clear draft primary asset id");
+  const removedDetailUpload = wardrobeDetail.config.handleImageUpload.call(detailInstance, {
+    detail: {
+      files: [{ url: "wxfile://detail-pending-remove.jpg", size: 4096, type: "image/jpeg" }]
+    }
+  });
+  wardrobeDetail.config.handleImageRemove.call(detailInstance);
+  detailRemoveUpload.resolve({
+    asset_public_id: "ast_detail_removed",
+    url: "https://cdn.example.com/detail-removed.jpg",
+    object_key: "users/u1/assets/ast_detail_removed.jpg"
+  });
+  await removedDetailUpload;
+  assert(detailInstance.data.draft.primary_asset_public_id === "", "wardrobe detail stale upload should not restore primary asset id after remove");
+  assert(detailInstance.data.imageFiles.length === 0, "wardrobe detail stale upload should not restore imageFiles after remove");
   wardrobeDetail.config.handleDraftInput.call(detailInstance, {
     currentTarget: {
       dataset: {
@@ -846,16 +988,6 @@ async function main() {
     },
     detail: {
       value: "暖白"
-    }
-  });
-  wardrobeDetail.config.handleDraftInput.call(detailInstance, {
-    currentTarget: {
-      dataset: {
-        field: "primary_asset_public_id"
-      }
-    },
-    detail: {
-      value: ""
     }
   });
   await wardrobeDetail.config.handleSaveItem.call(detailInstance);
@@ -922,6 +1054,18 @@ async function main() {
   assert(detailMarkup.includes("搭配逻辑"), "wardrobe detail should render style logic section");
   assert(detailMarkup.includes("结构化档案"), "wardrobe detail should render structured profile section");
   assert(detailMarkup.includes("最近反馈"), "wardrobe detail should render recent feedback section");
+  assert(detailMarkup.includes("<t-upload"), "wardrobe detail editor should render TDesign upload block");
+  assert(detailMarkup.includes("mediaType=\"{{imageMediaType}}\""), "wardrobe detail upload should restrict media type to image");
+  assert(detailMarkup.includes("gridConfig=\"{{imageGridConfig}}\""), "wardrobe detail upload should pass TDesign gridConfig prop");
+  assert(detailMarkup.includes("sizeLimit=\"{{imageSizeLimit}}\""), "wardrobe detail upload should pass TDesign sizeLimit prop");
+  assert(detailMarkup.includes("handleImageUpload"), "wardrobe detail editor should bind image upload handler");
+  assert(detailMarkup.includes("handleImageRemove"), "wardrobe detail editor should bind image remove handler");
+  assert(!detailMarkup.includes("主图资产 ID"), "wardrobe detail editor should not ask users to type primary asset id");
+  const wardrobeDetailPageJson = JSON.parse(read("pages/wardrobe-detail/wardrobe-detail.json"));
+  assert(
+    wardrobeDetailPageJson.usingComponents && wardrobeDetailPageJson.usingComponents["t-upload"] === "/miniprogram_npm/tdesign-miniprogram/upload/upload",
+    "wardrobe detail page should register TDesign upload component"
+  );
 
   const profile = loadPage("pages/profile/profile.js", {
     ensureDevSession: async () => ({

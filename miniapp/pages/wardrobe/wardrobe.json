@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "核心衣橱"
+  "navigationBarTitleText": "核心衣橱",
+  "usingComponents": {
+    "t-upload": "/miniprogram_npm/tdesign-miniprogram/upload/upload"
+  }
 }

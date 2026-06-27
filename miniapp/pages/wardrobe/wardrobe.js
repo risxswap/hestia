@@ -13,6 +13,8 @@ const {
   priorityItems,
   normalizeWardrobeGaps,
   buildPayload,
+  imageFilesFromItem,
+  imageFilesFromAsset,
   itemToDraft,
   categoryOptionsWithCounts,
   styleLogicForItem
@@ -35,6 +37,49 @@ function showToast(title, icon) {
       icon: icon || "none"
     });
   }
+}
+
+function getUploadFile(event) {
+  const detail = event && event.detail ? event.detail : {};
+  if (detail.file) {
+    return detail.file;
+  }
+  const files = detail.files || detail.fileList || detail.currentFiles;
+  if (Array.isArray(files) && files.length) {
+    return files[0];
+  }
+  return null;
+}
+
+function filePreviewUrl(file) {
+  const source = file || {};
+  return source.url || source.path || source.tempFilePath || "";
+}
+
+function pendingImageFiles(file) {
+  const url = filePreviewUrl(file);
+  if (!url) {
+    return [];
+  }
+  return [
+    {
+      url,
+      name: file.name || "衣服主图",
+      type: "image",
+      status: "loading"
+    }
+  ];
+}
+
+function failedImageFiles(file, message) {
+  const pending = pendingImageFiles(file);
+  if (!pending.length) {
+    return [];
+  }
+  return pending.map((item) => Object.assign({}, item, {
+    status: "failed",
+    message
+  }));
 }
 
 function confirmDelete() {
@@ -80,7 +125,21 @@ const wardrobePageConfig = {
     wardrobeDirty: false,
     editorVisible: false,
     draft: cloneDraft(),
-    editingPublicID: ""
+    editingPublicID: "",
+    imageFiles: [],
+    imageUploading: false,
+    imageUploadError: "",
+    imageGridConfig: {
+      column: 4,
+      width: 160,
+      height: 160
+    },
+    imageMediaType: ["image"],
+    imageSizeLimit: {
+      size: 8,
+      unit: "MB",
+      message: "图片大小不超过 8MB"
+    }
   },
 
   onLoad() {
@@ -182,6 +241,7 @@ const wardrobePageConfig = {
   },
 
   handleOpenCreate() {
+    this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
     const category = this.data.activeCategory && this.data.activeCategory !== "all"
       ? this.data.activeCategory
       : "top";
@@ -191,20 +251,29 @@ const wardrobePageConfig = {
       draft: cloneDraft({
         category
       }),
+      imageFiles: [],
+      imageUploading: false,
+      imageUploadError: "",
       errorMessage: ""
     });
   },
 
   handleCloseEditor() {
+    this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
     this.setData({
       editorVisible: false,
       editingPublicID: "",
       draft: cloneDraft(),
+      imageFiles: [],
+      imageUploading: false,
+      imageUploadError: "",
       errorMessage: ""
     });
+    this._imageUploadPromise = null;
   },
 
   handleEditItem(event) {
+    this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
     const dataset = getDataset(event);
     const publicID = dataset.publicId || dataset.public_id || dataset.id || "";
     const item = this.data.items.find((entry) => entry.public_id === publicID);
@@ -219,7 +288,77 @@ const wardrobePageConfig = {
       editorVisible: true,
       editingPublicID: publicID,
       draft: itemToDraft(item),
+      imageFiles: imageFilesFromItem(item),
+      imageUploading: false,
+      imageUploadError: "",
       errorMessage: ""
+    });
+  },
+
+  handleImageUpload(event) {
+    if (this.data.imageUploading) {
+      return this._imageUploadPromise || Promise.resolve([]);
+    }
+
+    const file = getUploadFile(event);
+    if (!file) {
+      return Promise.resolve([]);
+    }
+
+    this.setData({
+      imageFiles: pendingImageFiles(file),
+      imageUploading: true,
+      imageUploadError: ""
+    });
+
+    const uploadRunID = (this._imageUploadRunID || 0) + 1;
+    this._imageUploadRunID = uploadRunID;
+    this._imageUploadPromise = api.uploadAssetToQiniu(file, {
+      assetType: "wardrobe_item_photo"
+    })
+      .then((uploaded) => {
+        if (this._imageUploadRunID !== uploadRunID) {
+          return uploaded;
+        }
+        const draft = Object.assign({}, this.data.draft, {
+          primary_asset_public_id: uploaded && uploaded.asset_public_id ? uploaded.asset_public_id : ""
+        });
+        this.setData({
+          draft,
+          imageFiles: imageFilesFromAsset(uploaded),
+          imageUploading: false,
+          imageUploadError: ""
+        });
+        this._imageUploadPromise = null;
+        return uploaded;
+      })
+      .catch((error) => {
+        if (this._imageUploadRunID !== uploadRunID) {
+          return null;
+        }
+        const message = error && error.message ? error.message : "图片上传失败";
+        this.setData({
+          imageFiles: failedImageFiles(file, message),
+          imageUploading: false,
+          imageUploadError: message
+        });
+        this._imageUploadPromise = null;
+        return null;
+      });
+
+    return this._imageUploadPromise;
+  },
+
+  handleImageRemove() {
+    this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
+    this._imageUploadPromise = null;
+    this.setData({
+      imageFiles: [],
+      imageUploading: false,
+      imageUploadError: "",
+      draft: Object.assign({}, this.data.draft, {
+        primary_asset_public_id: ""
+      })
     });
   },
 
@@ -282,6 +421,13 @@ const wardrobePageConfig = {
   },
 
   async handleSaveItem() {
+    if (this.data.imageUploading) {
+      this.setData({
+        errorMessage: "图片还在上传，请稍后再保存"
+      });
+      return;
+    }
+
     const payload = buildPayload(this.data.draft);
     if (!payload.name || !payload.category) {
       this.setData({
@@ -310,7 +456,10 @@ const wardrobePageConfig = {
         saving: false,
         editorVisible: false,
         editingPublicID: "",
-        draft: cloneDraft()
+        draft: cloneDraft(),
+        imageFiles: [],
+        imageUploading: false,
+        imageUploadError: ""
       }, nextWardrobeState(nextItems, this.data.activeCategory)));
       showToast("已保存", "success");
     } catch (error) {
@@ -343,7 +492,10 @@ const wardrobePageConfig = {
         errorMessage: "",
         editorVisible: false,
         editingPublicID: "",
-        draft: cloneDraft()
+        draft: cloneDraft(),
+        imageFiles: [],
+        imageUploading: false,
+        imageUploadError: ""
       }, nextWardrobeState(nextItems, this.data.activeCategory)));
       showToast("已删除", "success");
     } catch (error) {

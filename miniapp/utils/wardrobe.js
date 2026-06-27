@@ -227,6 +227,30 @@ function buildPayload(draft) {
   return payload;
 }
 
+function imageFilesFromAsset(asset) {
+  const source = asset || {};
+  const url = source.url || source.object_key || "";
+  if (!url) {
+    return [];
+  }
+
+  const name = source.name || String(source.object_key || url).split("/").filter(Boolean).pop() || "衣服主图";
+  return [
+    {
+      url,
+      name,
+      type: "image",
+      status: "done",
+      asset_public_id: source.asset_public_id || source.public_id || "",
+      object_key: source.object_key || ""
+    }
+  ];
+}
+
+function imageFilesFromItem(item) {
+  return imageFilesFromAsset(item && item.primary_image);
+}
+
 function itemToDraft(item) {
   const decorated = decorateWardrobeItem(item);
   return cloneDraft({
@@ -271,6 +295,8 @@ module.exports = {
   priorityItems,
   normalizeWardrobeGaps,
   buildPayload,
+  imageFilesFromItem,
+  imageFilesFromAsset,
   itemToDraft,
   categoryOptionsWithCounts,
   styleLogicForItem

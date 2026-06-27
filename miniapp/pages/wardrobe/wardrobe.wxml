@@ -103,10 +103,21 @@
             <text class="field-label">季节</text>
             <input class="field" placeholder="例如：春秋、四季" value="{{draft.season}}" data-field="season" bindinput="handleDraftInput" />
           </label>
-          <label class="field-group">
-            <text class="field-label">主图资产 ID</text>
-            <input class="field" placeholder="可选：已上传图片 public_id" value="{{draft.primary_asset_public_id}}" data-field="primary_asset_public_id" bindinput="handleDraftInput" />
-          </label>
+        </view>
+
+        <view class="field-group upload-field">
+          <text class="field-label">主图</text>
+          <t-upload
+            files="{{imageFiles}}"
+            max="{{1}}"
+            mediaType="{{imageMediaType}}"
+            gridConfig="{{imageGridConfig}}"
+            sizeLimit="{{imageSizeLimit}}"
+            bind:add="handleImageUpload"
+            bind:success="handleImageUpload"
+            bind:remove="handleImageRemove"
+          />
+          <text wx:if="{{imageUploadError}}" class="upload-error">{{imageUploadError}}</text>
         </view>
 
         <label class="field-group">

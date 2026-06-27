@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "衣服详情"
+  "navigationBarTitleText": "衣服详情",
+  "usingComponents": {
+    "t-upload": "/miniprogram_npm/tdesign-miniprogram/upload/upload"
+  }
 }

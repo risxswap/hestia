@@ -7,6 +7,8 @@ const {
   normalizeWardrobeItems,
   decorateWardrobeItem,
   buildPayload,
+  imageFilesFromItem,
+  imageFilesFromAsset,
   itemToDraft
 } = wardrobeUtils;
 
@@ -27,6 +29,49 @@ function showToast(title, icon) {
       icon: icon || "none"
     });
   }
+}
+
+function getUploadFile(event) {
+  const detail = event && event.detail ? event.detail : {};
+  if (detail.file) {
+    return detail.file;
+  }
+  const files = detail.files || detail.fileList || detail.currentFiles;
+  if (Array.isArray(files) && files.length) {
+    return files[0];
+  }
+  return null;
+}
+
+function filePreviewUrl(file) {
+  const source = file || {};
+  return source.url || source.path || source.tempFilePath || "";
+}
+
+function pendingImageFiles(file) {
+  const url = filePreviewUrl(file);
+  if (!url) {
+    return [];
+  }
+  return [
+    {
+      url,
+      name: file.name || "衣服主图",
+      type: "image",
+      status: "loading"
+    }
+  ];
+}
+
+function failedImageFiles(file, message) {
+  const pending = pendingImageFiles(file);
+  if (!pending.length) {
+    return [];
+  }
+  return pending.map((item) => Object.assign({}, item, {
+    status: "failed",
+    message
+  }));
 }
 
 function confirmDelete() {
@@ -59,7 +104,21 @@ const wardrobeDetailPageConfig = {
     wardrobeDirty: false,
     editorVisible: false,
     draft: cloneDraft(),
-    editingPublicID: ""
+    editingPublicID: "",
+    imageFiles: [],
+    imageUploading: false,
+    imageUploadError: "",
+    imageGridConfig: {
+      column: 4,
+      width: 160,
+      height: 160
+    },
+    imageMediaType: ["image"],
+    imageSizeLimit: {
+      size: 8,
+      unit: "MB",
+      message: "图片大小不超过 8MB"
+    }
   },
 
   onLoad(options) {
@@ -139,20 +198,96 @@ const wardrobeDetailPageConfig = {
       return;
     }
 
+    this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
     this.setData({
       editorVisible: true,
       editingPublicID: this.data.item.public_id,
       draft: itemToDraft(this.data.item),
+      imageFiles: imageFilesFromItem(this.data.item),
+      imageUploading: false,
+      imageUploadError: "",
       errorMessage: ""
     });
   },
 
   handleCloseEditor() {
+    this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
     this.setData({
       editorVisible: false,
       editingPublicID: "",
       draft: cloneDraft(),
+      imageFiles: [],
+      imageUploading: false,
+      imageUploadError: "",
       errorMessage: ""
+    });
+    this._imageUploadPromise = null;
+  },
+
+  handleImageUpload(event) {
+    if (this.data.imageUploading) {
+      return this._imageUploadPromise || Promise.resolve([]);
+    }
+
+    const file = getUploadFile(event);
+    if (!file) {
+      return Promise.resolve([]);
+    }
+
+    this.setData({
+      imageFiles: pendingImageFiles(file),
+      imageUploading: true,
+      imageUploadError: ""
+    });
+
+    const uploadRunID = (this._imageUploadRunID || 0) + 1;
+    this._imageUploadRunID = uploadRunID;
+    this._imageUploadPromise = api.uploadAssetToQiniu(file, {
+      assetType: "wardrobe_item_photo"
+    })
+      .then((uploaded) => {
+        if (this._imageUploadRunID !== uploadRunID) {
+          return uploaded;
+        }
+        const draft = Object.assign({}, this.data.draft, {
+          primary_asset_public_id: uploaded && uploaded.asset_public_id ? uploaded.asset_public_id : ""
+        });
+        this.setData({
+          draft,
+          imageFiles: imageFilesFromAsset(uploaded),
+          imageUploading: false,
+          imageUploadError: ""
+        });
+        this._imageUploadPromise = null;
+        return uploaded;
+      })
+      .catch((error) => {
+        if (this._imageUploadRunID !== uploadRunID) {
+          return null;
+        }
+        const message = error && error.message ? error.message : "图片上传失败";
+        this.setData({
+          imageFiles: failedImageFiles(file, message),
+          imageUploading: false,
+          imageUploadError: message
+        });
+        this._imageUploadPromise = null;
+        return null;
+      });
+
+    return this._imageUploadPromise;
+  },
+
+  handleImageRemove() {
+    this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
+    this._imageUploadPromise = null;
+    this.setData({
+      imageFiles: [],
+      imageUploading: false,
+      imageUploadError: "",
+      draft: Object.assign({}, this.data.draft, {
+        primary_asset_public_id: ""
+      })
     });
   },
 
@@ -215,6 +350,13 @@ const wardrobeDetailPageConfig = {
   },
 
   async handleSaveItem() {
+    if (this.data.imageUploading) {
+      this.setData({
+        errorMessage: "图片还在上传，请稍后再保存"
+      });
+      return;
+    }
+
     const publicID = this.data.editingPublicID || this.data.itemPublicID;
     const payload = buildPayload(this.data.draft);
     if (!publicID) {
@@ -243,6 +385,9 @@ const wardrobeDetailPageConfig = {
         editorVisible: false,
         editingPublicID: "",
         draft: cloneDraft(),
+        imageFiles: [],
+        imageUploading: false,
+        imageUploadError: "",
         item,
         itemPublicID: item.public_id
       });
