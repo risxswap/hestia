@@ -526,6 +526,32 @@ async function main() {
   assert(typeof wardrobe.config.handleSaveItem === "function", "wardrobe should save item");
   assert(typeof wardrobe.config.handleDeleteItem === "function", "wardrobe should delete item");
   assert(typeof wardrobe.config.loadWardrobeGaps === "function", "wardrobe should load gaps from latest report");
+  assert(typeof wardrobe.mod.priorityItems === "function", "wardrobe should export priorityItems helper");
+  assert(
+    wardrobe.config.data.categoryOptions.map((item) => item.value).join(",") === "all,top,bottom,outerwear,shoes,bag,accessory",
+    "wardrobe category options should split shoes, bag and accessory"
+  );
+  assert(
+    !wardrobe.config.data.categoryOptions.some((item) => item.label === "鞋包配饰"),
+    "wardrobe category options should not merge shoes, bag and accessory"
+  );
+  const helperPriorityItems = wardrobe.mod.priorityItems([
+    { public_id: "wdi_preferred", name: "米白衬衫", status: "active", recommendation_status: "preferred", is_core: false },
+    { public_id: "wdi_paused", name: "黑色长裙", status: "active", recommendation_status: "paused", is_core: true },
+    { public_id: "wdi_deleted", name: "灰色外套", status: "deleted", recommendation_status: "preferred", is_core: true },
+    { public_id: "wdi_core", name: "直筒牛仔裤", status: "active", recommendation_status: "normal", is_core: true },
+    { public_id: "wdi_normal", name: "帆布鞋", status: "active", recommendation_status: "normal", is_core: false }
+  ]);
+  assert(helperPriorityItems.length === 2, "priorityItems should exclude paused, deleted and non-core normal items");
+  assert(helperPriorityItems[0].public_id === "wdi_preferred", "priorityItems should sort preferred first");
+  assert(helperPriorityItems[1].public_id === "wdi_core", "priorityItems should include active normal core items");
+  const fallbackPriorityItems = wardrobe.mod.priorityItems([
+    { public_id: "wdi_core_only", name: "直筒牛仔裤", status: "active", recommendation_status: "normal", is_core: true },
+    { public_id: "wdi_normal_only", name: "帆布鞋", status: "active", recommendation_status: "normal", is_core: false },
+    { public_id: "wdi_paused_preferred", name: "黑色长裙", status: "active", recommendation_status: "paused", is_core: true }
+  ]);
+  assert(fallbackPriorityItems.length === 1, "priorityItems should keep normal core item when no preferred item exists");
+  assert(fallbackPriorityItems[0].public_id === "wdi_core_only", "priorityItems fallback should use normal core item");
   const wardrobeInstance = createPageInstance(wardrobe.config);
   await wardrobe.config.loadWardrobe.call(wardrobeInstance);
   assert(wardrobeInstance.data.items.length === 2, "wardrobe should load two core wardrobe items");
@@ -572,6 +598,48 @@ async function main() {
     wardrobeApiCalls[0][1].recommendation_status === "normal",
     "wardrobe create payload should default recommendation_status to normal"
   );
+
+  wardrobe.config.handleEditItem.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        publicId: "wdi_jeans"
+      }
+    }
+  });
+  wardrobe.config.handleDraftInput.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        field: "color"
+      }
+    },
+    detail: {
+      value: "深蓝"
+    }
+  });
+  wardrobe.config.handleSceneInput.call(wardrobeInstance, {
+    detail: {
+      value: "周末，旅行"
+    }
+  });
+  wardrobe.config.handleRecommendationStatus.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        status: "paused"
+      }
+    }
+  });
+  wardrobe.config.handleCoreToggle.call(wardrobeInstance, {
+    detail: {
+      value: false
+    }
+  });
+  await wardrobe.config.handleSaveItem.call(wardrobeInstance);
+  const updateCall = wardrobeApiCalls.find((call) => call[0] === "update" && call[1] === "wdi_jeans");
+  assert(updateCall, "wardrobe edit save should call updateWardrobeItem");
+  assert(updateCall[2].color === "深蓝", "wardrobe edit should include changed color");
+  assert(updateCall[2].recommendation_status === "paused", "wardrobe edit should include changed recommendation status");
+  assert(updateCall[2].is_core === false, "wardrobe edit should include changed core flag");
+  assert(updateCall[2].scene_tags.join(",") === "周末,旅行", "wardrobe edit should parse scene tags");
 
   await wardrobe.config.handleDeleteItem.call(wardrobeInstance, {
     currentTarget: {

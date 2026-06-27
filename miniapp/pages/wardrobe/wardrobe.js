@@ -5,8 +5,9 @@ const categoryOptions = [
   { label: "上装", value: "top" },
   { label: "下装", value: "bottom" },
   { label: "外套", value: "outerwear" },
-  { label: "连衣裙", value: "dress" },
-  { label: "鞋包配饰", value: "accessory" }
+  { label: "鞋", value: "shoes" },
+  { label: "包", value: "bag" },
+  { label: "配饰", value: "accessory" }
 ];
 
 const categoryLabels = categoryOptions.reduce((result, option) => {
@@ -105,8 +106,19 @@ function filterItems(items, category) {
 
 function priorityItems(items) {
   return items
-    .filter((item) => item.recommendation_status === "preferred")
+    .filter((item) => {
+      const status = item.status || "active";
+      const recommendationStatus = item.recommendation_status || "normal";
+      return status === "active" && recommendationStatus !== "paused" && (
+        recommendationStatus === "preferred" || item.is_core === true
+      );
+    })
     .sort((left, right) => {
+      const leftPreferred = left.recommendation_status === "preferred";
+      const rightPreferred = right.recommendation_status === "preferred";
+      if (leftPreferred !== rightPreferred) {
+        return leftPreferred ? -1 : 1;
+      }
       if (left.is_core !== right.is_core) {
         return left.is_core ? -1 : 1;
       }
