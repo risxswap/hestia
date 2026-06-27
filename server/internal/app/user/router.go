@@ -10,6 +10,7 @@ import (
 	"hestia/server/internal/domain/job"
 	"hestia/server/internal/domain/onboarding"
 	"hestia/server/internal/domain/report"
+	"hestia/server/internal/domain/wardrobe"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,6 +32,7 @@ func NewRouter(deps *baseapp.Deps) *gin.Engine {
 	job.RegisterUserRoutes(protected.Group("/jobs"), deps)
 	report.RegisterUserRoutes(protected.Group("/reports"), deps)
 	imageroute.RegisterUserRoutes(protected.Group("/image-routes"), deps)
+	wardrobe.RegisterUserRoutes(protected.Group("/wardrobe"), deps)
 	return router
 }
 
