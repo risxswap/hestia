@@ -288,7 +288,6 @@ const profilePageConfig = {
   },
 
   async handleSaveProfile() {
-    const preservedPreferencesDraft = Object.assign({}, this.data.preferencesDraft);
     this.setData({
       savingProfile: true,
       profileSaveMessage: ""
@@ -296,8 +295,9 @@ const profilePageConfig = {
 
     try {
       const summary = await api.updateProfile(profilePayloadFromDraft(this.data.profileDraft));
+      const currentPreferencesDraft = Object.assign({}, this.data.preferencesDraft);
       this.setData(Object.assign({}, normalizeProfileSummary(summary), {
-        preferencesDraft: preservedPreferencesDraft,
+        preferencesDraft: currentPreferencesDraft,
         profileSaveMessage: ""
       }));
       showToast("档案已保存", "success");
@@ -311,7 +311,6 @@ const profilePageConfig = {
 
   async handleSavePreferences() {
     const submittedDraft = Object.assign({}, this.data.preferencesDraft);
-    const preservedProfileDraft = Object.assign({}, this.data.profileDraft);
     this.setData({
       savingPreferences: true,
       preferencesSaveMessage: ""
@@ -319,8 +318,9 @@ const profilePageConfig = {
 
     try {
       const summary = await api.updateProfilePreferences(preferencesPayloadFromDraft(this.data.preferencesDraft));
+      const currentProfileDraft = Object.assign({}, this.data.profileDraft);
       this.setData(Object.assign({}, normalizeProfileSummary(summary), {
-        profileDraft: preservedProfileDraft,
+        profileDraft: currentProfileDraft,
         preferencesDraft: submittedDraft,
         preferencesSaveMessage: ""
       }));

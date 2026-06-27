@@ -54,6 +54,20 @@ function createPageInstance(pageConfig) {
   });
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return {
+    promise,
+    resolve,
+    reject
+  };
+}
+
 const initialSummary = {
   user: {
     user_public_id: "usr_test",
@@ -95,6 +109,8 @@ async function main() {
   const apiCalls = [];
   let failNextProfileUpdate = false;
   let failNextPreferencesUpdate = false;
+  let deferredProfileUpdate = null;
+  let deferredPreferencesUpdate = null;
   const apiStub = {
     getProfileSummary() {
       apiCalls.push({ name: "getProfileSummary" });
@@ -105,6 +121,11 @@ async function main() {
       if (failNextProfileUpdate) {
         failNextProfileUpdate = false;
         return Promise.reject(new Error("基础档案保存失败"));
+      }
+      if (deferredProfileUpdate) {
+        const deferred = deferredProfileUpdate;
+        deferredProfileUpdate = null;
+        return deferred.promise;
       }
       return Promise.resolve(Object.assign({}, clone(initialSummary), {
         user: Object.assign({}, initialSummary.user, {
@@ -121,6 +142,11 @@ async function main() {
       if (failNextPreferencesUpdate) {
         failNextPreferencesUpdate = false;
         return Promise.reject(new Error("偏好保存失败"));
+      }
+      if (deferredPreferencesUpdate) {
+        const deferred = deferredPreferencesUpdate;
+        deferredPreferencesUpdate = null;
+        return deferred.promise;
       }
       return Promise.resolve(Object.assign({}, clone(initialSummary), {
         profile: Object.assign({}, initialSummary.profile, {
@@ -232,6 +258,37 @@ async function main() {
   assert(page.data.preferencesDraft.avoidancesText === "未保存禁忌", "handleSaveProfile should keep unsaved preferences avoidances");
   assert(page.data.preferencesDraft.scenarioPreferencesText === "未保存场景", "handleSaveProfile should keep unsaved preferences scenarios");
 
+  const pendingProfileDeferred = createDeferred();
+  deferredProfileUpdate = pendingProfileDeferred;
+  page.setData({
+    profileDraft: Object.assign({}, page.data.profileDraft, {
+      nickname: "pending 基础保存",
+      body_notes: "pending 基础内容"
+    }),
+    preferencesDraft: {
+      styleGoalsText: "请求前目标",
+      avoidancesText: "请求前禁忌",
+      scenarioPreferencesText: "请求前场景"
+    }
+  });
+  const pendingProfileSave = page.handleSaveProfile.call(page);
+  page.setData({
+    preferencesDraft: {
+      styleGoalsText: "请求中目标",
+      avoidancesText: "请求中禁忌",
+      scenarioPreferencesText: "请求中场景"
+    }
+  });
+  pendingProfileDeferred.resolve(Object.assign({}, clone(initialSummary), {
+    user: Object.assign({}, initialSummary.user, {
+      nickname: "pending 基础保存"
+    })
+  }));
+  await pendingProfileSave;
+  assert(page.data.preferencesDraft.styleGoalsText === "请求中目标", "pending profile save should keep preferences edited during request");
+  assert(page.data.preferencesDraft.avoidancesText === "请求中禁忌", "pending profile save should keep avoidances edited during request");
+  assert(page.data.preferencesDraft.scenarioPreferencesText === "请求中场景", "pending profile save should keep scenarios edited during request");
+
   page.setData({
     profileDraft: Object.assign({}, page.data.profileDraft, {
       nickname: "未保存昵称",
@@ -257,6 +314,35 @@ async function main() {
   assert(page.data.profileDraft.nickname === "未保存昵称", "handleSavePreferences should keep unsaved profile nickname");
   assert(page.data.profileDraft.body_notes === "未保存基础档案", "handleSavePreferences should keep unsaved profile notes");
 
+  const pendingPreferencesDeferred = createDeferred();
+  deferredPreferencesUpdate = pendingPreferencesDeferred;
+  page.setData({
+    profileDraft: Object.assign({}, page.data.profileDraft, {
+      nickname: "请求前昵称",
+      body_notes: "请求前基础"
+    }),
+    preferencesDraft: {
+      styleGoalsText: "pending 偏好目标",
+      avoidancesText: "pending 偏好禁忌",
+      scenarioPreferencesText: "pending 偏好场景"
+    }
+  });
+  const pendingPreferencesSave = page.handleSavePreferences.call(page);
+  page.setData({
+    profileDraft: Object.assign({}, page.data.profileDraft, {
+      nickname: "请求中昵称",
+      body_notes: "请求中基础"
+    })
+  });
+  pendingPreferencesDeferred.resolve(Object.assign({}, clone(initialSummary), {
+    profile: Object.assign({}, initialSummary.profile, {
+      style_goal_summary: "pending 偏好目标"
+    })
+  }));
+  await pendingPreferencesSave;
+  assert(page.data.profileDraft.nickname === "请求中昵称", "pending preferences save should keep profile nickname edited during request");
+  assert(page.data.profileDraft.body_notes === "请求中基础", "pending preferences save should keep profile notes edited during request");
+
   page.setData({
     preferencesDraft: {
       styleGoalsText: "失败目标",
@@ -270,7 +356,7 @@ async function main() {
   assert(page.data.preferencesSaveMessage === "偏好保存失败", "preferences save failure should show panel message");
   assert(page.data.preferencesDraft.styleGoalsText === "失败目标", "preferences save failure should keep style goals draft");
   assert(page.data.preferencesDraft.avoidancesText === "失败禁忌", "preferences save failure should keep avoidances draft");
-  assert(page.data.profileDraft.nickname === "未保存昵称", "preferences save failure should keep other panel draft");
+  assert(page.data.profileDraft.nickname === "请求中昵称", "preferences save failure should keep other panel draft");
 
   const removedKeys = [];
   const toastCalls = [];
