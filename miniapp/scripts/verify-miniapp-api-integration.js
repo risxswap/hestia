@@ -657,6 +657,21 @@ async function main() {
   await wardrobe.config.loadWardrobeGaps.call(wardrobeInstance);
   assert(wardrobeInstance.data.gaps[0] === "浅色短外套", "wardrobe loadWardrobeGaps should stay compatible");
 
+  const wardrobeMarkup = read("pages/wardrobe/wardrobe.wxml");
+  assert(wardrobeMarkup.includes("核心衣橱"), "wardrobe page should show core wardrobe title");
+  assert(wardrobeMarkup.includes("priorityItems"), "wardrobe page should render priority item summary");
+  assert(wardrobeMarkup.includes("visibleItems"), "wardrobe page should render filtered wardrobe cards");
+  assert(wardrobeMarkup.includes("建议补齐"), "wardrobe page should keep wardrobe gaps section");
+  assert(wardrobeMarkup.includes("handleSaveItem"), "wardrobe page should bind save item action");
+  assert(wardrobeMarkup.includes("handleCategoryFilter"), "wardrobe page should bind category filter action");
+  assert(wardrobeMarkup.includes("handleEditItem"), "wardrobe page should bind edit item action");
+  assert(wardrobeMarkup.includes("handleRecommendationStatus"), "wardrobe page should bind recommendation status action");
+  assert(wardrobeMarkup.includes("handleCoreToggle"), "wardrobe page should bind core item toggle action");
+  assert(
+    !wardrobeMarkup.includes("这里展示服务端报告识别出的关键缺口"),
+    "wardrobe page should remove old report-gap-only copy"
+  );
+
   const profile = loadPage("pages/profile/profile.js", {
     ensureDevSession: async () => ({
       token: "dev_token",

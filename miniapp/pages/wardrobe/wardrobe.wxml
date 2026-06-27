@@ -1,15 +1,151 @@
-<view class="page">
-  <view class="card block">
-    <text class="title">核心衣橱</text>
-    <text class="muted">这里展示服务端报告识别出的关键缺口。</text>
+<view class="page wardrobe-page">
+  <view class="card wardrobe-top">
+    <view class="top-main">
+      <view class="top-copy">
+        <text class="eyebrow">个人长期记忆</text>
+        <text class="title">核心衣橱</text>
+        <text class="muted">已记录 {{items.length}} 件单品，会影响后续每日穿搭、发型和场景建议。</text>
+      </view>
+      <button class="primary-button add-button" bind:tap="handleOpenCreate">新增</button>
+    </view>
+    <view class="priority-summary">
+      <text class="section-title">优先参与建议</text>
+      <view wx:if="{{priorityItems.length}}" class="priority-list">
+        <block wx:for="{{priorityItems}}" wx:key="public_id">
+          <view class="priority-pill">
+            <text class="priority-name">{{item.name}}</text>
+            <text class="priority-meta">{{item.categoryLabel}}</text>
+          </view>
+        </block>
+      </view>
+      <text wx:else class="empty-copy">还没有优先推荐单品。先添加常穿、稳定且容易搭配的衣物即可。</text>
+    </view>
   </view>
-  <view class="card block">
-    <text class="subtitle">关键缺口</text>
-    <text wx:if="{{loading}}" class="muted">正在读取最新报告...</text>
-    <text wx:elif="{{errorMessage}}" class="muted">{{errorMessage}}</text>
-    <text wx:elif="{{!gaps.length}}" class="muted">暂无缺口单品。完成初版报告后会自动更新。</text>
-    <block wx:for="{{gaps}}" wx:key="*this">
-      <text class="gap">{{item}}</text>
+
+  <view class="filter-row">
+    <block wx:for="{{categoryOptions}}" wx:key="value">
+      <button
+        class="chip {{activeCategory === item.value ? 'chip--active' : ''}}"
+        data-category="{{item.value}}"
+        bind:tap="handleCategoryFilter"
+      >
+        {{item.label}}
+      </button>
     </block>
+  </view>
+
+  <view wx:if="{{loading}}" class="card state-card">
+    <text class="muted">正在读取核心衣橱...</text>
+  </view>
+  <view wx:elif="{{errorMessage}}" class="card state-card">
+    <text class="error-text">{{errorMessage}}</text>
+  </view>
+
+  <view wx:if="{{!loading && !errorMessage && !visibleItems.length}}" class="card empty-card">
+    <text class="section-title">还没有可展示的单品</text>
+    <text class="muted">添加一两件最常穿、最稳定的衣物，后续建议会更贴近真实生活。</text>
+    <button class="secondary-button empty-action" bind:tap="handleOpenCreate">添加核心单品</button>
+  </view>
+
+  <view wx:if="{{visibleItems.length}}" class="item-grid">
+    <block wx:for="{{visibleItems}}" wx:key="public_id">
+      <view class="card item-card" data-public-id="{{item.public_id}}" bind:tap="handleEditItem">
+        <image wx:if="{{item.primary_image && item.primary_image.url}}" class="item-image" src="{{item.primary_image.url}}" mode="aspectFill" />
+        <view wx:else class="item-placeholder">
+          <text>{{item.categoryLabel}}</text>
+        </view>
+        <view class="item-body">
+          <view class="item-heading">
+            <text class="item-name">{{item.name}}</text>
+            <text class="status-label {{item.isPreferred ? 'status-label--preferred' : ''}} {{item.isPaused ? 'status-label--paused' : ''}}">{{item.recommendationLabel}}</text>
+          </view>
+          <text class="item-meta">{{item.categoryLabel}}</text>
+          <text wx:if="{{item.color}}" class="item-line">颜色：{{item.color}}</text>
+          <text wx:if="{{item.sceneText}}" class="item-line">场景：{{item.sceneText}}</text>
+          <button class="link-button" data-public-id="{{item.public_id}}" catchtap="handleEditItem">编辑</button>
+        </view>
+      </view>
+    </block>
+  </view>
+
+  <view wx:if="{{editorVisible}}" class="card editor-panel">
+    <view class="editor-header">
+      <view>
+        <text class="section-title">{{editingPublicID ? '编辑单品' : '新增单品'}}</text>
+        <text class="muted">只记录会影响建议的关键信息，不需要完整盘点衣橱。</text>
+      </view>
+    </view>
+
+    <view class="form-grid">
+      <label class="field-group">
+        <text class="field-label">名称</text>
+        <input class="field" placeholder="例如：米白衬衫" value="{{draft.name}}" data-field="name" bindinput="handleDraftInput" />
+      </label>
+      <label class="field-group">
+        <text class="field-label">分类</text>
+        <input class="field" placeholder="top / bottom / outerwear" value="{{draft.category}}" data-field="category" bindinput="handleDraftInput" />
+      </label>
+      <label class="field-group">
+        <text class="field-label">颜色</text>
+        <input class="field" placeholder="例如：米白、深蓝" value="{{draft.color}}" data-field="color" bindinput="handleDraftInput" />
+      </label>
+      <label class="field-group">
+        <text class="field-label">廓形</text>
+        <input class="field" placeholder="例如：微宽松、直筒" value="{{draft.silhouette}}" data-field="silhouette" bindinput="handleDraftInput" />
+      </label>
+      <label class="field-group">
+        <text class="field-label">材质</text>
+        <input class="field" placeholder="例如：棉、羊毛、牛仔" value="{{draft.material}}" data-field="material" bindinput="handleDraftInput" />
+      </label>
+      <label class="field-group">
+        <text class="field-label">季节</text>
+        <input class="field" placeholder="例如：春秋、四季" value="{{draft.season}}" data-field="season" bindinput="handleDraftInput" />
+      </label>
+    </view>
+
+    <label class="field-group">
+      <text class="field-label">适用场景</text>
+      <textarea class="textarea" maxlength="160" placeholder="例如：通勤，约会，周末" value="{{draft.sceneText}}" bindinput="handleSceneInput" />
+    </label>
+
+    <label class="field-group">
+      <text class="field-label">备注</text>
+      <textarea class="textarea" maxlength="220" placeholder="例如：肩线合适，但下摆需要扎进去" value="{{draft.user_notes}}" data-field="user_notes" bindinput="handleDraftInput" />
+    </label>
+
+    <view class="status-group">
+      <text class="field-label">推荐状态</text>
+      <view class="status-actions">
+        <button class="status-button {{draft.recommendation_status === 'preferred' ? 'status-button--active' : ''}}" data-status="preferred" bind:tap="handleRecommendationStatus">优先推荐</button>
+        <button class="status-button {{draft.recommendation_status === 'normal' ? 'status-button--active' : ''}}" data-status="normal" bind:tap="handleRecommendationStatus">正常推荐</button>
+        <button class="status-button {{draft.recommendation_status === 'paused' ? 'status-button--active status-button--paused' : ''}}" data-status="paused" bind:tap="handleRecommendationStatus">暂不推荐</button>
+      </view>
+    </view>
+
+    <view class="core-row">
+      <view class="core-copy">
+        <text class="field-label">核心单品</text>
+        <text class="muted">开启后会更常进入每日建议。</text>
+      </view>
+      <switch checked="{{draft.is_core}}" bindchange="handleCoreToggle" color="#27231f" />
+    </view>
+
+    <view class="editor-actions {{editingPublicID ? '' : 'editor-actions--single'}}">
+      <button wx:if="{{editingPublicID}}" class="danger-button" data-public-id="{{editingPublicID}}" bind:tap="handleDeleteItem">删除</button>
+      <button class="primary-button save-button" loading="{{saving}}" bind:tap="handleSaveItem">保存</button>
+    </view>
+  </view>
+
+  <view class="card gaps-section">
+    <view class="section-heading">
+      <text class="section-title">建议补齐</text>
+      <text class="muted">这些是报告里的缺口方向，仅作为搭配结构参考，不提供商品链接。</text>
+    </view>
+    <view wx:if="{{gaps.length}}" class="gap-list">
+      <block wx:for="{{gaps}}" wx:key="*this">
+        <text class="gap-item">{{item}}</text>
+      </block>
+    </view>
+    <text wx:else class="empty-copy">暂无明确缺口。后续报告和反馈会继续更新。</text>
   </view>
 </view>
