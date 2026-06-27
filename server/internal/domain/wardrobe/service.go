@@ -36,12 +36,34 @@ type itemRepository interface {
 	SoftDeleteItem(ctx context.Context, userID int64, publicID string) error
 }
 
+type ImageURLSigner interface {
+	PrivateDownloadURL(ctx context.Context, objectKey string) (string, error)
+}
+
+type ImageURLSignErrorHandler func(ctx context.Context, objectKey string, err error)
+
 type Service struct {
-	repo Repository
+	repo                     Repository
+	imageURLSigner           ImageURLSigner
+	imageURLSignErrorHandler ImageURLSignErrorHandler
 }
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
+}
+
+func (s *Service) SetImageURLSigner(signer ImageURLSigner) {
+	if s == nil {
+		return
+	}
+	s.imageURLSigner = signer
+}
+
+func (s *Service) SetImageURLSignErrorHandler(handler ImageURLSignErrorHandler) {
+	if s == nil {
+		return
+	}
+	s.imageURLSignErrorHandler = handler
 }
 
 func (s *Service) CreateCoreItems(ctx context.Context, userID int64, inputs []Input) ([]Item, error) {
@@ -89,7 +111,12 @@ func (s *Service) ListItems(ctx context.Context, userID int64, filter ListFilter
 	if err != nil {
 		return nil, err
 	}
-	return repo.ListItems(ctx, userID, filter)
+	items, err := repo.ListItems(ctx, userID, filter)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichPrimaryImageURLs(ctx, items)
+	return items, nil
 }
 
 func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInput) (Item, error) {
@@ -131,7 +158,11 @@ func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInpu
 		RecommendationStatus: recommendationStatus,
 		Status:               StatusActive,
 	}
-	return repo.CreateItem(ctx, item, strings.TrimSpace(input.PrimaryAssetPublicID))
+	created, err := repo.CreateItem(ctx, item, strings.TrimSpace(input.PrimaryAssetPublicID))
+	if err != nil {
+		return Item{}, err
+	}
+	return s.enrichPrimaryImageURL(ctx, created), nil
 }
 
 func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string, input UpdateInput) (Item, error) {
@@ -164,7 +195,11 @@ func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string,
 	if err != nil {
 		return Item{}, err
 	}
-	return repo.UpdateItem(ctx, userID, strings.TrimSpace(publicID), input)
+	item, err := repo.UpdateItem(ctx, userID, strings.TrimSpace(publicID), input)
+	if err != nil {
+		return Item{}, err
+	}
+	return s.enrichPrimaryImageURL(ctx, item), nil
 }
 
 func (s *Service) SoftDeleteItem(ctx context.Context, userID int64, publicID string) error {
@@ -212,6 +247,30 @@ func (s *Service) itemRepo() (itemRepository, error) {
 		return nil, ErrRepositoryUnsupported
 	}
 	return repo, nil
+}
+
+func (s *Service) enrichPrimaryImageURLs(ctx context.Context, items []Item) {
+	for i := range items {
+		items[i] = s.enrichPrimaryImageURL(ctx, items[i])
+	}
+}
+
+func (s *Service) enrichPrimaryImageURL(ctx context.Context, item Item) Item {
+	if item.PrimaryImage == nil {
+		return item
+	}
+	image := *item.PrimaryImage
+	image.URL = ""
+	objectKey := strings.TrimSpace(image.ObjectKey)
+	if s != nil && s.imageURLSigner != nil && objectKey != "" {
+		if url, err := s.imageURLSigner.PrivateDownloadURL(ctx, objectKey); err == nil {
+			image.URL = strings.TrimSpace(url)
+		} else if s.imageURLSignErrorHandler != nil {
+			s.imageURLSignErrorHandler(ctx, objectKey, err)
+		}
+	}
+	item.PrimaryImage = &image
+	return item
 }
 
 func isValidRecommendationStatus(status string) bool {

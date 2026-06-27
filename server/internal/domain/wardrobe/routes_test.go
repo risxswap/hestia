@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -50,6 +52,57 @@ func TestListItemsReturnsOnlyCurrentUserItems(t *testing.T) {
 	}
 }
 
+func TestListItemsInjectsPrimaryImageURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newRouteMemoryWardrobeRepo()
+	repo.add(wardrobe.Item{
+		PublicID:             "wdi_owned",
+		UserID:               12,
+		Name:                 "米白衬衫",
+		Category:             "top",
+		RecommendationStatus: wardrobe.RecommendationStatusNormal,
+		Status:               wardrobe.StatusActive,
+		IsCore:               true,
+		PrimaryImage: &wardrobe.Image{
+			AssetPublicID: "ast_owned",
+			ObjectKey:     "users/12/wardrobe/ast_owned.jpg",
+		},
+	})
+	service := wardrobe.NewService(repo)
+	service.SetImageURLSigner(routeImageURLSignerFunc(func(_ context.Context, objectKey string) (string, error) {
+		return fmt.Sprintf("https://private.example.test/%s?token=short", objectKey), nil
+	}))
+	router := newWardrobeRouteTestRouterWithService(service)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/user/wardrobe/items", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+		Data struct {
+			Items []wardrobe.Item `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Data.Items) != 1 {
+		t.Fatalf("expected one item, got %#v", body.Data.Items)
+	}
+	if body.Data.Items[0].PrimaryImage == nil {
+		t.Fatalf("expected primary image, got nil")
+	}
+	expectedURL := "https://private.example.test/users/12/wardrobe/ast_owned.jpg?token=short"
+	if body.Data.Items[0].PrimaryImage.URL != expectedURL {
+		t.Fatalf("expected primary image URL %q, got %#v", expectedURL, body.Data.Items[0].PrimaryImage)
+	}
+}
+
 func TestListItemsReturnsRequestFailedWhenRepositoryUnsupported(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newWardrobeRouteTestRouterWithService(wardrobe.NewService(routeCoreOnlyWardrobeRepo{}))
@@ -83,6 +136,40 @@ func TestCreateItemRejectsEmptyName(t *testing.T) {
 	}
 }
 
+func TestCreateItemInjectsPrimaryImageURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newRouteMemoryWardrobeRepo()
+	service := wardrobe.NewService(repo)
+	service.SetImageURLSigner(routeImageURLSignerFunc(func(_ context.Context, objectKey string) (string, error) {
+		return fmt.Sprintf("https://private.example.test/%s?token=short", objectKey), nil
+	}))
+	router := newWardrobeRouteTestRouterWithService(service)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/user/wardrobe/items", bytes.NewBufferString(`{"name":"米白衬衫","category":"top","primary_asset_public_id":"ast_created"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string        `json:"code"`
+		Data wardrobe.Item `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.PrimaryImage == nil {
+		t.Fatalf("expected primary image, got nil")
+	}
+	expectedURL := "https://private.example.test/users/12/wardrobe/ast_created.jpg?token=short"
+	if body.Data.PrimaryImage.URL != expectedURL {
+		t.Fatalf("expected signed create URL %q, got %#v", expectedURL, body.Data.PrimaryImage)
+	}
+}
+
 func TestPatchItemUpdatesRecommendationStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
@@ -110,6 +197,95 @@ func TestPatchItemUpdatesRecommendationStatus(t *testing.T) {
 	}
 	if body.Data.RecommendationStatus != wardrobe.RecommendationStatusPaused {
 		t.Fatalf("expected paused recommendation status, got %#v", body.Data)
+	}
+}
+
+func TestPatchItemInjectsPrimaryImageURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newRouteMemoryWardrobeRepo()
+	repo.add(wardrobe.Item{PublicID: "wdi_owned", UserID: 12, Name: "米白衬衫", Category: "top", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
+	service := wardrobe.NewService(repo)
+	service.SetImageURLSigner(routeImageURLSignerFunc(func(_ context.Context, objectKey string) (string, error) {
+		return fmt.Sprintf("https://private.example.test/%s?token=short", objectKey), nil
+	}))
+	router := newWardrobeRouteTestRouterWithService(service)
+
+	request := httptest.NewRequest(http.MethodPatch, "/api/user/wardrobe/items/wdi_owned", bytes.NewBufferString(`{"primary_asset_public_id":"ast_updated"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string        `json:"code"`
+		Data wardrobe.Item `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.PrimaryImage == nil {
+		t.Fatalf("expected primary image, got nil")
+	}
+	expectedURL := "https://private.example.test/users/12/wardrobe/ast_updated.jpg?token=short"
+	if body.Data.PrimaryImage.URL != expectedURL {
+		t.Fatalf("expected signed patch URL %q, got %#v", expectedURL, body.Data.PrimaryImage)
+	}
+}
+
+func TestListItemsKeepsResponseWhenPrimaryImageSigningFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newRouteMemoryWardrobeRepo()
+	repo.add(wardrobe.Item{
+		PublicID:             "wdi_owned",
+		UserID:               12,
+		Name:                 "米白衬衫",
+		Category:             "top",
+		RecommendationStatus: wardrobe.RecommendationStatusNormal,
+		Status:               wardrobe.StatusActive,
+		IsCore:               true,
+		PrimaryImage: &wardrobe.Image{
+			AssetPublicID: "ast_owned",
+			ObjectKey:     "users/12/wardrobe/ast_owned.jpg",
+		},
+	})
+	service := wardrobe.NewService(repo)
+	signErr := errors.New("sign failed")
+	service.SetImageURLSigner(routeImageURLSignerFunc(func(_ context.Context, _ string) (string, error) {
+		return "", signErr
+	}))
+	var capturedObjectKey string
+	var capturedErr error
+	service.SetImageURLSignErrorHandler(func(_ context.Context, objectKey string, err error) {
+		capturedObjectKey = objectKey
+		capturedErr = err
+	})
+	router := newWardrobeRouteTestRouterWithService(service)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/user/wardrobe/items", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+		Data struct {
+			Items []wardrobe.Item `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.Items[0].PrimaryImage == nil || body.Data.Items[0].PrimaryImage.URL != "" {
+		t.Fatalf("expected empty URL after signing failure, got %#v", body.Data.Items[0].PrimaryImage)
+	}
+	if capturedObjectKey != "users/12/wardrobe/ast_owned.jpg" || !errors.Is(capturedErr, signErr) {
+		t.Fatalf("expected signing error handler to capture failure, key=%q err=%v", capturedObjectKey, capturedErr)
 	}
 }
 
@@ -212,6 +388,12 @@ type routeMemoryWardrobeRepo struct {
 
 type routeCoreOnlyWardrobeRepo struct{}
 
+type routeImageURLSignerFunc func(ctx context.Context, objectKey string) (string, error)
+
+func (f routeImageURLSignerFunc) PrivateDownloadURL(ctx context.Context, objectKey string) (string, error) {
+	return f(ctx, objectKey)
+}
+
 func (routeCoreOnlyWardrobeRepo) CreateCoreItems(_ context.Context, items []wardrobe.Item) ([]wardrobe.Item, error) {
 	return items, nil
 }
@@ -254,7 +436,10 @@ func (r *routeMemoryWardrobeRepo) ListItems(_ context.Context, userID int64, fil
 	return result, nil
 }
 
-func (r *routeMemoryWardrobeRepo) CreateItem(_ context.Context, item wardrobe.Item, _ string) (wardrobe.Item, error) {
+func (r *routeMemoryWardrobeRepo) CreateItem(_ context.Context, item wardrobe.Item, primaryAssetPublicID string) (wardrobe.Item, error) {
+	if primaryAssetPublicID != "" {
+		item.PrimaryImage = routePrimaryImage(primaryAssetPublicID)
+	}
 	r.add(item)
 	return item, nil
 }
@@ -294,9 +479,23 @@ func (r *routeMemoryWardrobeRepo) UpdateItem(_ context.Context, userID int64, pu
 	if input.RecommendationStatus != nil {
 		item.RecommendationStatus = *input.RecommendationStatus
 	}
+	if input.PrimaryAssetPublicID != nil {
+		if *input.PrimaryAssetPublicID == "" {
+			item.PrimaryImage = nil
+		} else {
+			item.PrimaryImage = routePrimaryImage(*input.PrimaryAssetPublicID)
+		}
+	}
 	item.UpdatedAt = time.Now().UTC()
 	r.items[publicID] = item
 	return item, nil
+}
+
+func routePrimaryImage(assetPublicID string) *wardrobe.Image {
+	return &wardrobe.Image{
+		AssetPublicID: assetPublicID,
+		ObjectKey:     fmt.Sprintf("users/12/wardrobe/%s.jpg", assetPublicID),
+	}
 }
 
 func (r *routeMemoryWardrobeRepo) SoftDeleteItem(_ context.Context, userID int64, publicID string) error {

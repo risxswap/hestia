@@ -1,9 +1,11 @@
 package wardrobe
 
 import (
+	"context"
 	"log/slog"
 
 	baseapp "hestia/server/internal/app"
+	"hestia/server/internal/domain/asset"
 
 	"github.com/gin-gonic/gin"
 )
@@ -11,11 +13,19 @@ import (
 func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 	var repo Repository
 	var logger *slog.Logger
+	service := NewService(repo)
 	if deps != nil {
 		repo = NewMySQLRepository(deps.DB)
 		logger = deps.Logger
+		service = NewService(repo)
+		service.SetImageURLSigner(asset.NewServiceFromConfig(asset.NewMySQLRepository(deps.DB), deps.Config))
+		if logger != nil {
+			service.SetImageURLSignErrorHandler(func(_ context.Context, objectKey string, err error) {
+				logger.Warn("wardrobe primary image url signing failed", "object_key", objectKey, "error", err)
+			})
+		}
 	}
-	RegisterUserRoutesWithService(group, NewService(repo), logger)
+	RegisterUserRoutesWithService(group, service, logger)
 }
 
 func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service, logger *slog.Logger) {
