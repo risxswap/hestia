@@ -27,6 +27,8 @@ const (
 	maxScenarioLength    = 40
 	maxPreferenceCount   = 12
 	maxPreferenceLength  = 60
+	minHeightCM          = 80
+	maxHeightCM          = 250
 )
 
 type Repository interface {
@@ -45,6 +47,7 @@ type Service struct {
 }
 
 var ErrValidation = errors.New("profile validation failed")
+var ErrUserNotFound = errors.New("profile user not found")
 
 type ValidationError struct {
 	Field   string
@@ -181,31 +184,57 @@ func (s *Service) CompleteOnboarding(ctx context.Context, userID int64) error {
 
 func validateUpdateProfile(request UpdateProfileRequest) (UpdateProfileInput, error) {
 	input := UpdateProfileInput{
-		Nickname:  strings.TrimSpace(request.Nickname),
-		Gender:    strings.TrimSpace(request.Gender),
+		Nickname:  sanitizePatchString(request.Nickname),
+		Gender:    sanitizePatchString(request.Gender),
 		HeightCM:  request.HeightCM,
-		BodyNotes: strings.TrimSpace(request.BodyNotes),
-		SkinNotes: strings.TrimSpace(request.SkinNotes),
-		HairNotes: strings.TrimSpace(request.HairNotes),
+		BodyNotes: sanitizePatchString(request.BodyNotes),
+		SkinNotes: sanitizePatchString(request.SkinNotes),
+		HairNotes: sanitizePatchString(request.HairNotes),
 	}
-	texts := map[string]string{
-		"nickname":   input.Nickname,
-		"gender":     input.Gender,
-		"body_notes": input.BodyNotes,
-		"skin_notes": input.SkinNotes,
-		"hair_notes": input.HairNotes,
-	}
-	for field, value := range texts {
-		if len([]rune(value)) > maxProfileTextLength {
-			return UpdateProfileInput{}, ValidationError{Field: field, Message: "too long"}
-		}
-	}
-	scenarios, err := sanitizeStringList(request.LifestyleScenarios, maxScenarioCount, maxScenarioLength, "lifestyle_scenarios")
-	if err != nil {
+	if err := validatePatchString(input.Nickname, "nickname", maxProfileTextLength); err != nil {
 		return UpdateProfileInput{}, err
 	}
-	input.LifestyleScenarios = scenarios
+	if err := validatePatchString(input.Gender, "gender", maxProfileTextLength); err != nil {
+		return UpdateProfileInput{}, err
+	}
+	if err := validatePatchString(input.BodyNotes, "body_notes", maxProfileTextLength); err != nil {
+		return UpdateProfileInput{}, err
+	}
+	if err := validatePatchString(input.SkinNotes, "skin_notes", maxProfileTextLength); err != nil {
+		return UpdateProfileInput{}, err
+	}
+	if err := validatePatchString(input.HairNotes, "hair_notes", maxProfileTextLength); err != nil {
+		return UpdateProfileInput{}, err
+	}
+	if input.HeightCM.Present && input.HeightCM.Value != nil && (*input.HeightCM.Value < minHeightCM || *input.HeightCM.Value > maxHeightCM) {
+		return UpdateProfileInput{}, ValidationError{Field: "height_cm", Message: "out of range"}
+	}
+	if request.LifestyleScenarios.Present {
+		scenarios, err := sanitizeStringList(request.LifestyleScenarios.Value, maxScenarioCount, maxScenarioLength, "lifestyle_scenarios")
+		if err != nil {
+			return UpdateProfileInput{}, err
+		}
+		input.LifestyleScenarios = PatchStringSlice{Present: true, Value: scenarios}
+	}
 	return input, nil
+}
+
+func sanitizePatchString(value PatchString) PatchString {
+	if !value.Present {
+		return value
+	}
+	value.Value = strings.TrimSpace(value.Value)
+	return value
+}
+
+func validatePatchString(value PatchString, field string, maxLength int) error {
+	if !value.Present {
+		return nil
+	}
+	if len([]rune(value.Value)) > maxLength {
+		return ValidationError{Field: field, Message: "too long"}
+	}
+	return nil
 }
 
 func validateUpdatePreferences(request UpdatePreferencesRequest) (UpdatePreferencesInput, error) {

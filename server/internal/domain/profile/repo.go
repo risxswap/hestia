@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"hestia/server/internal/common/dbutil"
 	"hestia/server/internal/common/id"
@@ -123,30 +124,36 @@ func (r *MySQLRepository) UpdateExplicitPreferences(ctx context.Context, userID 
 }
 
 func (r *MySQLRepository) updateExplicitProfile(ctx context.Context, userID int64, input UpdateProfileInput) error {
-	if input.Nickname != "" {
-		if _, err := r.ext.ExecContext(ctx, `UPDATE users SET nickname = NULLIF(?, '') WHERE id = ? AND deleted_at IS NULL`, input.Nickname, userID); err != nil {
+	if err := r.ensureUserExistsForUpdate(ctx, userID); err != nil {
+		return err
+	}
+	if input.Nickname.Present {
+		if _, err := r.ext.ExecContext(ctx, `UPDATE users SET nickname = NULLIF(?, '') WHERE id = ? AND deleted_at IS NULL`, input.Nickname.Value, userID); err != nil {
 			return err
 		}
 	}
-	profile, err := r.upsertExplicitProfile(ctx, Profile{
-		PublicID:           id.NewPublicID("prf"),
-		UserID:             userID,
-		Status:             StatusActive,
-		Gender:             input.Gender,
-		HeightCM:           input.HeightCM,
-		BodyNotes:          input.BodyNotes,
-		SkinNotes:          input.SkinNotes,
-		HairNotes:          input.HairNotes,
-		LifestyleScenarios: input.LifestyleScenarios,
-	})
+	if !hasProfileFieldPatch(input) {
+		return nil
+	}
+	profile, err := r.ensureActiveProfile(ctx, userID)
 	if err != nil {
 		return err
 	}
+	if err := r.updateExplicitProfileFields(ctx, userID, input); err != nil {
+		return err
+	}
 	facts := explicitProfileFacts(input)
-	return r.ReplaceFacts(ctx, userID, profile.ID, facts)
+	factKeys := explicitProfileFactKeys(input)
+	if len(factKeys) == 0 {
+		return nil
+	}
+	return r.ReplaceFactKeys(ctx, userID, profile.ID, factKeys, facts)
 }
 
 func (r *MySQLRepository) updateExplicitPreferences(ctx context.Context, userID int64, input UpdatePreferencesInput) error {
+	if err := r.ensureUserExistsForUpdate(ctx, userID); err != nil {
+		return err
+	}
 	profile, err := r.ensureActiveProfile(ctx, userID)
 	if err != nil {
 		return err
@@ -251,6 +258,58 @@ ON DUPLICATE KEY UPDATE
 	return r.findProfileByUserID(ctx, userID)
 }
 
+func (r *MySQLRepository) ensureUserExistsForUpdate(ctx context.Context, userID int64) error {
+	var id int64
+	err := sqlx.GetContext(ctx, r.ext, &id, `SELECT id FROM users WHERE id = ? AND deleted_at IS NULL FOR UPDATE`, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrUserNotFound
+	}
+	return err
+}
+
+func (r *MySQLRepository) updateExplicitProfileFields(ctx context.Context, userID int64, input UpdateProfileInput) error {
+	sets := make([]string, 0, 6)
+	args := make([]any, 0, 7)
+	if input.Gender.Present {
+		sets = append(sets, "gender = NULLIF(?, '')")
+		args = append(args, input.Gender.Value)
+	}
+	if input.HeightCM.Present {
+		sets = append(sets, "height_cm = ?")
+		args = append(args, input.HeightCM.Value)
+	}
+	if input.BodyNotes.Present {
+		sets = append(sets, "body_notes = NULLIF(?, '')")
+		args = append(args, input.BodyNotes.Value)
+	}
+	if input.SkinNotes.Present {
+		sets = append(sets, "skin_notes = NULLIF(?, '')")
+		args = append(args, input.SkinNotes.Value)
+	}
+	if input.HairNotes.Present {
+		sets = append(sets, "hair_notes = NULLIF(?, '')")
+		args = append(args, input.HairNotes.Value)
+	}
+	if input.LifestyleScenarios.Present {
+		scenarios, err := jsonText(input.LifestyleScenarios.Value)
+		if err != nil {
+			return err
+		}
+		sets = append(sets, "lifestyle_scenarios = CAST(? AS JSON)")
+		args = append(args, scenarios)
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, userID)
+	_, err := r.ext.ExecContext(ctx, `
+UPDATE profiles
+SET `+strings.Join(sets, ", ")+`
+WHERE user_id = ? AND deleted_at IS NULL
+`, args...)
+	return err
+}
+
 func (r *MySQLRepository) findProfileByUserID(ctx context.Context, userID int64) (Profile, error) {
 	var saved Profile
 	err := sqlx.GetContext(ctx, r.ext, &saved, `
@@ -277,6 +336,37 @@ func (r *MySQLRepository) ReplaceFacts(ctx context.Context, userID int64, profil
 		return errors.New("profile repository database is nil")
 	}
 	if _, err := r.ext.ExecContext(ctx, `UPDATE profile_facts SET deleted_at = CURRENT_TIMESTAMP(3) WHERE user_id = ? AND profile_id = ? AND deleted_at IS NULL`, userID, profileID); err != nil {
+		return err
+	}
+	for _, fact := range facts {
+		raw, err := jsonText(fact.Value)
+		if err != nil {
+			return err
+		}
+		if _, err := r.ext.ExecContext(ctx, `
+INSERT INTO profile_facts (user_id, profile_id, fact_key, fact_value, source, confirmed_at)
+VALUES (?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP(3))
+`, userID, profileID, fact.Key, raw, fact.Source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *MySQLRepository) ReplaceFactKeys(ctx context.Context, userID int64, profileID int64, factKeys []string, facts []Fact) error {
+	if r == nil || r.ext == nil {
+		return errors.New("profile repository database is nil")
+	}
+	if len(factKeys) == 0 {
+		return nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(factKeys)), ",")
+	args := make([]any, 0, 2+len(factKeys))
+	args = append(args, userID, profileID)
+	for _, key := range factKeys {
+		args = append(args, key)
+	}
+	if _, err := r.ext.ExecContext(ctx, `UPDATE profile_facts SET deleted_at = CURRENT_TIMESTAMP(3) WHERE user_id = ? AND profile_id = ? AND deleted_at IS NULL AND fact_key IN (`+placeholders+`)`, args...); err != nil {
 		return err
 	}
 	for _, fact := range facts {
@@ -475,16 +565,39 @@ func decodeStringSlice(raw json.RawMessage) ([]string, error) {
 
 func explicitProfileFacts(input UpdateProfileInput) []Fact {
 	facts := make([]Fact, 0, 3)
-	if input.Gender != "" {
-		facts = append(facts, Fact{Key: "gender", Value: input.Gender, Source: SourceUser})
+	if input.Gender.Present && input.Gender.Value != "" {
+		facts = append(facts, Fact{Key: "gender", Value: input.Gender.Value, Source: SourceUser})
 	}
-	if input.HeightCM != nil {
-		facts = append(facts, Fact{Key: "height_cm", Value: input.HeightCM, Source: SourceUser})
+	if input.HeightCM.Present && input.HeightCM.Value != nil {
+		facts = append(facts, Fact{Key: "height_cm", Value: input.HeightCM.Value, Source: SourceUser})
 	}
-	if len(input.LifestyleScenarios) > 0 {
-		facts = append(facts, Fact{Key: "lifestyle_scenarios", Value: input.LifestyleScenarios, Source: SourceUser})
+	if input.LifestyleScenarios.Present {
+		facts = append(facts, Fact{Key: "lifestyle_scenarios", Value: input.LifestyleScenarios.Value, Source: SourceUser})
 	}
 	return facts
+}
+
+func explicitProfileFactKeys(input UpdateProfileInput) []string {
+	keys := make([]string, 0, 3)
+	if input.Gender.Present {
+		keys = append(keys, "gender")
+	}
+	if input.HeightCM.Present {
+		keys = append(keys, "height_cm")
+	}
+	if input.LifestyleScenarios.Present {
+		keys = append(keys, "lifestyle_scenarios")
+	}
+	return keys
+}
+
+func hasProfileFieldPatch(input UpdateProfileInput) bool {
+	return input.Gender.Present ||
+		input.HeightCM.Present ||
+		input.BodyNotes.Present ||
+		input.SkinNotes.Present ||
+		input.HairNotes.Present ||
+		input.LifestyleScenarios.Present
 }
 
 func explicitPreferences(input UpdatePreferencesInput) []Pref {

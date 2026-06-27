@@ -779,12 +779,24 @@ func (r *memoryProfileRepo) Summary(_ context.Context, userID int64) (profile.Su
 func (r *memoryProfileRepo) UpdateExplicitProfile(_ context.Context, userID int64, input profile.UpdateProfileInput) (profile.Summary, error) {
 	item := r.byUser[userID]
 	item.UserID = userID
-	item.Gender = input.Gender
-	item.HeightCM = input.HeightCM
-	item.BodyNotes = input.BodyNotes
-	item.SkinNotes = input.SkinNotes
-	item.HairNotes = input.HairNotes
-	item.LifestyleScenarios = append([]string(nil), input.LifestyleScenarios...)
+	if input.Gender.Present {
+		item.Gender = input.Gender.Value
+	}
+	if input.HeightCM.Present {
+		item.HeightCM = input.HeightCM.Value
+	}
+	if input.BodyNotes.Present {
+		item.BodyNotes = input.BodyNotes.Value
+	}
+	if input.SkinNotes.Present {
+		item.SkinNotes = input.SkinNotes.Value
+	}
+	if input.HairNotes.Present {
+		item.HairNotes = input.HairNotes.Value
+	}
+	if input.LifestyleScenarios.Present {
+		item.LifestyleScenarios = append([]string(nil), input.LifestyleScenarios.Value...)
+	}
 	r.byUser[userID] = item
 	return r.Summary(context.Background(), userID)
 }

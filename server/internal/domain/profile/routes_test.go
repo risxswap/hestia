@@ -2,6 +2,7 @@ package profile_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -248,7 +249,8 @@ func TestPatchProfileUpdatesExplicitProfileFields(t *testing.T) {
 	if repo.lastProfileUserID != 12 {
 		t.Fatalf("expected user 12, got %d", repo.lastProfileUserID)
 	}
-	if repo.lastProfileInput.Nickname != "明明" || repo.lastProfileInput.BodyNotes != "希望通勤更利落" {
+	if !repo.lastProfileInput.Nickname.Present || repo.lastProfileInput.Nickname.Value != "明明" ||
+		!repo.lastProfileInput.BodyNotes.Present || repo.lastProfileInput.BodyNotes.Value != "希望通勤更利落" {
 		t.Fatalf("expected captured profile input, got %#v", repo.lastProfileInput)
 	}
 	var body struct {
@@ -267,6 +269,42 @@ func TestPatchProfileUpdatesExplicitProfileFields(t *testing.T) {
 		{Key: "report", Title: "报告与路线", Summary: "暂无初版报告"},
 		{Key: "privacy", Title: "隐私与数据", Summary: "照片、档案、反馈可管理"},
 	})
+}
+
+func TestPatchProfileOnlyUpdatesPresentFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &routeProfileRepo{
+		summary: profile.Summary{
+			User: profile.UserSummary{UserPublicID: "usr_test", Nickname: "新昵称", OnboardingStatus: "completed"},
+			Profile: &profile.ProfileSummary{
+				ProfilePublicID:    "prf_test",
+				Gender:             "female",
+				HeightCM:           intPtr(165),
+				BodyNotes:          "保留身形记录",
+				SkinNotes:          "保留肤色记录",
+				HairNotes:          "保留发型记录",
+				LifestyleScenarios: []string{"通勤"},
+			},
+			MemorySummary: profile.MemorySummary{FactCount: 3},
+		},
+	}
+	router := newProfileRouteTestRouter(repo)
+	request := httptest.NewRequest(http.MethodPatch, "/api/user/profile", strings.NewReader(`{"nickname":"新昵称"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	input := repo.lastProfileInput
+	if !input.Nickname.Present || input.Nickname.Value != "新昵称" {
+		t.Fatalf("expected nickname to be present, got %#v", input.Nickname)
+	}
+	if input.Gender.Present || input.HeightCM.Present || input.BodyNotes.Present || input.SkinNotes.Present || input.HairNotes.Present || input.LifestyleScenarios.Present {
+		t.Fatalf("expected omitted profile fields to stay absent, got %#v", input)
+	}
 }
 
 func TestPatchPreferencesUpdatesExplicitPrefs(t *testing.T) {
@@ -315,8 +353,38 @@ func TestPatchProfileRejectsInvalidInput(t *testing.T) {
 		t.Fatalf("expected 400, got %d body=%s", recorder.Code, recorder.Body.String())
 	}
 	assertErrorCode(t, recorder.Body.Bytes(), "profile.validation_failed")
-	if repo.lastProfileInput.BodyNotes != "" {
+	if repo.lastProfileInput.BodyNotes.Present {
 		t.Fatalf("expected invalid input not to reach repo, got %#v", repo.lastProfileInput)
+	}
+}
+
+func TestPatchProfileRejectsInvalidHeightRange(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "negative", body: `{"height_cm":-1}`},
+		{name: "too high", body: `{"height_cm":251}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &routeProfileRepo{}
+			router := newProfileRouteTestRouter(repo)
+			request := httptest.NewRequest(http.MethodPatch, "/api/user/profile", strings.NewReader(tt.body))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			router.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", recorder.Code, recorder.Body.String())
+			}
+			assertErrorCode(t, recorder.Body.Bytes(), "profile.validation_failed")
+			if repo.lastProfileInput.HeightCM.Present {
+				t.Fatalf("expected invalid height not to reach repo, got %#v", repo.lastProfileInput)
+			}
+		})
 	}
 }
 
@@ -339,6 +407,22 @@ func TestPatchPreferencesRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestPatchProfileReturnsNotFoundWhenUserMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &routeProfileRepo{err: profile.ErrUserNotFound}
+	router := newProfileRouteTestRouter(repo)
+	request := httptest.NewRequest(http.MethodPatch, "/api/user/profile", strings.NewReader(`{"nickname":"新昵称"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	assertErrorCode(t, recorder.Body.Bytes(), "profile.user_not_found")
+}
+
 func TestMySQLUpdateExplicitProfileWritesUserProfileAndFacts(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -349,11 +433,14 @@ func TestMySQLUpdateExplicitProfileWritesUserProfileAndFacts(t *testing.T) {
 	userID := int64(12)
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT id FROM users WHERE id = \? AND deleted_at IS NULL FOR UPDATE`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(userID))
 	mock.ExpectExec(`UPDATE users SET nickname = NULLIF\(\?, ''\) WHERE id = \? AND deleted_at IS NULL`).
 		WithArgs("明明", userID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?s)INSERT INTO profiles.*ON DUPLICATE KEY UPDATE`).
-		WithArgs(sqlmock.AnyArg(), userID, "active", "female", 165, "希望通勤更利落", "中性偏暖", "锁骨发", `["通勤"]`).
+		WithArgs(sqlmock.AnyArg(), userID, "active").
 		WillReturnResult(sqlmock.NewResult(34, 1))
 	mock.ExpectQuery(`(?s)SELECT.*FROM profiles.*WHERE user_id = \?`).
 		WithArgs(userID).
@@ -369,8 +456,11 @@ func TestMySQLUpdateExplicitProfileWritesUserProfileAndFacts(t *testing.T) {
 			"hair_notes",
 			"style_goal_summary",
 		}).AddRow(int64(34), "prf_test", userID, "active", "female", 165, "希望通勤更利落", "中性偏暖", "锁骨发", ""))
-	mock.ExpectExec(`UPDATE profile_facts SET deleted_at = CURRENT_TIMESTAMP\(3\) WHERE user_id = \? AND profile_id = \? AND deleted_at IS NULL`).
-		WithArgs(userID, int64(34)).
+	mock.ExpectExec(`(?s)UPDATE profiles.*gender = NULLIF\(\?, ''\).*height_cm = \?.*body_notes = NULLIF\(\?, ''\).*skin_notes = NULLIF\(\?, ''\).*hair_notes = NULLIF\(\?, ''\).*lifestyle_scenarios = CAST\(\? AS JSON\).*WHERE user_id = \?`).
+		WithArgs("female", 165, "希望通勤更利落", "中性偏暖", "锁骨发", `["通勤"]`, userID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE profile_facts SET deleted_at = CURRENT_TIMESTAMP\(3\) WHERE user_id = \? AND profile_id = \? AND deleted_at IS NULL AND fact_key IN \(\?,\?,\?\)`).
+		WithArgs(userID, int64(34), "gender", "height_cm", "lifestyle_scenarios").
 		WillReturnResult(sqlmock.NewResult(0, 3))
 	mock.ExpectExec(`INSERT INTO profile_facts`).
 		WithArgs(userID, int64(34), "gender", `"female"`, "user").
@@ -385,19 +475,75 @@ func TestMySQLUpdateExplicitProfileWritesUserProfileAndFacts(t *testing.T) {
 	expectSummaryQueries(mock, userID)
 
 	summary, err := repo.UpdateExplicitProfile(context.Background(), userID, profile.UpdateProfileInput{
-		Nickname:           "明明",
-		Gender:             "female",
-		HeightCM:           intPtr(165),
-		BodyNotes:          "希望通勤更利落",
-		SkinNotes:          "中性偏暖",
-		HairNotes:          "锁骨发",
-		LifestyleScenarios: []string{"通勤"},
+		Nickname:           profile.PatchString{Present: true, Value: "明明"},
+		Gender:             profile.PatchString{Present: true, Value: "female"},
+		HeightCM:           profile.PatchInt{Present: true, Value: intPtr(165)},
+		BodyNotes:          profile.PatchString{Present: true, Value: "希望通勤更利落"},
+		SkinNotes:          profile.PatchString{Present: true, Value: "中性偏暖"},
+		HairNotes:          profile.PatchString{Present: true, Value: "锁骨发"},
+		LifestyleScenarios: profile.PatchStringSlice{Present: true, Value: []string{"通勤"}},
 	})
 	if err != nil {
 		t.Fatalf("update profile: %v", err)
 	}
 	if summary.User.UserPublicID != "usr_test" {
 		t.Fatalf("expected refreshed summary, got %#v", summary)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestMySQLUpdateExplicitProfileNicknameOnlyDoesNotReplaceFacts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("create sql mock: %v", err)
+	}
+	defer db.Close()
+	repo := profile.NewMySQLRepository(sqlx.NewDb(db, "sqlmock"))
+	userID := int64(12)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT id FROM users WHERE id = \? AND deleted_at IS NULL FOR UPDATE`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(userID))
+	mock.ExpectExec(`UPDATE users SET nickname = NULLIF\(\?, ''\) WHERE id = \? AND deleted_at IS NULL`).
+		WithArgs("新昵称", userID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	expectSummaryQueries(mock, userID)
+
+	_, err = repo.UpdateExplicitProfile(context.Background(), userID, profile.UpdateProfileInput{
+		Nickname: profile.PatchString{Present: true, Value: "新昵称"},
+	})
+	if err != nil {
+		t.Fatalf("update profile: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestMySQLUpdateExplicitProfileReturnsUserNotFound(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("create sql mock: %v", err)
+	}
+	defer db.Close()
+	repo := profile.NewMySQLRepository(sqlx.NewDb(db, "sqlmock"))
+	userID := int64(12)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT id FROM users WHERE id = \? AND deleted_at IS NULL FOR UPDATE`).
+		WithArgs(userID).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+
+	_, err = repo.UpdateExplicitProfile(context.Background(), userID, profile.UpdateProfileInput{
+		Nickname: profile.PatchString{Present: true, Value: "新昵称"},
+	})
+	if !errors.Is(err, profile.ErrUserNotFound) {
+		t.Fatalf("expected user not found, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
@@ -414,6 +560,9 @@ func TestMySQLUpdateExplicitPreferencesReplacesPrefsWithUserSource(t *testing.T)
 	userID := int64(12)
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT id FROM users WHERE id = \? AND deleted_at IS NULL FOR UPDATE`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(userID))
 	mock.ExpectExec(`(?s)INSERT INTO profiles.*ON DUPLICATE KEY UPDATE`).
 		WithArgs(sqlmock.AnyArg(), userID, "active").
 		WillReturnResult(sqlmock.NewResult(34, 1))

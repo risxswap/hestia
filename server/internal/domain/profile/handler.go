@@ -55,6 +55,10 @@ func (h *Handler) UpdateProfile(c *gin.Context) {
 			response.Error(c, http.StatusBadRequest, "profile.validation_failed", "请求参数不正确")
 			return
 		}
+		if errors.Is(err, ErrUserNotFound) {
+			response.Error(c, http.StatusNotFound, "profile.user_not_found", "用户不存在")
+			return
+		}
 		h.logger.Error("update profile failed", "error", err, "user_id", user.UserID)
 		response.Error(c, http.StatusInternalServerError, "profile.update_failed", "保存档案失败")
 		return
@@ -77,6 +81,10 @@ func (h *Handler) UpdatePreferences(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, ErrValidation) {
 			response.Error(c, http.StatusBadRequest, "profile.validation_failed", "请求参数不正确")
+			return
+		}
+		if errors.Is(err, ErrUserNotFound) {
+			response.Error(c, http.StatusNotFound, "profile.user_not_found", "用户不存在")
 			return
 		}
 		h.logger.Error("update profile preferences failed", "error", err, "user_id", user.UserID)

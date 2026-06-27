@@ -1,6 +1,9 @@
 package profile
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Profile struct {
 	ID                 int64  `db:"id"`
@@ -52,13 +55,13 @@ type OnboardingInput struct {
 }
 
 type UpdateProfileRequest struct {
-	Nickname           string   `json:"nickname"`
-	Gender             string   `json:"gender"`
-	HeightCM           *int     `json:"height_cm"`
-	BodyNotes          string   `json:"body_notes"`
-	SkinNotes          string   `json:"skin_notes"`
-	HairNotes          string   `json:"hair_notes"`
-	LifestyleScenarios []string `json:"lifestyle_scenarios"`
+	Nickname           PatchString      `json:"nickname"`
+	Gender             PatchString      `json:"gender"`
+	HeightCM           PatchInt         `json:"height_cm"`
+	BodyNotes          PatchString      `json:"body_notes"`
+	SkinNotes          PatchString      `json:"skin_notes"`
+	HairNotes          PatchString      `json:"hair_notes"`
+	LifestyleScenarios PatchStringSlice `json:"lifestyle_scenarios"`
 }
 
 type UpdatePreferencesRequest struct {
@@ -68,19 +71,66 @@ type UpdatePreferencesRequest struct {
 }
 
 type UpdateProfileInput struct {
-	Nickname           string
-	Gender             string
-	HeightCM           *int
-	BodyNotes          string
-	SkinNotes          string
-	HairNotes          string
-	LifestyleScenarios []string
+	Nickname           PatchString
+	Gender             PatchString
+	HeightCM           PatchInt
+	BodyNotes          PatchString
+	SkinNotes          PatchString
+	HairNotes          PatchString
+	LifestyleScenarios PatchStringSlice
 }
 
 type UpdatePreferencesInput struct {
 	StyleGoals          []string
 	Avoidances          []string
 	ScenarioPreferences []string
+}
+
+type PatchString struct {
+	Present bool
+	Value   string
+}
+
+func (p *PatchString) UnmarshalJSON(raw []byte) error {
+	p.Present = true
+	if string(raw) == "null" {
+		p.Value = ""
+		return nil
+	}
+	return json.Unmarshal(raw, &p.Value)
+}
+
+type PatchInt struct {
+	Present bool
+	Value   *int
+}
+
+func (p *PatchInt) UnmarshalJSON(raw []byte) error {
+	p.Present = true
+	if string(raw) == "null" {
+		p.Value = nil
+		return nil
+	}
+	var value int
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	p.Value = &value
+	return nil
+}
+
+type PatchStringSlice struct {
+	Present bool
+	Value   []string
+}
+
+func (p *PatchStringSlice) UnmarshalJSON(raw []byte) error {
+	p.Present = true
+	if string(raw) == "null" {
+		p.Value = []string{}
+		return nil
+	}
+	return json.Unmarshal(raw, &p.Value)
 }
 
 type UserSummary struct {
