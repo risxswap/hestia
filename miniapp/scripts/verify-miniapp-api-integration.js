@@ -481,14 +481,113 @@ async function main() {
     "advisor should append assistant message from server SSE status"
   );
 
+  const wardrobeApiCalls = [];
   const wardrobe = loadPage("pages/wardrobe/wardrobe.js", {
-    getLatestReport: async () => sampleReport
+    getWardrobeItems: async () => ({
+      items: [
+        {
+          public_id: "wdi_shirt",
+          name: "米白衬衫",
+          category: "top",
+          color: "米白",
+          is_core: true,
+          recommendation_status: "preferred",
+          scene_tags: ["通勤"]
+        },
+        {
+          public_id: "wdi_jeans",
+          name: "直筒牛仔裤",
+          category: "bottom",
+          color: "蓝色",
+          is_core: true,
+          recommendation_status: "normal",
+          scene_tags: ["日常"]
+        }
+      ]
+    }),
+    getLatestReport: async () => sampleReport,
+    createWardrobeItem: async (payload) => {
+      wardrobeApiCalls.push(["create", payload]);
+      return Object.assign({ public_id: "wdi_new", status: "active" }, payload);
+    },
+    updateWardrobeItem: async (publicID, payload) => {
+      wardrobeApiCalls.push(["update", publicID, payload]);
+      return Object.assign({ public_id: publicID, status: "active" }, payload);
+    },
+    deleteWardrobeItem: async (publicID) => {
+      wardrobeApiCalls.push(["delete", publicID]);
+      return { public_id: publicID };
+    }
   });
   assert(wardrobe.config, "wardrobe.js should register a Page config");
+  assert(typeof wardrobe.config.loadWardrobe === "function", "wardrobe should load core wardrobe items");
+  assert(typeof wardrobe.config.handleCategoryFilter === "function", "wardrobe should filter by category");
+  assert(typeof wardrobe.config.handleOpenCreate === "function", "wardrobe should open create form");
+  assert(typeof wardrobe.config.handleSaveItem === "function", "wardrobe should save item");
+  assert(typeof wardrobe.config.handleDeleteItem === "function", "wardrobe should delete item");
   assert(typeof wardrobe.config.loadWardrobeGaps === "function", "wardrobe should load gaps from latest report");
   const wardrobeInstance = createPageInstance(wardrobe.config);
-  await wardrobe.config.loadWardrobeGaps.call(wardrobeInstance);
+  await wardrobe.config.loadWardrobe.call(wardrobeInstance);
+  assert(wardrobeInstance.data.items.length === 2, "wardrobe should load two core wardrobe items");
   assert(wardrobeInstance.data.gaps[0] === "浅色短外套", "wardrobe should display report wardrobe gaps");
+  assert(
+    wardrobeInstance.data.priorityItems.some((item) => item.public_id === "wdi_shirt"),
+    "wardrobe should put preferred items into priorityItems"
+  );
+
+  wardrobe.config.handleCategoryFilter.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        category: "top"
+      }
+    }
+  });
+  assert(wardrobeInstance.data.visibleItems.length === 1, "wardrobe category=top should show one item");
+  assert(wardrobeInstance.data.visibleItems[0].public_id === "wdi_shirt", "wardrobe category=top should keep top item");
+
+  wardrobe.config.handleOpenCreate.call(wardrobeInstance);
+  wardrobe.config.handleDraftInput.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        field: "name"
+      }
+    },
+    detail: {
+      value: "黑色西装"
+    }
+  });
+  wardrobe.config.handleDraftInput.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        field: "category"
+      }
+    },
+    detail: {
+      value: "outerwear"
+    }
+  });
+  await wardrobe.config.handleSaveItem.call(wardrobeInstance);
+  assert(wardrobeApiCalls[0][0] === "create", "wardrobe save should create a new item");
+  assert(
+    wardrobeApiCalls[0][1].recommendation_status === "normal",
+    "wardrobe create payload should default recommendation_status to normal"
+  );
+
+  await wardrobe.config.handleDeleteItem.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        publicId: "wdi_shirt"
+      }
+    }
+  });
+  assert(wardrobeApiCalls.some((call) => call[0] === "delete" && call[1] === "wdi_shirt"), "wardrobe delete should call API");
+  assert(
+    wardrobeInstance.data.items.every((item) => item.public_id !== "wdi_shirt"),
+    "wardrobe delete should remove deleted item locally"
+  );
+
+  await wardrobe.config.loadWardrobeGaps.call(wardrobeInstance);
+  assert(wardrobeInstance.data.gaps[0] === "浅色短外套", "wardrobe loadWardrobeGaps should stay compatible");
 
   const profile = loadPage("pages/profile/profile.js", {
     ensureDevSession: async () => ({

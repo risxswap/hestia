@@ -48,7 +48,11 @@ async function main() {
     "saveOnboardingDraft",
     "submitOnboarding",
     "sendAgentMessage",
-    "parseSSEEvents"
+    "parseSSEEvents",
+    "getWardrobeItems",
+    "createWardrobeItem",
+    "updateWardrobeItem",
+    "deleteWardrobeItem"
   ].forEach((name) => {
     assert(typeof api[name] === "function", `api.js should export ${name}`);
   });
@@ -132,6 +136,46 @@ async function main() {
   assert(events.length === 2, "parseSSEEvents should parse two events");
   assert(events[0].event === "status", "first event should keep event name");
   assert(events[0].data.text === "准备好了", "first event should parse JSON data");
+
+  const wardrobeCalls = [];
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "wardrobe_token";
+      },
+      request(options) {
+        wardrobeCalls.push(options);
+        options.success({
+          statusCode: 200,
+          data: {
+            code: "ok",
+            data: {
+              items: []
+            }
+          }
+        });
+      }
+    }
+  }, async () => {
+    await api.getWardrobeItems();
+    await api.getWardrobeItems({ category: "top" });
+    await api.createWardrobeItem({ name: "米白衬衫", category: "top" });
+    await api.updateWardrobeItem("wdi_test", { color: "米白" });
+    await api.deleteWardrobeItem("wdi_test");
+  });
+
+  const wardrobePaths = wardrobeCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
+  assert(wardrobeCalls[0].method === "GET", "getWardrobeItems should use GET");
+  assert(wardrobePaths[0] === "/api/user/wardrobe/items", `wardrobe list path mismatch: ${wardrobePaths[0]}`);
+  assert(wardrobeCalls[1].method === "GET", "filtered getWardrobeItems should use GET");
+  assert(wardrobePaths[1] === "/api/user/wardrobe/items?category=top", `wardrobe filtered path mismatch: ${wardrobePaths[1]}`);
+  assert(wardrobeCalls[2].method === "POST", "createWardrobeItem should use POST");
+  assert(wardrobePaths[2] === "/api/user/wardrobe/items", `wardrobe create path mismatch: ${wardrobePaths[2]}`);
+  assert(wardrobeCalls[3].method === "PATCH", "updateWardrobeItem should use PATCH");
+  assert(wardrobePaths[3] === "/api/user/wardrobe/items/wdi_test", `wardrobe update path mismatch: ${wardrobePaths[3]}`);
+  assert(wardrobeCalls[4].method === "DELETE", "deleteWardrobeItem should use DELETE");
+  assert(wardrobePaths[4] === "/api/user/wardrobe/items/wdi_test", `wardrobe delete path mismatch: ${wardrobePaths[4]}`);
 
   let rejected = false;
   await withGlobals({

@@ -136,6 +136,41 @@ function getLatestReport() {
   });
 }
 
+function getWardrobeItems(filters) {
+  const params = filters || {};
+  const query = Object.keys(params)
+    .filter((key) => params[key] !== undefined && params[key] !== null && params[key] !== "")
+    .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
+    .join("&");
+
+  return authorizedRequest({
+    path: `/api/user/wardrobe/items${query ? `?${query}` : ""}`
+  });
+}
+
+function createWardrobeItem(data) {
+  return authorizedRequest({
+    path: "/api/user/wardrobe/items",
+    method: "POST",
+    data
+  });
+}
+
+function updateWardrobeItem(publicID, data) {
+  return authorizedRequest({
+    path: `/api/user/wardrobe/items/${publicID}`,
+    method: "PATCH",
+    data
+  });
+}
+
+function deleteWardrobeItem(publicID) {
+  return authorizedRequest({
+    path: `/api/user/wardrobe/items/${publicID}`,
+    method: "DELETE"
+  });
+}
+
 function getOnboardingDraft() {
   return authorizedRequest({
     path: "/api/user/onboarding"
@@ -273,6 +308,10 @@ module.exports = {
   request,
   ensureDevSession,
   getLatestReport,
+  getWardrobeItems,
+  createWardrobeItem,
+  updateWardrobeItem,
+  deleteWardrobeItem,
   getOnboardingDraft,
   saveOnboardingDraft,
   submitOnboarding,
