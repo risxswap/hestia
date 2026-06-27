@@ -171,6 +171,182 @@ function deleteWardrobeItem(publicID) {
   });
 }
 
+function createAssetUploadToken(data) {
+  return authorizedRequest({
+    path: "/api/user/assets/upload-token",
+    method: "POST",
+    data
+  });
+}
+
+function confirmAssetUpload(data) {
+  return authorizedRequest({
+    path: "/api/user/assets/confirm",
+    method: "POST",
+    data
+  });
+}
+
+async function uploadAssetToQiniu(file, options) {
+  const source = file || {};
+  const config = options || {};
+  const assetType = config.assetType;
+  if (!assetType) {
+    throw new ApiError("缺少资产类型", { code: "asset.asset_type_required" });
+  }
+
+  const filePath = source.url || source.path || source.tempFilePath;
+  if (!filePath) {
+    throw new ApiError("缺少上传文件路径", { code: "asset.file_path_required" });
+  }
+
+  const rawExt = inferFileExt(filePath, source.mimeType || source.type);
+  const mimeType = inferImageMimeType(source.mimeType || source.type, rawExt);
+  if (!mimeType) {
+    throw new ApiError("不支持的图片格式", { code: "asset.invalid_image_type" });
+  }
+  const fileExt = rawExt || mimeExt(mimeType);
+  const fileSize = source.size;
+  const token = await createAssetUploadToken({
+    asset_type: assetType,
+    mime_type: mimeType,
+    file_size: fileSize,
+    file_ext: fileExt
+  });
+
+  await uploadFileToQiniu({
+    uploadUrl: token.upload_url,
+    uploadToken: token.upload_token,
+    objectKey: token.object_key,
+    filePath
+  });
+
+  return confirmAssetUpload({
+    asset_public_id: token.asset_public_id,
+    bucket: token.bucket,
+    object_key: token.object_key,
+    mime_type: mimeType,
+    file_size: fileSize,
+    width: firstDefined(config.width, source.width),
+    height: firstDefined(config.height, source.height),
+    asset_type: assetType
+  });
+}
+
+function uploadFileToQiniu(options) {
+  const config = options || {};
+  return new Promise((resolve, reject) => {
+    if (typeof wx === "undefined" || !wx.uploadFile) {
+      reject(new ApiError("当前环境不支持 wx.uploadFile", { code: "api.wx_unavailable" }));
+      return;
+    }
+
+    wx.uploadFile({
+      url: config.uploadUrl,
+      filePath: config.filePath,
+      name: "file",
+      formData: {
+        token: config.uploadToken,
+        key: config.objectKey
+      },
+      success(response) {
+        const statusCode = response && response.statusCode ? Number(response.statusCode) : 0;
+        if (statusCode >= 200 && statusCode < 300) {
+          resolve(response);
+          return;
+        }
+
+        reject(new ApiError("上传失败", {
+          code: "asset.upload_failed",
+          statusCode,
+          data: response
+        }));
+      },
+      fail(error) {
+        reject(new ApiError(error && error.errMsg ? error.errMsg : "上传失败", {
+          code: "asset.upload_failed",
+          data: error
+        }));
+      }
+    });
+  });
+}
+
+function firstDefined(primary, fallback) {
+  return primary !== undefined && primary !== null ? primary : fallback;
+}
+
+function inferFileExt(filePath, mimeType) {
+  const cleanPath = String(filePath || "").split("?")[0].split("#")[0];
+  const match = cleanPath.match(/\.([a-zA-Z0-9]+)$/);
+  if (match) {
+    const ext = match[1].toLowerCase();
+    if (["jpg", "jpeg", "png", "webp", "heic"].indexOf(ext) >= 0) {
+      return ext;
+    }
+  }
+  return mimeExt(mimeType);
+}
+
+function inferImageMimeType(mimeType, fileExt) {
+  const normalized = normalizeImageMimeType(mimeType);
+  if (normalized) {
+    return normalized;
+  }
+  if (String(mimeType || "").toLowerCase() === "image") {
+    return "image/jpeg";
+  }
+
+  const ext = String(fileExt || "").toLowerCase();
+  if (ext === "jpg" || ext === "jpeg") {
+    return "image/jpeg";
+  }
+  if (ext === "png") {
+    return "image/png";
+  }
+  if (ext === "webp") {
+    return "image/webp";
+  }
+  if (ext === "heic") {
+    return "image/heic";
+  }
+  return "";
+}
+
+function normalizeImageMimeType(mimeType) {
+  const value = String(mimeType || "").toLowerCase();
+  if (value === "image/jpg" || value === "image/jpeg") {
+    return "image/jpeg";
+  }
+  if (value === "image/png") {
+    return "image/png";
+  }
+  if (value === "image/webp") {
+    return "image/webp";
+  }
+  if (value === "image/heic" || value === "image/heif") {
+    return "image/heic";
+  }
+  return "";
+}
+
+function mimeExt(mimeType) {
+  const normalized = normalizeImageMimeType(mimeType);
+  if (normalized === "image/jpeg") {
+    return "jpg";
+  }
+  if (normalized === "image/png") {
+    return "png";
+  }
+  if (normalized === "image/webp") {
+    return "webp";
+  }
+  if (normalized === "image/heic") {
+    return "heic";
+  }
+  return "";
+}
+
 function getOnboardingDraft() {
   return authorizedRequest({
     path: "/api/user/onboarding"
@@ -312,6 +488,9 @@ module.exports = {
   createWardrobeItem,
   updateWardrobeItem,
   deleteWardrobeItem,
+  createAssetUploadToken,
+  confirmAssetUpload,
+  uploadAssetToQiniu,
   getOnboardingDraft,
   saveOnboardingDraft,
   submitOnboarding,

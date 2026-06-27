@@ -52,7 +52,10 @@ async function main() {
     "getWardrobeItems",
     "createWardrobeItem",
     "updateWardrobeItem",
-    "deleteWardrobeItem"
+    "deleteWardrobeItem",
+    "createAssetUploadToken",
+    "confirmAssetUpload",
+    "uploadAssetToQiniu"
   ].forEach((name) => {
     assert(typeof api[name] === "function", `api.js should export ${name}`);
   });
@@ -208,6 +211,303 @@ async function main() {
     }
   });
   assert(rejected, "request should reject non-ok API responses with code and statusCode");
+
+  const assetCalls = [];
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "asset_token";
+      },
+      request(options) {
+        assetCalls.push(options);
+        options.success({
+          statusCode: 200,
+          data: {
+            code: "ok",
+            data: {
+              ok: true
+            }
+          }
+        });
+      }
+    }
+  }, async () => {
+    await api.createAssetUploadToken({
+      asset_type: "wardrobe_item_photo",
+      mime_type: "image/png",
+      file_size: 1024,
+      file_ext: "png"
+    });
+    await api.confirmAssetUpload({
+      asset_public_id: "ast_1",
+      bucket: "hestia-assets",
+      object_key: "users/u1/assets/ast_1.png",
+      mime_type: "image/png",
+      file_size: 1024,
+      asset_type: "wardrobe_item_photo"
+    });
+  });
+
+  const assetPaths = assetCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
+  assert(assetCalls[0].method === "POST", "createAssetUploadToken should use POST");
+  assert(assetPaths[0] === "/api/user/assets/upload-token", `asset upload-token path mismatch: ${assetPaths[0]}`);
+  assert(assetCalls[0].data.asset_type === "wardrobe_item_photo", "createAssetUploadToken should pass asset_type");
+  assert(assetCalls[1].method === "POST", "confirmAssetUpload should use POST");
+  assert(assetPaths[1] === "/api/user/assets/confirm", `asset confirm path mismatch: ${assetPaths[1]}`);
+  assert(assetCalls[1].data.object_key === "users/u1/assets/ast_1.png", "confirmAssetUpload should pass object_key");
+
+  const uploadRequests = [];
+  const uploadFiles = [];
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "asset_token";
+      },
+      request(options) {
+        uploadRequests.push(options);
+        if (options.url.endsWith("/api/user/assets/upload-token")) {
+          options.success({
+            statusCode: 200,
+            data: {
+              code: "ok",
+              data: {
+                asset_public_id: "ast_upload",
+                bucket: "hestia-assets",
+                object_key: "users/u1/assets/ast_upload.webp",
+                upload_url: "https://upload.qiniup.com",
+                upload_token: "qiniu_token"
+              }
+            }
+          });
+          return;
+        }
+
+        options.success({
+          statusCode: 200,
+          data: {
+            code: "ok",
+            data: {
+              asset_public_id: "ast_upload",
+              object_key: "users/u1/assets/ast_upload.webp",
+              url: "https://cdn.example.com/users/u1/assets/ast_upload.webp",
+              asset_type: "wardrobe_item_photo"
+            }
+          }
+        });
+      },
+      uploadFile(options) {
+        uploadFiles.push(options);
+        options.success({
+          statusCode: 200,
+          data: "{\"hash\":\"hash_1\"}"
+        });
+      }
+    }
+  }, async () => {
+    const uploaded = await api.uploadAssetToQiniu(
+      {
+        tempFilePath: "/tmp/wardrobe.webp",
+        size: 2048,
+        type: "image/webp"
+      },
+      {
+        assetType: "wardrobe_item_photo",
+        width: 640,
+        height: 960
+      }
+    );
+
+    assert(uploaded.asset_public_id === "ast_upload", "uploadAssetToQiniu should return confirmed asset_public_id");
+    assert(uploaded.object_key === "users/u1/assets/ast_upload.webp", "uploadAssetToQiniu should return confirmed object_key");
+    assert(uploaded.url === "https://cdn.example.com/users/u1/assets/ast_upload.webp", "uploadAssetToQiniu should return confirmed url");
+    assert(uploaded.asset_type === "wardrobe_item_photo", "uploadAssetToQiniu should return confirmed asset_type");
+  });
+
+  assert(uploadFiles.length === 1, `expected 1 wx.uploadFile call, got ${uploadFiles.length}`);
+  assert(uploadFiles[0].url === "https://upload.qiniup.com", `upload url mismatch: ${uploadFiles[0].url}`);
+  assert(uploadFiles[0].filePath === "/tmp/wardrobe.webp", `upload filePath mismatch: ${uploadFiles[0].filePath}`);
+  assert(uploadFiles[0].name === "file", "uploadAssetToQiniu should use file field name");
+  assert(uploadFiles[0].formData.token === "qiniu_token", "wx.uploadFile formData should include upload token");
+  assert(uploadFiles[0].formData.key === "users/u1/assets/ast_upload.webp", "wx.uploadFile formData should include object key");
+  assert(uploadRequests.length === 2, `expected token and confirm requests, got ${uploadRequests.length}`);
+  assert(uploadRequests[0].data.asset_type === "wardrobe_item_photo", "uploadAssetToQiniu should request token with asset_type");
+  assert(uploadRequests[0].data.mime_type === "image/webp", "uploadAssetToQiniu should request token with inferred mime_type");
+  assert(uploadRequests[0].data.file_size === 2048, "uploadAssetToQiniu should request token with file size");
+  assert(uploadRequests[0].data.file_ext === "webp", "uploadAssetToQiniu should request token with inferred file_ext");
+  assert(uploadRequests[1].data.asset_public_id === "ast_upload", "uploadAssetToQiniu should confirm asset_public_id");
+  assert(uploadRequests[1].data.bucket === "hestia-assets", "uploadAssetToQiniu should confirm bucket");
+  assert(uploadRequests[1].data.object_key === "users/u1/assets/ast_upload.webp", "uploadAssetToQiniu should confirm object_key");
+  assert(uploadRequests[1].data.mime_type === "image/webp", "uploadAssetToQiniu should confirm mime_type");
+  assert(uploadRequests[1].data.file_size === 2048, "uploadAssetToQiniu should confirm file_size");
+  assert(uploadRequests[1].data.width === 640, "uploadAssetToQiniu should confirm width");
+  assert(uploadRequests[1].data.height === 960, "uploadAssetToQiniu should confirm height");
+  assert(uploadRequests[1].data.asset_type === "wardrobe_item_photo", "uploadAssetToQiniu should confirm asset_type");
+
+  const tdesignUploadRequests = [];
+  const tdesignUploadFiles = [];
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "asset_token";
+      },
+      request(options) {
+        tdesignUploadRequests.push(options);
+        if (options.url.endsWith("/api/user/assets/upload-token")) {
+          options.success({
+            statusCode: 200,
+            data: {
+              code: "ok",
+              data: {
+                asset_public_id: "ast_tdesign",
+                bucket: "hestia-assets",
+                object_key: "users/u1/assets/ast_tdesign.jpg",
+                upload_url: "https://upload.qiniup.com",
+                upload_token: "qiniu_token"
+              }
+            }
+          });
+          return;
+        }
+
+        options.success({
+          statusCode: 200,
+          data: {
+            code: "ok",
+            data: {
+              asset_public_id: "ast_tdesign",
+              object_key: "users/u1/assets/ast_tdesign.jpg",
+              url: "https://cdn.example.com/users/u1/assets/ast_tdesign.jpg",
+              asset_type: "wardrobe_item_photo"
+            }
+          }
+        });
+      },
+      uploadFile(options) {
+        tdesignUploadFiles.push(options);
+        options.success({
+          statusCode: 200,
+          data: "{}"
+        });
+      }
+    }
+  }, async () => {
+    await api.uploadAssetToQiniu(
+      {
+        url: "wxfile://tmp-no-extension",
+        size: 4096,
+        type: "image"
+      },
+      {
+        assetType: "wardrobe_item_photo"
+      }
+    );
+  });
+
+  assert(tdesignUploadFiles[0].filePath === "wxfile://tmp-no-extension", "uploadAssetToQiniu should support TDesign file.url");
+  assert(tdesignUploadRequests[0].data.mime_type === "image/jpeg", "TDesign type=image should default to image/jpeg");
+  assert(tdesignUploadRequests[0].data.file_ext === "jpg", "TDesign type=image should default to jpg extension");
+
+  let missingAssetTypeRejected = false;
+  try {
+    await api.uploadAssetToQiniu({ tempFilePath: "/tmp/wardrobe.png", size: 1 }, {});
+  } catch (error) {
+    missingAssetTypeRejected = error instanceof api.ApiError && error.code === "asset.asset_type_required";
+  }
+  assert(missingAssetTypeRejected, "uploadAssetToQiniu should reject without assetType");
+
+  let missingFilePathRejected = false;
+  try {
+    await api.uploadAssetToQiniu({ size: 1, type: "image" }, { assetType: "wardrobe_item_photo" });
+  } catch (error) {
+    missingFilePathRejected = error instanceof api.ApiError && error.code === "asset.file_path_required";
+  }
+  assert(missingFilePathRejected, "uploadAssetToQiniu should reject without a file path");
+
+  let invalidImageRejected = false;
+  try {
+    await api.uploadAssetToQiniu({ tempFilePath: "/tmp/file", size: 1, type: "video" }, { assetType: "wardrobe_item_photo" });
+  } catch (error) {
+    invalidImageRejected = error instanceof api.ApiError && error.code === "asset.invalid_image_type";
+  }
+  assert(invalidImageRejected, "uploadAssetToQiniu should reject files without image mime or extension");
+
+  let uploadStatusRejected = false;
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "asset_token";
+      },
+      request(options) {
+        options.success({
+          statusCode: 200,
+          data: {
+            code: "ok",
+            data: {
+              asset_public_id: "ast_failed",
+              bucket: "hestia-assets",
+              object_key: "users/u1/assets/ast_failed.jpg",
+              upload_url: "https://upload.qiniup.com",
+              upload_token: "qiniu_token"
+            }
+          }
+        });
+      },
+      uploadFile(options) {
+        options.success({
+          statusCode: 500,
+          data: "upload failed"
+        });
+      }
+    }
+  }, async () => {
+    try {
+      await api.uploadAssetToQiniu({ tempFilePath: "/tmp/wardrobe.jpg", size: 1 }, { assetType: "wardrobe_item_photo" });
+    } catch (error) {
+      uploadStatusRejected = error instanceof api.ApiError && error.code === "asset.upload_failed" && error.statusCode === 500;
+    }
+  });
+  assert(uploadStatusRejected, "uploadAssetToQiniu should reject non-2xx wx.uploadFile responses");
+
+  let uploadFailRejected = false;
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "asset_token";
+      },
+      request(options) {
+        options.success({
+          statusCode: 200,
+          data: {
+            code: "ok",
+            data: {
+              asset_public_id: "ast_network_failed",
+              bucket: "hestia-assets",
+              object_key: "users/u1/assets/ast_network_failed.jpg",
+              upload_url: "https://upload.qiniup.com",
+              upload_token: "qiniu_token"
+            }
+          }
+        });
+      },
+      uploadFile(options) {
+        options.fail({
+          errMsg: "uploadFile:fail timeout"
+        });
+      }
+    }
+  }, async () => {
+    try {
+      await api.uploadAssetToQiniu({ path: "/tmp/wardrobe.jpg", size: 1 }, { assetType: "wardrobe_item_photo" });
+    } catch (error) {
+      uploadFailRejected = error instanceof api.ApiError && error.code === "asset.upload_failed";
+    }
+  });
+  assert(uploadFailRejected, "uploadAssetToQiniu should reject wx.uploadFile fail callbacks");
 }
 
 main()
