@@ -11,6 +11,12 @@ type captureWardrobeRepo struct {
 	items   []Item
 }
 
+type coreOnlyWardrobeRepo struct{}
+
+func (r coreOnlyWardrobeRepo) CreateCoreItems(_ context.Context, items []Item) ([]Item, error) {
+	return items, nil
+}
+
 func (r *captureWardrobeRepo) CreateCoreItems(_ context.Context, items []Item) ([]Item, error) {
 	r.created = append(r.created, items...)
 	return items, nil
@@ -19,7 +25,7 @@ func (r *captureWardrobeRepo) CreateCoreItems(_ context.Context, items []Item) (
 func (r *captureWardrobeRepo) ListItems(_ context.Context, userID int64, filter ListFilter) ([]Item, error) {
 	var result []Item
 	for _, item := range r.items {
-		if item.UserID != userID || item.Status == StatusDeleted {
+		if item.UserID != userID {
 			continue
 		}
 		if filter.Category != "" && item.Category != filter.Category {
@@ -93,11 +99,20 @@ func TestCreateItemRejectsInvalidRecommendationStatus(t *testing.T) {
 	}
 }
 
+func TestCreateItemReturnsUnsupportedWhenRepoDoesNotSupportItems(t *testing.T) {
+	service := NewService(coreOnlyWardrobeRepo{})
+	_, err := service.CreateItem(context.Background(), 12, CreateInput{Name: "黑色西装"})
+	if err != ErrRepositoryUnsupported {
+		t.Fatalf("expected ErrRepositoryUnsupported, got %v", err)
+	}
+}
+
 func TestAdviceContextExcludesPausedAndSortsPreferredFirst(t *testing.T) {
 	now := time.Now()
 	repo := &captureWardrobeRepo{items: []Item{
 		{PublicID: "wdi_normal", UserID: 12, Name: "蓝色牛仔裤", Category: "bottom", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true, UpdatedAt: now.Add(-time.Hour)},
 		{PublicID: "wdi_paused", UserID: 12, Name: "红色长裙", Category: "dress", RecommendationStatus: RecommendationStatusPaused, Status: StatusActive, IsCore: true, UpdatedAt: now},
+		{PublicID: "wdi_deleted", UserID: 12, Name: "灰色短外套", Category: "outerwear", RecommendationStatus: RecommendationStatusPreferred, Status: StatusDeleted, IsCore: true, SceneTags: []string{"通勤"}, UpdatedAt: now.Add(time.Hour)},
 		{PublicID: "wdi_preferred", UserID: 12, Name: "米白衬衫", Category: "top", RecommendationStatus: RecommendationStatusPreferred, Status: StatusActive, IsCore: true, SceneTags: []string{"通勤"}, UpdatedAt: now.Add(-2 * time.Hour)},
 	}}
 	service := NewService(repo)
@@ -107,7 +122,12 @@ func TestAdviceContextExcludesPausedAndSortsPreferredFirst(t *testing.T) {
 		t.Fatalf("advice context: %v", err)
 	}
 	if len(items) != 2 {
-		t.Fatalf("expected paused item excluded, got %#v", items)
+		t.Fatalf("expected paused and deleted items excluded, got %#v", items)
+	}
+	for _, item := range items {
+		if item.PublicID == "wdi_deleted" {
+			t.Fatalf("expected deleted item excluded, got %#v", items)
+		}
 	}
 	if items[0].PublicID != "wdi_preferred" {
 		t.Fatalf("expected preferred scene match first, got %#v", items)

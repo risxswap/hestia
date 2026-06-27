@@ -21,10 +21,14 @@ const (
 var (
 	ErrInvalidRecommendationStatus = errors.New("invalid recommendation status")
 	ErrItemNotFound                = errors.New("wardrobe item not found")
+	ErrRepositoryUnsupported       = errors.New("wardrobe repository unsupported")
 )
 
 type Repository interface {
 	CreateCoreItems(ctx context.Context, items []Item) ([]Item, error)
+}
+
+type itemRepository interface {
 	ListItems(ctx context.Context, userID int64, filter ListFilter) ([]Item, error)
 	CreateItem(ctx context.Context, item Item, primaryAssetPublicID string) (Item, error)
 	UpdateItem(ctx context.Context, userID int64, publicID string, input UpdateInput) (Item, error)
@@ -80,7 +84,11 @@ func (s *Service) ListItems(ctx context.Context, userID int64, filter ListFilter
 	if filter.RecommendationStatus != "" && !isValidRecommendationStatus(filter.RecommendationStatus) {
 		return nil, ErrInvalidRecommendationStatus
 	}
-	return s.repo.ListItems(ctx, userID, filter)
+	repo, err := s.itemRepo()
+	if err != nil {
+		return nil, err
+	}
+	return repo.ListItems(ctx, userID, filter)
 }
 
 func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInput) (Item, error) {
@@ -98,6 +106,10 @@ func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInpu
 	}
 	if !isValidRecommendationStatus(recommendationStatus) {
 		return Item{}, ErrInvalidRecommendationStatus
+	}
+	repo, err := s.itemRepo()
+	if err != nil {
+		return Item{}, err
 	}
 	isCore := true
 	if input.IsCore != nil {
@@ -118,7 +130,7 @@ func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInpu
 		RecommendationStatus: recommendationStatus,
 		Status:               StatusActive,
 	}
-	return s.repo.CreateItem(ctx, item, strings.TrimSpace(input.PrimaryAssetPublicID))
+	return repo.CreateItem(ctx, item, strings.TrimSpace(input.PrimaryAssetPublicID))
 }
 
 func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string, input UpdateInput) (Item, error) {
@@ -141,15 +153,27 @@ func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string,
 	trimStringPtr(input.Season)
 	trimStringPtr(input.UserNotes)
 	trimStringPtr(input.PrimaryAssetPublicID)
-	return s.repo.UpdateItem(ctx, userID, strings.TrimSpace(publicID), input)
+	repo, err := s.itemRepo()
+	if err != nil {
+		return Item{}, err
+	}
+	return repo.UpdateItem(ctx, userID, strings.TrimSpace(publicID), input)
 }
 
 func (s *Service) SoftDeleteItem(ctx context.Context, userID int64, publicID string) error {
-	return s.repo.SoftDeleteItem(ctx, userID, strings.TrimSpace(publicID))
+	repo, err := s.itemRepo()
+	if err != nil {
+		return err
+	}
+	return repo.SoftDeleteItem(ctx, userID, strings.TrimSpace(publicID))
 }
 
 func (s *Service) AdviceContextItems(ctx context.Context, userID int64, filter AdviceContextFilter) ([]Item, error) {
-	items, err := s.repo.ListItems(ctx, userID, ListFilter{})
+	repo, err := s.itemRepo()
+	if err != nil {
+		return nil, err
+	}
+	items, err := repo.ListItems(ctx, userID, ListFilter{})
 	if err != nil {
 		return nil, err
 	}
@@ -173,6 +197,14 @@ func (s *Service) AdviceContextItems(ctx context.Context, userID int64, filter A
 		result = result[:filter.Limit]
 	}
 	return result, nil
+}
+
+func (s *Service) itemRepo() (itemRepository, error) {
+	repo, ok := s.repo.(itemRepository)
+	if !ok {
+		return nil, ErrRepositoryUnsupported
+	}
+	return repo, nil
 }
 
 func isValidRecommendationStatus(status string) bool {
