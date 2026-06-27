@@ -65,6 +65,11 @@ LIMIT 1
 		return Summary{}, err
 	}
 	summary.MemorySummary = memory
+	preferences, err := r.preferencesSummary(ctx, userID)
+	if err != nil {
+		return Summary{}, err
+	}
+	summary.Preferences = preferences
 	latest, err := r.latestReportSummary(ctx, userID)
 	if err != nil {
 		return Summary{}, err
@@ -495,6 +500,42 @@ LIMIT 1
 	return report, nil
 }
 
+func (r *MySQLRepository) preferencesSummary(ctx context.Context, userID int64) (PreferencesSummary, error) {
+	var rows []preferenceSummaryRow
+	if err := sqlx.SelectContext(ctx, r.ext, &rows, `
+SELECT
+  pref_type,
+  pref_key,
+  polarity
+FROM profile_prefs
+WHERE user_id = ?
+  AND deleted_at IS NULL
+ORDER BY id ASC
+`, userID); err != nil {
+		return PreferencesSummary{}, err
+	}
+	summary := PreferencesSummary{
+		StyleGoals:          []string{},
+		Avoidances:          []string{},
+		ScenarioPreferences: []string{},
+	}
+	for _, row := range rows {
+		switch row.PrefType {
+		case PrefTypeStyleGoal:
+			summary.StyleGoals = append(summary.StyleGoals, row.PrefKey)
+		case PrefTypeAvoidance:
+			summary.Avoidances = append(summary.Avoidances, row.PrefKey)
+		case PrefTypeScenarioPreference:
+			summary.ScenarioPreferences = append(summary.ScenarioPreferences, row.PrefKey)
+		default:
+			if row.Polarity == PolarityNegative {
+				summary.Avoidances = append(summary.Avoidances, row.PrefKey)
+			}
+		}
+	}
+	return summary, nil
+}
+
 type profileSummaryRow struct {
 	UserPublicID       string          `db:"user_public_id"`
 	Nickname           string          `db:"nickname"`
@@ -547,6 +588,12 @@ type latestReportSummaryRow struct {
 	Title       string       `db:"title"`
 	Status      string       `db:"status"`
 	GeneratedAt sql.NullTime `db:"generated_at"`
+}
+
+type preferenceSummaryRow struct {
+	PrefType string `db:"pref_type"`
+	PrefKey  string `db:"pref_key"`
+	Polarity string `db:"polarity"`
 }
 
 func decodeStringSlice(raw json.RawMessage) ([]string, error) {

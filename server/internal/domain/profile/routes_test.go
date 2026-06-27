@@ -36,6 +36,11 @@ func TestSummaryReturnsDashboardData(t *testing.T) {
 				LifestyleScenarios: []string{"通勤", "周末见朋友"},
 				StyleGoalSummary:   "更利落",
 			},
+			Preferences: profile.PreferencesSummary{
+				StyleGoals:          []string{"更利落"},
+				Avoidances:          []string{"过甜"},
+				ScenarioPreferences: []string{"通勤更正式"},
+			},
 			MemorySummary: profile.MemorySummary{
 				FactCount:                4,
 				PreferenceCount:          2,
@@ -79,9 +84,18 @@ func TestSummaryReturnsDashboardData(t *testing.T) {
 	if body.Data.LatestReport == nil || body.Data.LatestReport.PublicID != "rpt_test" {
 		t.Fatalf("expected latest report summary, got %#v", body.Data.LatestReport)
 	}
+	if len(body.Data.Preferences.StyleGoals) != 1 || body.Data.Preferences.StyleGoals[0] != "更利落" {
+		t.Fatalf("expected style goals in summary, got %#v", body.Data.Preferences)
+	}
+	if len(body.Data.Preferences.Avoidances) != 1 || body.Data.Preferences.Avoidances[0] != "过甜" {
+		t.Fatalf("expected avoidances in summary, got %#v", body.Data.Preferences)
+	}
+	if len(body.Data.Preferences.ScenarioPreferences) != 1 || body.Data.Preferences.ScenarioPreferences[0] != "通勤更正式" {
+		t.Fatalf("expected scenario preferences in summary, got %#v", body.Data.Preferences)
+	}
 	assertQuickEntries(t, body.Data.QuickEntries, []profile.QuickEntry{
 		{Key: "profile", Title: "我的档案", Summary: "已记录 2 个常见场景"},
-		{Key: "preferences", Title: "偏好与禁忌", Summary: "2 个风格目标、1 个禁忌"},
+		{Key: "preferences", Title: "偏好与禁忌", Summary: "2 个偏好、1 个禁忌"},
 		{Key: "report", Title: "报告与路线", Summary: "初版报告已生成"},
 		{Key: "privacy", Title: "隐私与数据", Summary: "照片、档案、反馈可管理"},
 	})
@@ -122,7 +136,7 @@ func TestSummaryReturnsEmptyStateWithoutProfileOrReport(t *testing.T) {
 	}
 	assertQuickEntries(t, body.Data.QuickEntries, []profile.QuickEntry{
 		{Key: "profile", Title: "我的档案", Summary: "还没有记录常见场景"},
-		{Key: "preferences", Title: "偏好与禁忌", Summary: "0 个风格目标、0 个禁忌"},
+		{Key: "preferences", Title: "偏好与禁忌", Summary: "0 个偏好、0 个禁忌"},
 		{Key: "report", Title: "报告与路线", Summary: "暂无初版报告"},
 		{Key: "privacy", Title: "隐私与数据", Summary: "照片、档案、反馈可管理"},
 	})
@@ -175,6 +189,12 @@ func TestMySQLSummaryFiltersActiveProfile(t *testing.T) {
 			"inference_count",
 			"pending_confirmation_count",
 		}).AddRow(4, 2, 1, 3, 1))
+	mock.ExpectQuery(`(?s)FROM profile_prefs.*WHERE user_id = \?.*deleted_at IS NULL`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"pref_type", "pref_key", "polarity"}).
+			AddRow("style_goal", "更利落", "positive").
+			AddRow("avoidance", "过甜", "negative").
+			AddRow("scenario_preference", "通勤更正式", "positive"))
 	mock.ExpectQuery(`(?s)FROM reports.*report_type = 'initial'.*status = 'ready'.*LIMIT 1`).
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"public_id", "title", "status", "generated_at"}))
@@ -210,6 +230,15 @@ func TestMySQLSummaryFiltersActiveProfile(t *testing.T) {
 		summary.MemorySummary.InferenceCount != 3 ||
 		summary.MemorySummary.PendingConfirmationCount != 1 {
 		t.Fatalf("unexpected memory summary: %#v", summary.MemorySummary)
+	}
+	if len(summary.Preferences.StyleGoals) != 1 || summary.Preferences.StyleGoals[0] != "更利落" {
+		t.Fatalf("unexpected style goals: %#v", summary.Preferences)
+	}
+	if len(summary.Preferences.Avoidances) != 1 || summary.Preferences.Avoidances[0] != "过甜" {
+		t.Fatalf("unexpected avoidances: %#v", summary.Preferences)
+	}
+	if len(summary.Preferences.ScenarioPreferences) != 1 || summary.Preferences.ScenarioPreferences[0] != "通勤更正式" {
+		t.Fatalf("unexpected scenario preferences: %#v", summary.Preferences)
 	}
 	if summary.LatestReport != nil {
 		t.Fatalf("expected nil latest report, got %#v", summary.LatestReport)
@@ -265,7 +294,7 @@ func TestPatchProfileUpdatesExplicitProfileFields(t *testing.T) {
 	}
 	assertQuickEntries(t, body.Data.QuickEntries, []profile.QuickEntry{
 		{Key: "profile", Title: "我的档案", Summary: "已记录 1 个常见场景"},
-		{Key: "preferences", Title: "偏好与禁忌", Summary: "0 个风格目标、0 个禁忌"},
+		{Key: "preferences", Title: "偏好与禁忌", Summary: "0 个偏好、0 个禁忌"},
 		{Key: "report", Title: "报告与路线", Summary: "暂无初版报告"},
 		{Key: "privacy", Title: "隐私与数据", Summary: "照片、档案、反馈可管理"},
 	})
@@ -746,6 +775,12 @@ func expectSummaryQueries(mock sqlmock.Sqlmock, userID int64) {
 			"inference_count",
 			"pending_confirmation_count",
 		}).AddRow(4, 2, 1, 3, 1))
+	mock.ExpectQuery(`(?s)FROM profile_prefs.*WHERE user_id = \?.*deleted_at IS NULL`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"pref_type", "pref_key", "polarity"}).
+			AddRow("style_goal", "更利落", "positive").
+			AddRow("avoidance", "过甜", "negative").
+			AddRow("scenario_preference", "通勤更正式", "positive"))
 	mock.ExpectQuery(`(?s)FROM reports.*report_type = 'initial'.*status = 'ready'.*LIMIT 1`).
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"public_id", "title", "status", "generated_at"}))

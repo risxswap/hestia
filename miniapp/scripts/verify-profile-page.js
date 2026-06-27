@@ -84,6 +84,11 @@ const initialSummary = {
     lifestyle_scenarios: ["通勤", "周末见朋友"],
     style_goal_summary: "更利落"
   },
+  preferences: {
+    style_goals: ["更利落"],
+    avoidances: ["过甜"],
+    scenario_preferences: ["通勤更正式"]
+  },
   memory_summary: {
     fact_count: 4,
     preference_count: 2,
@@ -184,6 +189,8 @@ async function main() {
   assert(page.data.profileDraft.nickname === "明明", "loadProfile should prepare profile draft nickname");
   assert(page.data.profileDraft.scenarioText === "通勤、周末见朋友", "loadProfile should normalize scenario draft text");
   assert(page.data.preferencesDraft.styleGoalsText === "更利落", "loadProfile should prepare style goals draft");
+  assert(page.data.preferencesDraft.avoidancesText === "过甜", "loadProfile should prepare avoidances draft");
+  assert(page.data.preferencesDraft.scenarioPreferencesText === "通勤更正式", "loadProfile should prepare scenario preferences draft");
   assert(page.data.quickEntries.length === 4, "loadProfile should expose four quick entries");
   assert(
     page.data.quickEntries.map((entry) => entry.key).join(",") === "profile,preferences,report,privacy",

@@ -299,7 +299,7 @@ func buildQuickEntries(summary Summary) []QuickEntry {
 		{
 			Key:     "preferences",
 			Title:   "偏好与禁忌",
-			Summary: fmt.Sprintf("%d 个风格目标、%d 个禁忌", summary.MemorySummary.PreferenceCount, summary.MemorySummary.AvoidanceCount),
+			Summary: fmt.Sprintf("%d 个偏好、%d 个禁忌", summary.MemorySummary.PreferenceCount, summary.MemorySummary.AvoidanceCount),
 		},
 		{
 			Key:     "report",

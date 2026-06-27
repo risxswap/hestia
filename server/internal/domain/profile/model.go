@@ -165,6 +165,12 @@ type LatestReportSummary struct {
 	GeneratedAt *time.Time `json:"generated_at"`
 }
 
+type PreferencesSummary struct {
+	StyleGoals          []string `json:"style_goals"`
+	Avoidances          []string `json:"avoidances"`
+	ScenarioPreferences []string `json:"scenario_preferences"`
+}
+
 type QuickEntry struct {
 	Key     string `json:"key"`
 	Title   string `json:"title"`
@@ -174,6 +180,7 @@ type QuickEntry struct {
 type Summary struct {
 	User          UserSummary          `json:"user"`
 	Profile       *ProfileSummary      `json:"profile"`
+	Preferences   PreferencesSummary   `json:"preferences"`
 	MemorySummary MemorySummary        `json:"memory_summary"`
 	LatestReport  *LatestReportSummary `json:"latest_report"`
 	QuickEntries  []QuickEntry         `json:"quick_entries"`

@@ -1068,17 +1068,52 @@ async function main() {
   );
 
   const profile = loadPage("pages/profile/profile.js", {
-    ensureDevSession: async () => ({
-      token: "dev_token",
-      user_public_id: "usr_dev",
-      onboarding_status: "not_started"
+    getProfileSummary: async () => ({
+      user: {
+        user_public_id: "usr_dev",
+        nickname: "集成用户",
+        onboarding_status: "completed"
+      },
+      profile: {
+        profile_public_id: "prf_dev",
+        gender: "female",
+        height_cm: 165,
+        body_notes: "希望通勤更利落",
+        skin_notes: "",
+        hair_notes: "",
+        lifestyle_scenarios: ["通勤"],
+        style_goal_summary: "更利落"
+      },
+      preferences: {
+        style_goals: ["更利落"],
+        avoidances: ["过甜"],
+        scenario_preferences: ["通勤更正式"]
+      },
+      memory_summary: {
+        fact_count: 3,
+        preference_count: 2,
+        avoidance_count: 1,
+        inference_count: 0,
+        pending_confirmation_count: 0
+      },
+      latest_report: null,
+      quick_entries: [
+        { key: "profile", title: "我的档案", summary: "常见场景 1 个" },
+        { key: "preferences", title: "偏好与禁忌", summary: "2 个偏好、1 个禁忌" },
+        { key: "report", title: "报告与路线", summary: "暂无报告" },
+        { key: "privacy", title: "隐私与数据", summary: "照片、档案、反馈可管理" }
+      ]
     })
   });
   assert(profile.config, "profile.js should register a Page config");
   assert(typeof profile.config.loadProfile === "function", "profile should load profile state through API client");
   const profileInstance = createPageInstance(profile.config);
   await profile.config.loadProfile.call(profileInstance);
-  assert(profileInstance.data.userPublicID === "usr_dev", "profile should display logged-in user public id");
+  assert(profileInstance.data.user.user_public_id === "usr_dev", "profile should display logged-in user public id");
+  assert(profileInstance.data.user.nickname === "集成用户", "profile should display profile summary nickname");
+  assert(profileInstance.data.quickEntries.map((entry) => entry.key).join(",") === "profile,preferences,report,privacy", "profile should keep profile quick entry contract");
+  assert(profileInstance.data.preferencesDraft.avoidancesText === "过甜", "profile should hydrate avoidances from summary preferences");
+  assert(profileInstance.data.preferencesDraft.scenarioPreferencesText === "通勤更正式", "profile should hydrate scenario preferences from summary preferences");
 }
 
 main()

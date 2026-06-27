@@ -222,6 +222,11 @@ AI 推断首版只做轻量确认，不做复杂编辑器。
     "inference_count": 2,
     "pending_confirmation_count": 1
   },
+  "preferences": {
+    "style_goals": ["更利落"],
+    "avoidances": ["过甜"],
+    "scenario_preferences": ["通勤更正式"]
+  },
   "latest_report": {
     "public_id": "rpt_demo_01",
     "title": "初版个人形象报告",
