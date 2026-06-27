@@ -93,6 +93,8 @@ const initialSummary = {
 
 async function main() {
   const apiCalls = [];
+  let failNextProfileUpdate = false;
+  let failNextPreferencesUpdate = false;
   const apiStub = {
     getProfileSummary() {
       apiCalls.push({ name: "getProfileSummary" });
@@ -100,6 +102,10 @@ async function main() {
     },
     updateProfile(data) {
       apiCalls.push({ name: "updateProfile", data });
+      if (failNextProfileUpdate) {
+        failNextProfileUpdate = false;
+        return Promise.reject(new Error("基础档案保存失败"));
+      }
       return Promise.resolve(Object.assign({}, clone(initialSummary), {
         user: Object.assign({}, initialSummary.user, {
           nickname: data.nickname
@@ -112,6 +118,10 @@ async function main() {
     },
     updateProfilePreferences(data) {
       apiCalls.push({ name: "updateProfilePreferences", data });
+      if (failNextPreferencesUpdate) {
+        failNextPreferencesUpdate = false;
+        return Promise.reject(new Error("偏好保存失败"));
+      }
       return Promise.resolve(Object.assign({}, clone(initialSummary), {
         profile: Object.assign({}, initialSummary.profile, {
           style_goal_summary: data.style_goals.join("、")
@@ -142,7 +152,7 @@ async function main() {
 
   assert(apiCalls[0].name === "getProfileSummary", "loadProfile should call getProfileSummary");
   assert(page.data.loading === false, "loadProfile should clear loading");
-  assert(page.data.errorMessage === "", "loadProfile should clear errorMessage");
+  assert(page.data.loadErrorMessage === "", "loadProfile should clear loadErrorMessage");
   assert(page.data.empty === false, "loadProfile should mark summary as non-empty");
   assert(page.data.user.nickname === "明明", "loadProfile should expose user nickname");
   assert(page.data.profileDraft.nickname === "明明", "loadProfile should prepare profile draft nickname");
@@ -154,6 +164,24 @@ async function main() {
     "loadProfile should keep profile quick entry contract"
   );
   assert(page.data.memoryItems.length === 5, "loadProfile should normalize memory summary items");
+
+  page.setData({
+    profileDraft: Object.assign({}, page.data.profileDraft, {
+      nickname: "失败后保留",
+      body_notes: "保存失败时不要清掉"
+    }),
+    preferencesDraft: Object.assign({}, page.data.preferencesDraft, {
+      avoidancesText: "失败时保留禁忌"
+    })
+  });
+  failNextProfileUpdate = true;
+  await page.handleSaveProfile.call(page);
+  assert(page.data.loadErrorMessage === "", "profile save failure should not set full-page load error");
+  assert(page.data.profileSaveMessage === "基础档案保存失败", "profile save failure should show panel message");
+  assert(page.data.profileDraft.nickname === "失败后保留", "profile save failure should keep profile draft nickname");
+  assert(page.data.profileDraft.body_notes === "保存失败时不要清掉", "profile save failure should keep profile draft notes");
+  assert(page.data.preferencesDraft.avoidancesText === "失败时保留禁忌", "profile save failure should keep other panel draft");
+  assert(page.data.user.user_public_id === "usr_test", "profile save failure should keep loaded dashboard visible");
 
   const navigations = [];
   const scrolls = [];
@@ -184,19 +212,31 @@ async function main() {
       nickname: "小明",
       body_notes: "保持自然利落",
       scenarioText: "通勤，约会 / 周末"
+    }),
+    preferencesDraft: Object.assign({}, page.data.preferencesDraft, {
+      styleGoalsText: "未保存目标",
+      avoidancesText: "未保存禁忌",
+      scenarioPreferencesText: "未保存场景"
     })
   });
   await page.handleSaveProfile.call(page);
 
-  const profileSave = apiCalls.find((call) => call.name === "updateProfile");
+  const profileSave = apiCalls.find((call) => call.name === "updateProfile" && call.data.nickname === "小明");
   assert(profileSave, "handleSaveProfile should call updateProfile");
   assert(profileSave.data.nickname === "小明", "handleSaveProfile should send nickname");
   assert(profileSave.data.body_notes === "保持自然利落", "handleSaveProfile should send body_notes");
   assert(profileSave.data.lifestyle_scenarios.length === 3, "handleSaveProfile should split scenario text");
   assert(page.data.savingProfile === false, "handleSaveProfile should clear savingProfile");
   assert(page.data.user.nickname === "小明", "handleSaveProfile should apply returned summary");
+  assert(page.data.preferencesDraft.styleGoalsText === "未保存目标", "handleSaveProfile should keep unsaved preferences style goals");
+  assert(page.data.preferencesDraft.avoidancesText === "未保存禁忌", "handleSaveProfile should keep unsaved preferences avoidances");
+  assert(page.data.preferencesDraft.scenarioPreferencesText === "未保存场景", "handleSaveProfile should keep unsaved preferences scenarios");
 
   page.setData({
+    profileDraft: Object.assign({}, page.data.profileDraft, {
+      nickname: "未保存昵称",
+      body_notes: "未保存基础档案"
+    }),
     preferencesDraft: {
       styleGoalsText: "更利落、轻松",
       avoidancesText: "过甜 / 太紧身",
@@ -214,6 +254,23 @@ async function main() {
   assert(page.data.preferencesDraft.styleGoalsText === "更利落、轻松", "handleSavePreferences should keep submitted style goals draft");
   assert(page.data.preferencesDraft.avoidancesText === "过甜 / 太紧身", "handleSavePreferences should keep submitted avoidances draft");
   assert(page.data.preferencesDraft.scenarioPreferencesText === "通勤，周末", "handleSavePreferences should keep submitted scenario preferences draft");
+  assert(page.data.profileDraft.nickname === "未保存昵称", "handleSavePreferences should keep unsaved profile nickname");
+  assert(page.data.profileDraft.body_notes === "未保存基础档案", "handleSavePreferences should keep unsaved profile notes");
+
+  page.setData({
+    preferencesDraft: {
+      styleGoalsText: "失败目标",
+      avoidancesText: "失败禁忌",
+      scenarioPreferencesText: "失败场景"
+    }
+  });
+  failNextPreferencesUpdate = true;
+  await page.handleSavePreferences.call(page);
+  assert(page.data.loadErrorMessage === "", "preferences save failure should not set full-page load error");
+  assert(page.data.preferencesSaveMessage === "偏好保存失败", "preferences save failure should show panel message");
+  assert(page.data.preferencesDraft.styleGoalsText === "失败目标", "preferences save failure should keep style goals draft");
+  assert(page.data.preferencesDraft.avoidancesText === "失败禁忌", "preferences save failure should keep avoidances draft");
+  assert(page.data.profileDraft.nickname === "未保存昵称", "preferences save failure should keep other panel draft");
 
   const removedKeys = [];
   const toastCalls = [];
@@ -232,6 +289,14 @@ async function main() {
   assert(removedKeys.includes("user_token"), "handleClearLocalSession should remove user_token");
   assert(removedKeys.includes("token"), "handleClearLocalSession should remove token");
   assert(page.data.tokenReady === false, "handleClearLocalSession should update tokenReady");
+  assert(page.data.summary === null, "handleClearLocalSession should clear summary");
+  assert(page.data.user.user_public_id === "", "handleClearLocalSession should clear user public id");
+  assert(page.data.user.nickname === "", "handleClearLocalSession should clear nickname");
+  assert(page.data.profile === null, "handleClearLocalSession should clear profile");
+  assert(page.data.profileDraft.nickname === "", "handleClearLocalSession should clear profile draft");
+  assert(page.data.preferencesDraft.styleGoalsText === "", "handleClearLocalSession should clear preferences draft");
+  assert(page.data.memoryItems.every((item) => item.value === 0), "handleClearLocalSession should clear memory counters");
+  assert(page.data.quickEntries.length === 0, "handleClearLocalSession should clear quick entries");
   assert(toastCalls[0].title === "已清除本地登录", "handleClearLocalSession should show neutral toast");
 }
 

@@ -129,14 +129,16 @@ function normalizeProfileSummary(rawSummary) {
     loading: false,
     savingProfile: false,
     savingPreferences: false,
-    errorMessage: "",
+    loadErrorMessage: "",
+    profileSaveMessage: "",
+    preferencesSaveMessage: "",
     empty: !hasSummary,
     tokenReady: hasSummary,
     summary,
     user: {
       user_public_id: normalizeText(user.user_public_id),
-      nickname: normalizeText(user.nickname) || "本地用户",
-      onboarding_status: normalizeText(user.onboarding_status) || "not_started"
+      nickname: hasSummary ? normalizeText(user.nickname) || "本地用户" : "",
+      onboarding_status: hasSummary ? normalizeText(user.onboarding_status) || "not_started" : ""
     },
     profile,
     latestReport,
@@ -144,6 +146,32 @@ function normalizeProfileSummary(rawSummary) {
     memoryItems: normalizeMemorySummary(summary.memory_summary),
     profileDraft: hasSummary ? buildProfileDraft(summary) : Object.assign({}, emptyProfileDraft),
     preferencesDraft: hasSummary ? buildPreferencesDraft(summary) : Object.assign({}, emptyPreferencesDraft)
+  };
+}
+
+function emptyLocalProfileState() {
+  return {
+    loading: false,
+    savingProfile: false,
+    savingPreferences: false,
+    loadErrorMessage: "",
+    profileSaveMessage: "",
+    preferencesSaveMessage: "",
+    empty: true,
+    tokenReady: false,
+    summary: null,
+    user: {
+      user_public_id: "",
+      nickname: "",
+      onboarding_status: ""
+    },
+    profile: null,
+    latestReport: null,
+    activeSection: "",
+    quickEntries: [],
+    memoryItems: normalizeMemorySummary(),
+    profileDraft: Object.assign({}, emptyProfileDraft),
+    preferencesDraft: Object.assign({}, emptyPreferencesDraft)
   };
 }
 
@@ -185,7 +213,9 @@ const profilePageConfig = {
     loading: false,
     savingProfile: false,
     savingPreferences: false,
-    errorMessage: "",
+    loadErrorMessage: "",
+    profileSaveMessage: "",
+    preferencesSaveMessage: "",
     empty: false,
     tokenReady: false,
     summary: null,
@@ -210,7 +240,9 @@ const profilePageConfig = {
   async loadProfile() {
     this.setData({
       loading: true,
-      errorMessage: ""
+      loadErrorMessage: "",
+      profileSaveMessage: "",
+      preferencesSaveMessage: ""
     });
 
     try {
@@ -220,7 +252,7 @@ const profilePageConfig = {
       this.setData({
         loading: false,
         tokenReady: false,
-        errorMessage: error && error.message ? error.message : "登录状态读取失败"
+        loadErrorMessage: error && error.message ? error.message : "登录状态读取失败"
       });
     }
   },
@@ -256,40 +288,47 @@ const profilePageConfig = {
   },
 
   async handleSaveProfile() {
+    const preservedPreferencesDraft = Object.assign({}, this.data.preferencesDraft);
     this.setData({
       savingProfile: true,
-      errorMessage: ""
+      profileSaveMessage: ""
     });
 
     try {
       const summary = await api.updateProfile(profilePayloadFromDraft(this.data.profileDraft));
-      this.setData(normalizeProfileSummary(summary));
+      this.setData(Object.assign({}, normalizeProfileSummary(summary), {
+        preferencesDraft: preservedPreferencesDraft,
+        profileSaveMessage: ""
+      }));
       showToast("档案已保存", "success");
     } catch (error) {
       this.setData({
         savingProfile: false,
-        errorMessage: error && error.message ? error.message : "保存档案失败"
+        profileSaveMessage: error && error.message ? error.message : "保存档案失败"
       });
     }
   },
 
   async handleSavePreferences() {
     const submittedDraft = Object.assign({}, this.data.preferencesDraft);
+    const preservedProfileDraft = Object.assign({}, this.data.profileDraft);
     this.setData({
       savingPreferences: true,
-      errorMessage: ""
+      preferencesSaveMessage: ""
     });
 
     try {
       const summary = await api.updateProfilePreferences(preferencesPayloadFromDraft(this.data.preferencesDraft));
       this.setData(Object.assign({}, normalizeProfileSummary(summary), {
-        preferencesDraft: submittedDraft
+        profileDraft: preservedProfileDraft,
+        preferencesDraft: submittedDraft,
+        preferencesSaveMessage: ""
       }));
       showToast("偏好已保存", "success");
     } catch (error) {
       this.setData({
         savingPreferences: false,
-        errorMessage: error && error.message ? error.message : "保存偏好失败"
+        preferencesSaveMessage: error && error.message ? error.message : "保存偏好失败"
       });
     }
   },
@@ -349,9 +388,7 @@ const profilePageConfig = {
         wx.removeStorageSync(key);
       });
     }
-    this.setData({
-      tokenReady: false
-    });
+    this.setData(emptyLocalProfileState());
     showToast("已清除本地登录");
   }
 };

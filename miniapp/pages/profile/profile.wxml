@@ -3,9 +3,9 @@
     <text class="muted">正在读取形象档案...</text>
   </view>
 
-  <view wx:elif="{{errorMessage}}" class="card state-card">
+  <view wx:elif="{{loadErrorMessage}}" class="card state-card">
     <text class="section-title">档案读取失败</text>
-    <text class="muted">{{errorMessage}}</text>
+    <text class="muted">{{loadErrorMessage}}</text>
     <button class="primary-button action-button" bind:tap="loadProfile">重新读取</button>
   </view>
 
@@ -83,6 +83,7 @@
     </label>
 
     <button class="primary-button save-button" loading="{{savingProfile}}" bind:tap="handleSaveProfile">保存基础档案</button>
+    <text wx:if="{{profileSaveMessage}}" class="save-message">{{profileSaveMessage}}</text>
   </view>
 
   <view id="preferences-section" class="card edit-panel {{activeSection === 'preferences' ? 'edit-panel--active' : ''}}">
@@ -105,6 +106,7 @@
     </label>
 
     <button class="primary-button save-button" loading="{{savingPreferences}}" bind:tap="handleSavePreferences">保存偏好</button>
+    <text wx:if="{{preferencesSaveMessage}}" class="save-message">{{preferencesSaveMessage}}</text>
   </view>
 
   <view id="privacy-section" class="card privacy-panel {{activeSection === 'privacy' ? 'privacy-panel--active' : ''}}">
