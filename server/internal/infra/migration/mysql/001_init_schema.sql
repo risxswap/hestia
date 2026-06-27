@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS `wardrobe_items` (
   `ai_attrs` json DEFAULT NULL,
   `user_notes` text,
   `is_core` tinyint(1) NOT NULL DEFAULT 0,
+  `recommendation_status` varchar(32) NOT NULL DEFAULT 'normal',
   `status` varchar(32) NOT NULL DEFAULT 'active',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
