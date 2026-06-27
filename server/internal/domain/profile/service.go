@@ -125,45 +125,40 @@ func (s *Service) CompleteOnboarding(ctx context.Context, userID int64) error {
 }
 
 func buildQuickEntries(summary Summary) []QuickEntry {
-	profileSummary := "还没有完成形象档案"
+	scenarioCount := 0
 	if summary.Profile != nil {
-		profileSummary = firstNonEmpty(summary.Profile.StyleGoalSummary, "已完成基础形象档案")
+		scenarioCount = len(summary.Profile.LifestyleScenarios)
+	}
+	profileSummary := "还没有记录常见场景"
+	if scenarioCount > 0 {
+		profileSummary = fmt.Sprintf("已记录 %d 个常见场景", scenarioCount)
 	}
 
-	reportSummary := "暂无初版形象报告"
+	reportSummary := "暂无初版报告"
 	if summary.LatestReport != nil {
-		reportSummary = firstNonEmpty(summary.LatestReport.Title, "已生成初版形象报告")
+		reportSummary = "初版报告已生成"
 	}
 
 	return []QuickEntry{
 		{
 			Key:     "profile",
-			Title:   "形象档案",
+			Title:   "我的档案",
 			Summary: profileSummary,
 		},
 		{
-			Key:     "memory",
-			Title:   "长期记忆",
-			Summary: fmt.Sprintf("已沉淀 %d 条事实、%d 条偏好", summary.MemorySummary.FactCount, summary.MemorySummary.PreferenceCount),
+			Key:     "preferences",
+			Title:   "偏好与禁忌",
+			Summary: fmt.Sprintf("%d 个风格目标、%d 个禁忌", summary.MemorySummary.PreferenceCount, summary.MemorySummary.AvoidanceCount),
 		},
 		{
 			Key:     "report",
-			Title:   "形象报告",
+			Title:   "报告与路线",
 			Summary: reportSummary,
 		},
 		{
-			Key:     "feedback",
-			Title:   "反馈校准",
-			Summary: fmt.Sprintf("%d 条推断待确认", summary.MemorySummary.PendingConfirmationCount),
+			Key:     "privacy",
+			Title:   "隐私与数据",
+			Summary: "照片、档案、反馈可管理",
 		},
 	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }

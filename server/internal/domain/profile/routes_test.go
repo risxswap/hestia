@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,9 +77,12 @@ func TestSummaryReturnsDashboardData(t *testing.T) {
 	if body.Data.LatestReport == nil || body.Data.LatestReport.PublicID != "rpt_test" {
 		t.Fatalf("expected latest report summary, got %#v", body.Data.LatestReport)
 	}
-	if len(body.Data.QuickEntries) != 4 {
-		t.Fatalf("expected four quick entries, got %#v", body.Data.QuickEntries)
-	}
+	assertQuickEntries(t, body.Data.QuickEntries, []profile.QuickEntry{
+		{Key: "profile", Title: "我的档案", Summary: "已记录 2 个常见场景"},
+		{Key: "preferences", Title: "偏好与禁忌", Summary: "2 个风格目标、1 个禁忌"},
+		{Key: "report", Title: "报告与路线", Summary: "初版报告已生成"},
+		{Key: "privacy", Title: "隐私与数据", Summary: "照片、档案、反馈可管理"},
+	})
 }
 
 func TestSummaryReturnsEmptyStateWithoutProfileOrReport(t *testing.T) {
@@ -113,8 +118,21 @@ func TestSummaryReturnsEmptyStateWithoutProfileOrReport(t *testing.T) {
 	if body.Data.LatestReport != nil {
 		t.Fatalf("expected nil report, got %#v", body.Data.LatestReport)
 	}
-	if len(body.Data.QuickEntries) != 4 {
-		t.Fatalf("expected four quick entries for empty state, got %#v", body.Data.QuickEntries)
+	assertQuickEntries(t, body.Data.QuickEntries, []profile.QuickEntry{
+		{Key: "profile", Title: "我的档案", Summary: "还没有记录常见场景"},
+		{Key: "preferences", Title: "偏好与禁忌", Summary: "0 个风格目标、0 个禁忌"},
+		{Key: "report", Title: "报告与路线", Summary: "暂无初版报告"},
+		{Key: "privacy", Title: "隐私与数据", Summary: "照片、档案、反馈可管理"},
+	})
+}
+
+func TestMySQLSummaryFiltersActiveProfile(t *testing.T) {
+	source, err := os.ReadFile("repo.go")
+	if err != nil {
+		t.Fatalf("read repo source: %v", err)
+	}
+	if !strings.Contains(string(source), "p.status = 'active'") {
+		t.Fatalf("expected summary query to filter active profile")
 	}
 }
 
@@ -162,4 +180,22 @@ func (*routeProfileRepo) MarkUserOnboardingCompleted(context.Context, int64) err
 
 func intPtr(value int) *int {
 	return &value
+}
+
+func assertQuickEntries(t *testing.T, actual []profile.QuickEntry, expected []profile.QuickEntry) {
+	t.Helper()
+	if len(actual) != len(expected) {
+		t.Fatalf("expected %d quick entries, got %#v", len(expected), actual)
+	}
+	for i := range expected {
+		if actual[i].Key != expected[i].Key {
+			t.Fatalf("entry %d expected key %q, got %#v", i, expected[i].Key, actual[i])
+		}
+		if actual[i].Title != expected[i].Title {
+			t.Fatalf("entry %d expected title %q, got %#v", i, expected[i].Title, actual[i])
+		}
+		if actual[i].Summary != expected[i].Summary {
+			t.Fatalf("entry %d expected summary %q, got %#v", i, expected[i].Summary, actual[i])
+		}
+	}
 }

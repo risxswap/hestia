@@ -45,6 +45,7 @@ SELECT
 FROM users u
 LEFT JOIN profiles p
   ON p.user_id = u.id
+  AND p.status = 'active'
   AND p.deleted_at IS NULL
 WHERE u.id = ?
   AND u.deleted_at IS NULL
