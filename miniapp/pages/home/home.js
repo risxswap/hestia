@@ -33,6 +33,35 @@ function normalizeTextList(value) {
   return value.filter(Boolean).map((item) => String(item));
 }
 
+function normalizeWardrobeItems(response) {
+  const body = response && response.data ? response.data : response;
+  const items = Array.isArray(body) ? body : body && Array.isArray(body.items) ? body.items : [];
+  return items.map((item) => Object.assign({}, item || {}, {
+    public_id: (item && (item.public_id || item.publicID)) || "",
+    name: (item && item.name) || "",
+    status: (item && item.status) || "active",
+    recommendation_status: (item && item.recommendation_status) || "normal",
+    is_core: !item || item.is_core !== false
+  }));
+}
+
+function coreWardrobeSection(response) {
+  const items = normalizeWardrobeItems(response)
+    .filter((item) => item.status === "active" && item.recommendation_status !== "paused" && (
+      item.recommendation_status === "preferred" || item.is_core === true
+    ))
+    .map((item) => item.name)
+    .filter(Boolean)
+    .slice(0, 5);
+  if (!items.length) {
+    return null;
+  }
+  return {
+    title: "核心衣橱",
+    body: items.join("；")
+  };
+}
+
 function firstActionText(content) {
   const items = Array.isArray(content.action_items) ? content.action_items : [];
   if (!items.length) {
@@ -145,7 +174,19 @@ const homePageConfig = {
 
     try {
       const report = await api.getLatestReport();
-      this.setData(normalizeTodayFromReport(report));
+      const nextState = normalizeTodayFromReport(report);
+      if (report && typeof api.getWardrobeItems === "function") {
+        try {
+          const wardrobeItems = await api.getWardrobeItems();
+          const section = coreWardrobeSection(wardrobeItems);
+          if (section) {
+            nextState.todayPlanSections = nextState.todayPlanSections.concat(section);
+          }
+        } catch (error) {
+          // 今日页以报告为主，衣橱上下文读取失败不阻断主链路。
+        }
+      }
+      this.setData(nextState);
     } catch (error) {
       this.setData(Object.assign({}, emptyToday, {
         hasReport: false,
@@ -220,6 +261,7 @@ if (typeof Page === "function") {
 if (typeof module !== "undefined") {
   module.exports = {
     normalizeTodayFromReport,
+    coreWardrobeSection,
     homePageConfig
   };
 }

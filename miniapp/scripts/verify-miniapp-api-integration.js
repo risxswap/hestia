@@ -262,6 +262,26 @@ async function main() {
 
   const home = loadPage("pages/home/home.js", {
     getLatestReport: async () => sampleReport,
+    getWardrobeItems: async () => ({
+      items: [
+        {
+          public_id: "wdi_shirt",
+          name: "米白衬衫",
+          category: "top",
+          is_core: true,
+          recommendation_status: "preferred",
+          status: "active"
+        },
+        {
+          public_id: "wdi_paused",
+          name: "黑色长裙",
+          category: "bottom",
+          is_core: true,
+          recommendation_status: "paused",
+          status: "active"
+        }
+      ]
+    }),
     sendImageRouteFeedback: async () => ({ public_id: "irt_test", status: "active" })
   });
   assert(home.config, "home.js should register a Page config");
@@ -272,6 +292,10 @@ async function main() {
   await home.config.loadToday.call(homeInstance);
   assert(homeInstance.data.todayRecommendation.title === "干净 + 有气质", "home should derive title from latest report route");
   assert(homeInstance.data.routePublicID === "irt_test", "home should keep route public id for feedback");
+  const coreWardrobeSection = homeInstance.data.todayPlanSections.find((section) => section.title === "核心衣橱");
+  assert(coreWardrobeSection, "home should append core wardrobe section after loading latest report");
+  assert(coreWardrobeSection.body.includes("米白衬衫"), "home core wardrobe section should include active preferred/core item");
+  assert(!coreWardrobeSection.body.includes("黑色长裙"), "home core wardrobe section should exclude paused items");
   await home.config.handlePrimaryAction.call(homeInstance);
   assert(homeInstance.data.memoryToast.includes("已记录"), "home primary feedback should call route feedback");
 
@@ -492,7 +516,10 @@ async function main() {
           color: "米白",
           is_core: true,
           recommendation_status: "preferred",
-          scene_tags: ["通勤"]
+          scene_tags: ["通勤"],
+          primary_image: {
+            object_key: "wardrobe/wdi_shirt/main.jpg"
+          }
         },
         {
           public_id: "wdi_jeans",
@@ -555,6 +582,10 @@ async function main() {
   const wardrobeInstance = createPageInstance(wardrobe.config);
   await wardrobe.config.loadWardrobe.call(wardrobeInstance);
   assert(wardrobeInstance.data.items.length === 2, "wardrobe should load two core wardrobe items");
+  assert(
+    wardrobeInstance.data.items[0].primaryImageSrc === "wardrobe/wdi_shirt/main.jpg",
+    "wardrobe should normalize primary image object_key into primaryImageSrc"
+  );
   assert(wardrobeInstance.data.gaps[0] === "浅色短外套", "wardrobe should display report wardrobe gaps");
   assert(
     wardrobeInstance.data.priorityItems.some((item) => item.public_id === "wdi_shirt"),
@@ -654,6 +685,24 @@ async function main() {
     "wardrobe delete should remove deleted item locally"
   );
 
+  wardrobe.config.handleEditItem.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        publicId: "wdi_jeans"
+      }
+    }
+  });
+  await wardrobe.config.handleDeleteItem.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        publicId: "wdi_jeans"
+      }
+    }
+  });
+  assert(wardrobeInstance.data.editorVisible === false, "wardrobe delete should close editor when deleting edited item");
+  assert(wardrobeInstance.data.editingPublicID === "", "wardrobe delete should clear editingPublicID");
+  assert(wardrobeInstance.data.draft.name === "", "wardrobe delete should reset draft");
+
   await wardrobe.config.loadWardrobeGaps.call(wardrobeInstance);
   assert(wardrobeInstance.data.gaps[0] === "浅色短外套", "wardrobe loadWardrobeGaps should stay compatible");
 
@@ -667,6 +716,8 @@ async function main() {
   assert(wardrobeMarkup.includes("handleEditItem"), "wardrobe page should bind edit item action");
   assert(wardrobeMarkup.includes("handleRecommendationStatus"), "wardrobe page should bind recommendation status action");
   assert(wardrobeMarkup.includes("handleCoreToggle"), "wardrobe page should bind core item toggle action");
+  assert(wardrobeMarkup.includes("primaryImageSrc"), "wardrobe page should render normalized primary image source");
+  assert(wardrobeMarkup.includes("primary_asset_public_id"), "wardrobe page should provide primary asset public id input");
   assert(
     !wardrobeMarkup.includes("这里展示服务端报告识别出的关键缺口"),
     "wardrobe page should remove old report-gap-only copy"

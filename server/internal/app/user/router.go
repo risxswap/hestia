@@ -21,13 +21,13 @@ func NewRouter(deps *baseapp.Deps) *gin.Engine {
 	api := router.Group("/api/user")
 	api.GET("/health", health)
 	account.RegisterUserRoutes(api, deps)
-	agent.RegisterUserRoutes(api.Group("/agent"), deps)
 	protected := api.Group("")
 	if deps == nil {
 		protected.Use(auth.RequireUserSession(auth.NewRedisSessionStore(nil)))
 	} else {
 		protected.Use(auth.RequireUserSession(auth.NewRedisSessionStore(deps.Redis)))
 	}
+	agent.RegisterUserRoutes(protected.Group("/agent"), deps)
 	onboarding.RegisterUserRoutes(protected.Group("/onboarding"), deps)
 	job.RegisterUserRoutes(protected.Group("/jobs"), deps)
 	report.RegisterUserRoutes(protected.Group("/reports"), deps)

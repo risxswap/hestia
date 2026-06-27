@@ -73,6 +73,10 @@ function decorateWardrobeItem(item) {
   const source = item || {};
   const sceneTags = normalizeTextList(source.scene_tags);
   const recommendationStatus = source.recommendation_status || "normal";
+  const primaryImage = source.primary_image || null;
+  const primaryImageSrc = primaryImage && (primaryImage.url || primaryImage.object_key)
+    ? primaryImage.url || primaryImage.object_key
+    : "";
 
   return Object.assign({}, source, {
     public_id: source.public_id || source.publicID || "",
@@ -89,7 +93,8 @@ function decorateWardrobeItem(item) {
     recommendation_status: recommendationStatus,
     recommendationLabel: recommendationLabels[recommendationStatus] || "正常推荐",
     categoryLabel: categoryLabels[source.category] || source.category || "未分类",
-    primary_image: source.primary_image || null,
+    primary_image: primaryImage,
+    primaryImageSrc,
     status: source.status || "active",
     isPreferred: recommendationStatus === "preferred",
     isPaused: recommendationStatus === "paused"
@@ -452,7 +457,10 @@ const wardrobePageConfig = {
       await api.deleteWardrobeItem(publicID);
       const nextItems = this.data.items.filter((item) => item.public_id !== publicID);
       this.setData(Object.assign({
-        errorMessage: ""
+        errorMessage: "",
+        editorVisible: false,
+        editingPublicID: "",
+        draft: cloneDraft()
       }, nextWardrobeState(nextItems, this.data.activeCategory)));
       showToast("已删除", "success");
     } catch (error) {

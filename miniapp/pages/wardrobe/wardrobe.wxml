@@ -50,7 +50,7 @@
   <view wx:if="{{visibleItems.length}}" class="item-grid">
     <block wx:for="{{visibleItems}}" wx:key="public_id">
       <view class="card item-card" data-public-id="{{item.public_id}}" bind:tap="handleEditItem">
-        <image wx:if="{{item.primary_image && item.primary_image.url}}" class="item-image" src="{{item.primary_image.url}}" mode="aspectFill" />
+        <image wx:if="{{item.primaryImageSrc}}" class="item-image" src="{{item.primaryImageSrc}}" mode="aspectFill" />
         <view wx:else class="item-placeholder">
           <text>{{item.categoryLabel}}</text>
         </view>
@@ -100,6 +100,10 @@
       <label class="field-group">
         <text class="field-label">季节</text>
         <input class="field" placeholder="例如：春秋、四季" value="{{draft.season}}" data-field="season" bindinput="handleDraftInput" />
+      </label>
+      <label class="field-group">
+        <text class="field-label">主图资产 ID</text>
+        <input class="field" placeholder="可选：已上传图片 public_id" value="{{draft.primary_asset_public_id}}" data-field="primary_asset_public_id" bindinput="handleDraftInput" />
       </label>
     </view>
 
