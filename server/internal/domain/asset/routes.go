@@ -1,0 +1,29 @@
+package asset
+
+import (
+	"log/slog"
+
+	baseapp "hestia/server/internal/app"
+
+	"github.com/gin-gonic/gin"
+)
+
+func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
+	var repo Repository
+	var logger *slog.Logger
+	var service *Service
+	if deps != nil {
+		repo = NewMySQLRepository(deps.DB)
+		logger = deps.Logger
+		service = NewServiceFromConfig(repo, deps.Config)
+	} else {
+		service = NewService(repo)
+	}
+	RegisterUserRoutesWithService(group, service, logger)
+}
+
+func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service, logger *slog.Logger) {
+	handler := NewHandler(service, logger)
+	group.POST("/upload-token", handler.UploadToken)
+	group.POST("/confirm", handler.Confirm)
+}

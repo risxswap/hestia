@@ -11,21 +11,30 @@ import (
 )
 
 type Config struct {
-	AppEnv        string `env:"APP_ENV" envDefault:"development"`
-	Port          string `env:"SERVER_PORT" envDefault:"8080"`
-	DatabaseDSN   string `env:"DATABASE_DSN"`
-	RedisAddr     string `env:"REDIS_ADDR"`
-	RedisPassword string `env:"REDIS_PASSWORD"`
-	RedisDB       int    `env:"REDIS_DB"`
-	LLMProvider   string `env:"LLM_PROVIDER"`
+	AppEnv                     string `env:"APP_ENV" envDefault:"development"`
+	Port                       string `env:"SERVER_PORT" envDefault:"8080"`
+	DatabaseDSN                string `env:"DATABASE_DSN"`
+	RedisAddr                  string `env:"REDIS_ADDR"`
+	RedisPassword              string `env:"REDIS_PASSWORD"`
+	RedisDB                    int    `env:"REDIS_DB"`
+	LLMProvider                string `env:"LLM_PROVIDER"`
+	QiniuAccessKey             string `env:"QINIU_ACCESS_KEY"`
+	QiniuSecretKey             string `env:"QINIU_SECRET_KEY"`
+	QiniuBucket                string `env:"QINIU_BUCKET"`
+	QiniuUploadHost            string `env:"QINIU_UPLOAD_HOST"`
+	QiniuPrivateDomain         string `env:"QINIU_PRIVATE_DOMAIN"`
+	QiniuUploadTokenTTLSeconds int    `env:"QINIU_UPLOAD_TOKEN_TTL_SECONDS"`
+	QiniuDownloadURLTTLSeconds int    `env:"QINIU_DOWNLOAD_URL_TTL_SECONDS"`
 }
 
 func Load() (*Config, error) {
 	_ = godotenv.Load(".env", "server/.env")
 
 	cfg := Config{
-		AppEnv: "development",
-		Port:   "8080",
+		AppEnv:                     "development",
+		Port:                       "8080",
+		QiniuUploadTokenTTLSeconds: 3600,
+		QiniuDownloadURLTTLSeconds: 900,
 	}
 	if err := applyTOMLConfig(&cfg); err != nil {
 		return nil, err
@@ -42,6 +51,7 @@ func Load() (*Config, error) {
 type fileConfig struct {
 	MySQL mysqlConfig `toml:"mysql"`
 	Redis redisConfig `toml:"redis"`
+	Qiniu qiniuConfig `toml:"qiniu"`
 }
 
 type mysqlConfig struct {
@@ -57,6 +67,16 @@ type redisConfig struct {
 	Port     int    `toml:"port"`
 	Password string `toml:"password"`
 	Database int    `toml:"database"`
+}
+
+type qiniuConfig struct {
+	AccessKey             string `toml:"access_key"`
+	SecretKey             string `toml:"secret_key"`
+	Bucket                string `toml:"bucket"`
+	UploadHost            string `toml:"upload_host"`
+	PrivateDomain         string `toml:"private_domain"`
+	UploadTokenTTLSeconds int    `toml:"upload_token_ttl_seconds"`
+	DownloadURLTTLSeconds int    `toml:"download_url_ttl_seconds"`
 }
 
 func applyTOMLConfig(cfg *Config) error {
@@ -98,6 +118,27 @@ func applyTOMLConfig(cfg *Config) error {
 		cfg.RedisAddr = fmt.Sprintf("%s:%d", fc.Redis.Host, fc.Redis.Port)
 		cfg.RedisPassword = fc.Redis.Password
 		cfg.RedisDB = fc.Redis.Database
+	}
+	if fc.Qiniu.AccessKey != "" {
+		cfg.QiniuAccessKey = fc.Qiniu.AccessKey
+	}
+	if fc.Qiniu.SecretKey != "" {
+		cfg.QiniuSecretKey = fc.Qiniu.SecretKey
+	}
+	if fc.Qiniu.Bucket != "" {
+		cfg.QiniuBucket = fc.Qiniu.Bucket
+	}
+	if fc.Qiniu.UploadHost != "" {
+		cfg.QiniuUploadHost = fc.Qiniu.UploadHost
+	}
+	if fc.Qiniu.PrivateDomain != "" {
+		cfg.QiniuPrivateDomain = fc.Qiniu.PrivateDomain
+	}
+	if fc.Qiniu.UploadTokenTTLSeconds > 0 {
+		cfg.QiniuUploadTokenTTLSeconds = fc.Qiniu.UploadTokenTTLSeconds
+	}
+	if fc.Qiniu.DownloadURLTTLSeconds > 0 {
+		cfg.QiniuDownloadURLTTLSeconds = fc.Qiniu.DownloadURLTTLSeconds
 	}
 
 	return nil

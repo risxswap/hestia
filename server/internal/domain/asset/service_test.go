@@ -2,7 +2,12 @@ package asset
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/qiniu/go-sdk/v7/auth/qbox"
 )
 
 type captureRepo struct {
@@ -41,4 +46,66 @@ func TestRegisterOnboardingAssetsPersistsReferenceMetadata(t *testing.T) {
 	if metadata["original_asset_public_id"] != "ast_existing" {
 		t.Fatalf("expected original asset public id metadata, got %#v", metadata)
 	}
+}
+
+func TestQiniuUploadSignerLimitsTokenToRequestedFileSize(t *testing.T) {
+	token, err := qiniuUploadSigner{credentials: qboxTestCredentials()}.SignUpload(context.Background(), UploadSignRequest{
+		Bucket:    "private-assets",
+		ObjectKey: "users/12/wardrobe/ast_test.jpg",
+		MimeType:  "image/jpeg",
+		FileSize:  2048,
+	})
+	if err != nil {
+		t.Fatalf("sign upload: %v", err)
+	}
+
+	parts := strings.Split(token, ":")
+	if len(parts) != 3 {
+		t.Fatalf("expected qiniu upload token with three parts, got %q", token)
+	}
+	raw, err := decodeQiniuPolicy(parts[2])
+	if err != nil {
+		t.Fatalf("decode put policy: %v", err)
+	}
+	var policy map[string]any
+	if err := json.Unmarshal(raw, &policy); err != nil {
+		t.Fatalf("unmarshal put policy: %v", err)
+	}
+	if policy["fsizeLimit"] != float64(2048) {
+		t.Fatalf("expected fsizeLimit 2048, got %#v in %s", policy["fsizeLimit"], string(raw))
+	}
+}
+
+func TestQiniuUploadSignerRejectsInvalidFileSize(t *testing.T) {
+	tests := []struct {
+		name     string
+		fileSize int64
+	}{
+		{name: "zero", fileSize: 0},
+		{name: "too large", fileSize: maxImageFileSize + 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := qiniuUploadSigner{credentials: qboxTestCredentials()}.SignUpload(context.Background(), UploadSignRequest{
+				Bucket:    "private-assets",
+				ObjectKey: "users/12/wardrobe/ast_test.jpg",
+				MimeType:  "image/jpeg",
+				FileSize:  tt.fileSize,
+			})
+			if err != ErrInvalidFileSize {
+				t.Fatalf("expected ErrInvalidFileSize, got %v", err)
+			}
+		})
+	}
+}
+
+func qboxTestCredentials() *qbox.Mac {
+	return qbox.NewMac("test-ak", "test-sk")
+}
+
+func decodeQiniuPolicy(value string) ([]byte, error) {
+	if raw, err := base64.URLEncoding.DecodeString(value); err == nil {
+		return raw, nil
+	}
+	return base64.RawURLEncoding.DecodeString(value)
 }

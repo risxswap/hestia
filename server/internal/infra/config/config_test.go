@@ -45,6 +45,13 @@ func TestConfigExposesOnlyRuntimeFields(t *testing.T) {
 		"RedisPassword",
 		"RedisDB",
 		"LLMProvider",
+		"QiniuAccessKey",
+		"QiniuSecretKey",
+		"QiniuBucket",
+		"QiniuUploadHost",
+		"QiniuPrivateDomain",
+		"QiniuUploadTokenTTLSeconds",
+		"QiniuDownloadURLTTLSeconds",
 	}
 
 	if cfgType.NumField() != len(expected) {
@@ -62,6 +69,13 @@ func TestLoadUsesConfigTOML(t *testing.T) {
 	unsetenv(t, "REDIS_ADDR")
 	unsetenv(t, "REDIS_PASSWORD")
 	unsetenv(t, "REDIS_DB")
+	unsetenv(t, "QINIU_ACCESS_KEY")
+	unsetenv(t, "QINIU_SECRET_KEY")
+	unsetenv(t, "QINIU_BUCKET")
+	unsetenv(t, "QINIU_UPLOAD_HOST")
+	unsetenv(t, "QINIU_PRIVATE_DOMAIN")
+	unsetenv(t, "QINIU_UPLOAD_TOKEN_TTL_SECONDS")
+	unsetenv(t, "QINIU_DOWNLOAD_URL_TTL_SECONDS")
 
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	err := os.WriteFile(configPath, []byte(`
@@ -77,6 +91,15 @@ host = "127.0.0.2"
 port = 6380
 password = "redis-secret"
 database = 3
+
+[qiniu]
+access_key = "ak"
+secret_key = "sk"
+bucket = "private-assets"
+upload_host = "https://upload.example.test"
+private_domain = "private.example.test"
+upload_token_ttl_seconds = 1800
+download_url_ttl_seconds = 600
 `), 0o600)
 	if err != nil {
 		t.Fatalf("write config file: %v", err)
@@ -100,6 +123,73 @@ database = 3
 	}
 	if cfg.RedisDB != 3 {
 		t.Fatalf("expected redis db 3, got %d", cfg.RedisDB)
+	}
+	if cfg.QiniuAccessKey != "ak" || cfg.QiniuSecretKey != "sk" {
+		t.Fatalf("expected qiniu credentials from config file")
+	}
+	if cfg.QiniuBucket != "private-assets" {
+		t.Fatalf("expected qiniu bucket private-assets, got %q", cfg.QiniuBucket)
+	}
+	if cfg.QiniuUploadHost != "https://upload.example.test" {
+		t.Fatalf("expected qiniu upload host, got %q", cfg.QiniuUploadHost)
+	}
+	if cfg.QiniuPrivateDomain != "private.example.test" {
+		t.Fatalf("expected qiniu private domain, got %q", cfg.QiniuPrivateDomain)
+	}
+	if cfg.QiniuUploadTokenTTLSeconds != 1800 {
+		t.Fatalf("expected qiniu upload ttl 1800, got %d", cfg.QiniuUploadTokenTTLSeconds)
+	}
+	if cfg.QiniuDownloadURLTTLSeconds != 600 {
+		t.Fatalf("expected qiniu download ttl 600, got %d", cfg.QiniuDownloadURLTTLSeconds)
+	}
+}
+
+func TestLoadUsesQiniuEnvironmentOverride(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	err := os.WriteFile(configPath, []byte(`
+[qiniu]
+access_key = "toml-ak"
+secret_key = "toml-sk"
+bucket = "toml-bucket"
+upload_host = "https://toml-upload.example.test"
+private_domain = "toml-private.example.test"
+upload_token_ttl_seconds = 1800
+download_url_ttl_seconds = 600
+`), 0o600)
+	if err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+	t.Setenv("CONFIG_FILE", configPath)
+	t.Setenv("QINIU_ACCESS_KEY", "env-ak")
+	t.Setenv("QINIU_SECRET_KEY", "env-sk")
+	t.Setenv("QINIU_BUCKET", "env-bucket")
+	t.Setenv("QINIU_UPLOAD_HOST", "https://env-upload.example.test")
+	t.Setenv("QINIU_PRIVATE_DOMAIN", "env-private.example.test")
+	t.Setenv("QINIU_UPLOAD_TOKEN_TTL_SECONDS", "7200")
+	t.Setenv("QINIU_DOWNLOAD_URL_TTL_SECONDS", "1200")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if cfg.QiniuAccessKey != "env-ak" || cfg.QiniuSecretKey != "env-sk" {
+		t.Fatalf("expected qiniu credentials from env, got %q/%q", cfg.QiniuAccessKey, cfg.QiniuSecretKey)
+	}
+	if cfg.QiniuBucket != "env-bucket" {
+		t.Fatalf("expected qiniu bucket from env, got %q", cfg.QiniuBucket)
+	}
+	if cfg.QiniuUploadHost != "https://env-upload.example.test" {
+		t.Fatalf("expected qiniu upload host from env, got %q", cfg.QiniuUploadHost)
+	}
+	if cfg.QiniuPrivateDomain != "env-private.example.test" {
+		t.Fatalf("expected qiniu private domain from env, got %q", cfg.QiniuPrivateDomain)
+	}
+	if cfg.QiniuUploadTokenTTLSeconds != 7200 {
+		t.Fatalf("expected qiniu upload ttl from env, got %d", cfg.QiniuUploadTokenTTLSeconds)
+	}
+	if cfg.QiniuDownloadURLTTLSeconds != 1200 {
+		t.Fatalf("expected qiniu download ttl from env, got %d", cfg.QiniuDownloadURLTTLSeconds)
 	}
 }
 
