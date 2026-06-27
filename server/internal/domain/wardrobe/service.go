@@ -20,6 +20,7 @@ const (
 
 var (
 	ErrInvalidRecommendationStatus = errors.New("invalid recommendation status")
+	ErrInvalidItemName             = errors.New("invalid wardrobe item name")
 	ErrItemNotFound                = errors.New("wardrobe item not found")
 	ErrRepositoryUnsupported       = errors.New("wardrobe repository unsupported")
 )
@@ -94,7 +95,7 @@ func (s *Service) ListItems(ctx context.Context, userID int64, filter ListFilter
 func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInput) (Item, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
-		return Item{}, errors.New("wardrobe item name is required")
+		return Item{}, ErrInvalidItemName
 	}
 	category := strings.TrimSpace(input.Category)
 	if category == "" {
@@ -180,7 +181,7 @@ func (s *Service) AdviceContextItems(ctx context.Context, userID int64, filter A
 	scene := strings.TrimSpace(filter.Scene)
 	result := make([]Item, 0, len(items))
 	for _, item := range items {
-		if item.Status == StatusDeleted || item.RecommendationStatus == RecommendationStatusPaused {
+		if item.Status != StatusActive || item.RecommendationStatus == RecommendationStatusPaused {
 			continue
 		}
 		result = append(result, item)
@@ -222,10 +223,10 @@ func adviceRank(item Item, scene string) int {
 		rank += 100
 	}
 	if item.IsCore {
-		rank += 10
+		rank += 20
 	}
 	if scene != "" && hasSceneTag(item.SceneTags, scene) {
-		rank += 20
+		rank += 10
 	}
 	return rank
 }

@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/go-sql-driver/mysql"
 
 	"hestia/server/internal/infra/config"
 	mysqlinfra "hestia/server/internal/infra/mysql"
@@ -72,12 +75,24 @@ func ApplyMySQLSchema(ctx context.Context, exec SQLExecutor) error {
 		}
 		for _, statement := range splitSQLStatements(string(raw)) {
 			if _, err := exec.ExecContext(ctx, statement); err != nil {
+				if isIgnorableDuplicateAddColumn(statement, err) {
+					continue
+				}
 				return fmt.Errorf("execute mysql migration %s: %w", path, err)
 			}
 		}
 	}
 
 	return nil
+}
+
+func isIgnorableDuplicateAddColumn(statement string, err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if !errors.As(err, &mysqlErr) || mysqlErr.Number != 1060 {
+		return false
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+	return strings.HasPrefix(normalized, "alter table ") && strings.Contains(normalized, " add column ")
 }
 
 func splitSQLStatements(sqlText string) []string {

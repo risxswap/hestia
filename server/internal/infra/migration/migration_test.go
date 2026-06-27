@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-sql-driver/mysql"
+
 	"hestia/server/internal/infra/config"
 	"hestia/server/internal/infra/migration"
 )
@@ -59,10 +61,25 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	if !containsStatement(exec.queries, "CREATE TABLE IF NOT EXISTS `jobs`") {
 		t.Fatalf("expected jobs table creation statement")
 	}
+	if !containsStatement(exec.queries, "ALTER TABLE wardrobe_items ADD COLUMN recommendation_status") {
+		t.Fatalf("expected wardrobe recommendation status migration statement")
+	}
 	for _, query := range exec.queries {
 		if strings.TrimSpace(query) == "" {
 			t.Fatal("expected no empty SQL statements to be executed")
 		}
+	}
+}
+
+func TestApplyMySQLSchemaIgnoresDuplicateColumnForIncrementalAddColumn(t *testing.T) {
+	exec := &duplicateColumnSQLExecutor{}
+
+	if err := migration.ApplyMySQLSchema(context.Background(), exec); err != nil {
+		t.Fatalf("expected duplicate column migration to be ignored, got %v", err)
+	}
+
+	if !exec.sawRecommendationStatusMigration {
+		t.Fatalf("expected wardrobe recommendation status migration to be executed")
 	}
 }
 
@@ -169,6 +186,18 @@ type fakeSQLExecutor struct {
 
 func (f *fakeSQLExecutor) ExecContext(_ context.Context, query string, _ ...any) (sql.Result, error) {
 	f.queries = append(f.queries, query)
+	return nil, nil
+}
+
+type duplicateColumnSQLExecutor struct {
+	sawRecommendationStatusMigration bool
+}
+
+func (f *duplicateColumnSQLExecutor) ExecContext(_ context.Context, query string, _ ...any) (sql.Result, error) {
+	if strings.Contains(query, "ALTER TABLE wardrobe_items ADD COLUMN recommendation_status") {
+		f.sawRecommendationStatusMigration = true
+		return nil, &mysql.MySQLError{Number: 1060, Message: "Duplicate column name 'recommendation_status'"}
+	}
 	return nil, nil
 }
 
