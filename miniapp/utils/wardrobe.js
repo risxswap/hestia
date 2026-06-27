@@ -118,8 +118,8 @@ function decorateWardrobeItem(item) {
   const sceneTags = normalizeTextList(source.scene_tags);
   const recommendationStatus = source.recommendation_status || "normal";
   const primaryImage = source.primary_image || null;
-  const primaryImageSrc = primaryImage && (primaryImage.url || primaryImage.object_key)
-    ? primaryImage.url || primaryImage.object_key
+  const primaryImageSrc = primaryImage && primaryImage.url
+    ? primaryImage.url
     : "";
   const category = source.category || "";
   const isCore = source.is_core !== false;
@@ -229,7 +229,7 @@ function buildPayload(draft) {
 
 function imageFilesFromAsset(asset) {
   const source = asset || {};
-  const url = source.url || source.object_key || "";
+  const url = source.url || "";
   if (!url) {
     return [];
   }

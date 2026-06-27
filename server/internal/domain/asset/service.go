@@ -120,8 +120,8 @@ func NewService(repo Repository) *Service {
 
 func NewServiceWithOptions(repo Repository, options ServiceOptions) *Service {
 	options.Bucket = strings.TrimSpace(options.Bucket)
-	options.UploadHost = strings.TrimSpace(options.UploadHost)
-	options.PrivateDomain = normalizePrivateDomain(options.PrivateDomain)
+	options.UploadHost = normalizeHTTPSURL(options.UploadHost)
+	options.PrivateDomain = normalizeHTTPSURL(options.PrivateDomain)
 	if options.UploadTTL <= 0 {
 		options.UploadTTL = time.Hour
 	}
@@ -490,14 +490,17 @@ func validDimensions(width *int, height *int) bool {
 	return true
 }
 
-func normalizePrivateDomain(value string) string {
+func normalizeHTTPSURL(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
 	}
 	lower := strings.ToLower(value)
-	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+	if strings.HasPrefix(lower, "https://") {
 		return value
+	}
+	if strings.HasPrefix(lower, "http://") {
+		return "https://" + strings.TrimSpace(value[len("http://"):])
 	}
 	return "https://" + value
 }

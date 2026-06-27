@@ -21,6 +21,7 @@ const (
 var (
 	ErrInvalidRecommendationStatus = errors.New("invalid recommendation status")
 	ErrInvalidItemName             = errors.New("invalid wardrobe item name")
+	ErrInvalidPrimaryAsset         = errors.New("invalid wardrobe primary asset")
 	ErrItemNotFound                = errors.New("wardrobe item not found")
 	ErrRepositoryUnsupported       = errors.New("wardrobe repository unsupported")
 )

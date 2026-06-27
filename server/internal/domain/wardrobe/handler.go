@@ -118,6 +118,8 @@ func (h *Handler) writeError(c *gin.Context, err error, logMessage string, userI
 		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_recommendation_status", "不支持的推荐状态")
 	case errors.Is(err, ErrInvalidItemName):
 		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_item", "单品名称不能为空")
+	case errors.Is(err, ErrInvalidPrimaryAsset):
+		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_primary_asset", "主图资产不可用于衣橱")
 	case errors.Is(err, ErrItemNotFound):
 		response.Error(c, http.StatusNotFound, "wardrobe.item_not_found", "单品不存在")
 	case errors.Is(err, ErrRepositoryUnsupported):

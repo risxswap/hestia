@@ -5,12 +5,19 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"hestia/server/internal/common/dbutil"
 
 	"github.com/jmoiron/sqlx"
+)
+
+const (
+	wardrobePrimaryAssetType   = "wardrobe_item_photo"
+	wardrobePrimaryAssetSource = "miniapp_upload"
+	localOnboardingBucket      = "local-onboarding"
 )
 
 type MySQLRepository struct {
@@ -327,7 +334,7 @@ WHERE wardrobe_item_id = ?
 func (r *MySQLRepository) findAssetForUser(ctx context.Context, userID int64, publicID string) (wardrobeAssetRow, error) {
 	var row wardrobeAssetRow
 	err := sqlx.GetContext(ctx, r.ext, &row, `
-SELECT id, public_id, object_key
+SELECT id, public_id, bucket, object_key, asset_type, source
 FROM assets
 WHERE public_id = ?
   AND owner_user_id = ?
@@ -340,6 +347,9 @@ LIMIT 1
 	}
 	if err != nil {
 		return wardrobeAssetRow{}, err
+	}
+	if !row.eligibleWardrobePrimaryAsset(userID) {
+		return wardrobeAssetRow{}, ErrInvalidPrimaryAsset
 	}
 	return row, nil
 }
@@ -379,6 +389,11 @@ func primaryImageJoinSQL() string {
     JOIN assets a_pick
       ON a_pick.id = wia_pick.asset_id
       AND a_pick.deleted_at IS NULL
+      AND a_pick.status <> 'deleted'
+      AND a_pick.asset_type = '` + wardrobePrimaryAssetType + `'
+      AND a_pick.source = '` + wardrobePrimaryAssetSource + `'
+      AND a_pick.bucket <> '` + localOnboardingBucket + `'
+      AND a_pick.object_key LIKE CONCAT('users/', wi.user_id, '/wardrobe/', a_pick.public_id, '.%')
     WHERE wia_pick.wardrobe_item_id = wi.id
       AND wia_pick.is_primary = 1
     ORDER BY wia_pick.sort_order ASC, wia_pick.id DESC
@@ -387,6 +402,7 @@ func primaryImageJoinSQL() string {
 LEFT JOIN assets a
   ON a.id = primary_wia.asset_id
   AND a.deleted_at IS NULL
+  AND a.status <> 'deleted'
 `
 }
 
@@ -525,7 +541,29 @@ func (c primaryImageCandidate) betterThan(other primaryImageCandidate) bool {
 type wardrobeAssetRow struct {
 	ID        int64  `db:"id"`
 	PublicID  string `db:"public_id"`
+	Bucket    string `db:"bucket"`
 	ObjectKey string `db:"object_key"`
+	AssetType string `db:"asset_type"`
+	Source    string `db:"source"`
+}
+
+func (r wardrobeAssetRow) eligibleWardrobePrimaryAsset(userID int64) bool {
+	if strings.TrimSpace(r.PublicID) == "" || strings.TrimSpace(r.Bucket) == "" {
+		return false
+	}
+	if r.Bucket == localOnboardingBucket {
+		return false
+	}
+	if r.AssetType != wardrobePrimaryAssetType || r.Source != wardrobePrimaryAssetSource {
+		return false
+	}
+	prefix := fmt.Sprintf("users/%d/wardrobe/", userID)
+	objectKey := strings.TrimSpace(r.ObjectKey)
+	if !strings.HasPrefix(objectKey, prefix) {
+		return false
+	}
+	filename := strings.TrimPrefix(objectKey, prefix)
+	return strings.HasPrefix(filename, r.PublicID+".")
 }
 
 func jsonText(value any) (string, error) {

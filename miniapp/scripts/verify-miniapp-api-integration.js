@@ -619,8 +619,8 @@ async function main() {
   assert(wardrobeInstance.data.items.length === 2, "wardrobe should load two core wardrobe items");
   assert(wardrobeInstance.data.visibleItems.length === 2, "wardrobe all category should show all loaded items");
   assert(
-    wardrobeInstance.data.items[0].primaryImageSrc === "wardrobe/wdi_shirt/main.jpg",
-    "wardrobe should normalize primary image object_key into primaryImageSrc"
+    wardrobeInstance.data.items[0].primaryImageSrc === "",
+    "wardrobe should not expose primary image object_key as display src when signed url is unavailable"
   );
   assert(wardrobeInstance.data.gaps[0] === "浅色短外套", "wardrobe should display report wardrobe gaps");
   assert(

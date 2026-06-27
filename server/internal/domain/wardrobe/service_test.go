@@ -154,6 +154,92 @@ func TestCreateItemTrimsAndDefaultsFields(t *testing.T) {
 	}
 }
 
+func TestWardrobeAssetRowEligibilityRequiresWardrobeUploadScope(t *testing.T) {
+	valid := wardrobeAssetRow{
+		PublicID:  "ast_abcdefghijklmnopqrstuvwxyz",
+		Bucket:    "private-assets",
+		ObjectKey: "users/12/wardrobe/ast_abcdefghijklmnopqrstuvwxyz.jpg",
+		AssetType: wardrobePrimaryAssetType,
+		Source:    wardrobePrimaryAssetSource,
+	}
+	if !valid.eligibleWardrobePrimaryAsset(12) {
+		t.Fatalf("expected valid wardrobe uploaded asset to be eligible")
+	}
+
+	tests := []struct {
+		name string
+		row  wardrobeAssetRow
+	}{
+		{
+			name: "onboarding asset type",
+			row: wardrobeAssetRow{
+				PublicID:  valid.PublicID,
+				Bucket:    valid.Bucket,
+				ObjectKey: valid.ObjectKey,
+				AssetType: "onboarding_photo",
+				Source:    valid.Source,
+			},
+		},
+		{
+			name: "onboarding source",
+			row: wardrobeAssetRow{
+				PublicID:  valid.PublicID,
+				Bucket:    valid.Bucket,
+				ObjectKey: valid.ObjectKey,
+				AssetType: valid.AssetType,
+				Source:    "onboarding",
+			},
+		},
+		{
+			name: "local bucket",
+			row: wardrobeAssetRow{
+				PublicID:  valid.PublicID,
+				Bucket:    localOnboardingBucket,
+				ObjectKey: valid.ObjectKey,
+				AssetType: valid.AssetType,
+				Source:    valid.Source,
+			},
+		},
+		{
+			name: "other user path",
+			row: wardrobeAssetRow{
+				PublicID:  valid.PublicID,
+				Bucket:    valid.Bucket,
+				ObjectKey: "users/99/wardrobe/ast_abcdefghijklmnopqrstuvwxyz.jpg",
+				AssetType: valid.AssetType,
+				Source:    valid.Source,
+			},
+		},
+		{
+			name: "other scope path",
+			row: wardrobeAssetRow{
+				PublicID:  valid.PublicID,
+				Bucket:    valid.Bucket,
+				ObjectKey: "users/12/onboarding/ast_abcdefghijklmnopqrstuvwxyz.jpg",
+				AssetType: valid.AssetType,
+				Source:    valid.Source,
+			},
+		},
+		{
+			name: "mismatched filename",
+			row: wardrobeAssetRow{
+				PublicID:  valid.PublicID,
+				Bucket:    valid.Bucket,
+				ObjectKey: "users/12/wardrobe/ast_bcdefghijklmnopqrstuvwxyza.jpg",
+				AssetType: valid.AssetType,
+				Source:    valid.Source,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.row.eligibleWardrobePrimaryAsset(12) {
+				t.Fatalf("expected ineligible wardrobe primary asset, got %#v", tt.row)
+			}
+		})
+	}
+}
+
 func TestCreateItemReturnsUnsupportedWhenRepoDoesNotSupportItems(t *testing.T) {
 	service := NewService(coreOnlyWardrobeRepo{})
 	_, err := service.CreateItem(context.Background(), 12, CreateInput{Name: "黑色西装"})

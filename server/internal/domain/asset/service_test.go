@@ -99,6 +99,21 @@ func TestQiniuUploadSignerRejectsInvalidFileSize(t *testing.T) {
 	}
 }
 
+func TestNewServiceWithOptionsNormalizesAssetURLsToHTTPS(t *testing.T) {
+	service := NewServiceWithOptions(&captureRepo{}, ServiceOptions{
+		Bucket:        "private-assets",
+		UploadHost:    "http://upload.example.test",
+		PrivateDomain: "private.example.test",
+	})
+
+	if service.options.UploadHost != "https://upload.example.test" {
+		t.Fatalf("expected upload host to be normalized to https, got %q", service.options.UploadHost)
+	}
+	if service.options.PrivateDomain != "https://private.example.test" {
+		t.Fatalf("expected private domain to be normalized to https, got %q", service.options.PrivateDomain)
+	}
+}
+
 func qboxTestCredentials() *qbox.Mac {
 	return qbox.NewMac("test-ak", "test-sk")
 }
