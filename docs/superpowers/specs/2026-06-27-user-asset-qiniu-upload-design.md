@@ -1,15 +1,16 @@
-# 衣橱图片七牛上传设计
+# 用户资产图片七牛上传设计
 
 ## 背景
 
 图库式衣橱已经支持通过 `primary_asset_public_id` 关联主图，但新增和编辑弹窗里仍然需要用户手动填写“主图资产 ID”。这不符合真实使用方式，也阻塞了衣橱图库成为以图片为核心的界面。
 
-本设计补齐图片上传链路：用户在小程序里选择或拍摄衣服图片，图片存储在七牛云对象存储，后端只负责签发上传凭证、登记资产、生成短期可访问图片 URL，并继续通过现有衣橱字段绑定主图。
+本设计补齐公共用户资产上传链路：用户在小程序里选择或拍摄图片，图片存储在七牛云对象存储，后端只负责签发上传凭证、登记资产、生成短期可访问图片 URL。衣橱主图是第一个接入场景，后续 onboarding 自拍、核心衣橱照片、参考图和顾问聊天图片都应复用同一套资产上传接口。
 
 图片属于敏感个人数据。第一版按私有 bucket 设计，不把对象 key 当作长期公开访问地址。
 
 ## 目标
 
+- 提供公共用户资产上传 API，其他业务可以通过 `asset_type` 复用。
 - 新增衣服和编辑衣服时，可以在弹窗内选择、上传、替换或移除主图。
 - 使用项目已有 TDesign 小程序组件能力，优先采用 `t-upload`，不把聊天输入组件搬进衣橱表单。
 - 后端接入七牛云对象存储，业务服务端签发上传凭证，小程序直传七牛。
@@ -30,17 +31,17 @@
 
 采用“小程序直传七牛 + 后端登记资产”的方案。
 
-流程：
+公共流程：
 
-1. 用户在衣橱新增或编辑弹窗点击上传区域。
+1. 用户在任一业务入口点击上传区域。
 2. `t-upload` 调起相册或相机，限制单张图片。
 3. 小程序向后端申请上传凭证。
 4. 后端生成 `asset_public_id`、`object_key`、上传 token、上传地址和过期时间。
 5. 小程序使用 `wx.uploadFile` 直传七牛。
 6. 七牛返回成功后，小程序调用后端确认接口。
 7. 后端写入 `assets` 表，状态为 `active`、审核状态为 `pending`。
-8. 小程序把确认后的 `asset_public_id` 写入当前草稿的 `primary_asset_public_id`。
-9. 用户保存衣服时，现有衣橱创建或更新接口绑定该主图资产。
+8. 小程序把确认后的 `asset_public_id` 返回给调用业务。
+9. 调用业务按自己的语义保存引用。衣橱场景写入 `primary_asset_public_id`，onboarding 场景写入 `photos/assets/uploaded_refs` 等结构。
 
 不采用“图片先传业务后端再转发七牛”，因为它会增加服务端带宽和延迟。不采用“前端自己控制七牛 key/token”，因为密钥和对象路径控制权不能放到小程序端。
 
@@ -60,7 +61,7 @@
 
 TOML 配置可增加 `[qiniu]` 段，字段与环境变量对应。环境变量优先级继续沿用现有配置加载策略。
 
-### 上传凭证接口
+### 公共上传凭证接口
 
 新增受登录保护的接口：
 
@@ -82,12 +83,12 @@ TOML 配置可增加 `[qiniu]` 段，字段与环境变量对应。环境变量�
 - 校验用户已登录。
 - 只允许图片 MIME 类型。
 - 限制单文件大小，第一版建议 10 MB。
-- 只允许明确的资产类型，衣橱主图使用 `wardrobe_item_photo`。
+- 只允许明确的资产类型，避免客户端随意写入资产语义。
 - 生成 `asset_public_id`，沿用现有 `ast` public id 前缀。
-- 生成服务端控制的 `object_key`，例如：
+- 根据 `asset_type` 生成服务端控制的 `object_key`，例如：
 
 ```text
-users/{user_id}/wardrobe/{asset_public_id}.jpg
+users/{user_id}/{asset_scope}/{asset_public_id}.jpg
 ```
 
 - 生成七牛上传凭证，限定 bucket 和 object key。
@@ -106,7 +107,18 @@ users/{user_id}/wardrobe/{asset_public_id}.jpg
 }
 ```
 
-### 上传确认接口
+第一版支持的 `asset_type` 和对象路径映射：
+
+| asset_type | asset_scope | 用途 |
+| --- | --- | --- |
+| `wardrobe_item_photo` | `wardrobe` | 衣橱单品主图 |
+| `onboarding_photo` | `onboarding` | onboarding 自拍、半身照、衣橱照片 |
+| `style_reference` | `style-reference` | 用户上传的风格参考图 |
+| `chat_image` | `chat` | 顾问聊天里随问题上传的图片 |
+
+如果某个业务还没有正式接入保存链路，也可以先不在前端开放入口；但后端资产上传接口应从第一版就按公共能力设计。
+
+### 公共上传确认接口
 
 新增受登录保护的接口：
 
@@ -150,6 +162,17 @@ users/{user_id}/wardrobe/{asset_public_id}.jpg
 
 第一版不强制服务端回查七牛对象元信息；如果后续发现确认接口被误调用，再增加七牛 stat 校验。
 
+### 资产 URL 生成能力
+
+资产领域需要提供公共的短期 URL 生成能力。任何业务返回资产图片时，都不应自己拼七牛私有 URL，而应调用同一套资产 URL 签名逻辑。
+
+公共能力：
+
+- 输入：`bucket`、`object_key`。
+- 输出：短期签名下载 URL。
+- TTL：使用 `QINIU_DOWNLOAD_URL_TTL_SECONDS`。
+- 行为：如果七牛配置缺失，返回空 URL，不阻塞非图片字段返回。
+
 ### 图片展示 URL
 
 现有 `wardrobe.Item.PrimaryImage` 已有 `URL` 字段。衣橱列表和详情仍返回 `primary_image`，但后端需要在返回前把私有 bucket 图片转换为短期签名 URL：
@@ -170,7 +193,7 @@ users/{user_id}/wardrobe/{asset_public_id}.jpg
 
 ### 组件选择
 
-衣橱新增弹窗和详情编辑弹窗使用 TDesign `t-upload`：
+前端需要沉淀公共上传封装，业务页面只关心“选择图片后得到资产”。衣橱新增弹窗和详情编辑弹窗作为首个使用方，使用 TDesign `t-upload`：
 
 - `max=1`
 - `mediaType=['image']`
@@ -179,6 +202,8 @@ users/{user_id}/wardrobe/{asset_public_id}.jpg
 - `files` 由页面草稿状态控制。
 
 这满足“使用现有组件”的要求，也能保持衣橱表单和聊天页解耦。
+
+后续如果 onboarding 或聊天也需要相同交互，可以复用同一套上传工具；是否抽成独立小程序组件由实现时根据重复程度决定。第一版至少要把七牛上传逻辑从衣橱页面 JS 中拆到公共工具层。
 
 ### 上传工具
 
@@ -195,6 +220,8 @@ users/{user_id}/wardrobe/{asset_public_id}.jpg
 3. 解析七牛响应。
 4. 调用 confirm。
 5. 返回 `{ asset_public_id, url, object_key }`。
+
+调用方必须传入明确的 `asset_type`。衣橱传 `wardrobe_item_photo`；后续 onboarding、参考图和聊天上传传各自的类型。
 
 ### 弹窗交互
 
@@ -227,6 +254,7 @@ users/{user_id}/wardrobe/{asset_public_id}.jpg
 - 未配置七牛：上传凭证接口返回服务端错误，前端提示“图片上传暂不可用”。
 - 文件过大：前端先拦截，后端再兜底拒绝。
 - 非图片文件：前端限制媒体类型，后端兜底拒绝。
+- 不支持的 `asset_type`：后端拒绝，前端提示当前入口暂不支持上传。
 - 七牛上传失败：不调用确认接口，保留草稿文本字段。
 - 确认失败：上传块显示失败，不把资产 ID 写入草稿。
 - 保存衣服失败：已上传资产保留在用户资产表中，但不会绑定到衣服；后续可由清理任务处理未绑定资产。
@@ -239,6 +267,7 @@ users/{user_id}/wardrobe/{asset_public_id}.jpg
 - 私有下载 URL 设置短 TTL。
 - `assets.owner_user_id` 必须写入当前登录用户 ID。
 - 衣橱绑定主图时继续校验资产属于当前用户。
+- 其他业务引用资产时也必须校验资产属于当前用户。
 - 不在日志中记录上传 token。
 
 ## 测试与验证
@@ -247,14 +276,17 @@ users/{user_id}/wardrobe/{asset_public_id}.jpg
 
 - 上传凭证接口拒绝未登录请求。
 - 上传凭证接口拒绝非图片 MIME 类型。
+- 上传凭证接口拒绝不支持的 `asset_type`。
 - 上传凭证接口生成 `ast` public id 和用户隔离的 object key。
 - 上传确认接口写入 `assets` 表。
 - 上传确认接口拒绝不属于当前用户路径的 object key。
+- 上传确认接口对相同 `asset_public_id`、bucket 和 object key 保持幂等。
 - 衣橱列表返回主图短期 URL。
 
 前端需要覆盖：
 
 - API client 暴露上传 token、确认、七牛上传封装。
+- 公共上传封装要求调用方传入 `asset_type`。
 - 新增弹窗上传成功后写入 `draft.primary_asset_public_id`。
 - 编辑弹窗能回显已有主图。
 - 上传中不能保存。
@@ -273,6 +305,7 @@ users/{user_id}/wardrobe/{asset_public_id}.jpg
 
 - 七牛 bucket 按私有 bucket 设计。
 - 小程序直传七牛，服务端签发上传凭证。
-- 衣橱弹窗使用现有 TDesign 上传组件能力。
+- 上传接口是公共用户资产能力，不属于衣橱模块；衣橱只是首个接入场景。
+- 衣橱弹窗使用现有 TDesign 上传组件能力，并复用公共上传工具。
 - 后端返回短期签名下载 URL 给图库和详情页展示。
 - 本轮聚焦单张衣橱主图，不做批量导入和自动识别。
