@@ -1,4 +1,4 @@
-package migration_test
+package migration
 
 import (
 	"context"
@@ -13,14 +13,13 @@ import (
 	"github.com/go-sql-driver/mysql"
 
 	"hestia/server/internal/infra/config"
-	"hestia/server/internal/infra/migration"
 )
 
 func TestRunOnStartupCallsRunnerUp(t *testing.T) {
 	runner := &fakeRunner{}
 	cfg := &config.Config{DatabaseDSN: "mysql://example"}
 
-	if err := migration.RunOnStartup(context.Background(), cfg, runner); err != nil {
+	if err := RunOnStartup(context.Background(), cfg, runner); err != nil {
 		t.Fatalf("run startup migration: %v", err)
 	}
 
@@ -36,7 +35,7 @@ func TestRunOnStartupReturnsRunnerError(t *testing.T) {
 	expected := errors.New("migration failed")
 	runner := &fakeRunner{err: expected}
 
-	err := migration.RunOnStartup(context.Background(), &config.Config{}, runner)
+	err := RunOnStartup(context.Background(), &config.Config{}, runner)
 	if !errors.Is(err, expected) {
 		t.Fatalf("expected runner error, got %v", err)
 	}
@@ -45,7 +44,7 @@ func TestRunOnStartupReturnsRunnerError(t *testing.T) {
 func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	exec := &fakeSQLExecutor{}
 
-	if err := migration.ApplyMySQLSchema(context.Background(), exec); err != nil {
+	if err := ApplyMySQLSchema(context.Background(), exec); err != nil {
 		t.Fatalf("apply mysql schema: %v", err)
 	}
 
@@ -74,12 +73,23 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 func TestApplyMySQLSchemaIgnoresDuplicateColumnForIncrementalAddColumn(t *testing.T) {
 	exec := &duplicateColumnSQLExecutor{}
 
-	if err := migration.ApplyMySQLSchema(context.Background(), exec); err != nil {
+	if err := ApplyMySQLSchema(context.Background(), exec); err != nil {
 		t.Fatalf("expected duplicate column migration to be ignored, got %v", err)
 	}
 
 	if !exec.sawRecommendationStatusMigration {
 		t.Fatalf("expected wardrobe recommendation status migration to be executed")
+	}
+}
+
+func TestDuplicateColumnIgnoreOnlyAppliesToWardrobeRecommendationStatusMigration(t *testing.T) {
+	duplicateErr := &mysql.MySQLError{Number: 1060, Message: "Duplicate column name 'recommendation_status'"}
+
+	if !isIgnorableDuplicateAddColumn("ALTER TABLE wardrobe_items ADD COLUMN recommendation_status varchar(32) NOT NULL DEFAULT 'normal' AFTER is_core", duplicateErr) {
+		t.Fatal("expected wardrobe recommendation_status duplicate add column to be ignored")
+	}
+	if isIgnorableDuplicateAddColumn("ALTER TABLE users ADD COLUMN recommendation_status varchar(32) NOT NULL DEFAULT 'normal'", duplicateErr) {
+		t.Fatal("expected unrelated duplicate add column to return an error")
 	}
 }
 

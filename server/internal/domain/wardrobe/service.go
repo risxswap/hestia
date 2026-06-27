@@ -135,6 +135,13 @@ func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInpu
 }
 
 func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string, input UpdateInput) (Item, error) {
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return Item{}, ErrInvalidItemName
+		}
+		input.Name = &name
+	}
 	if input.RecommendationStatus != nil {
 		status := strings.TrimSpace(*input.RecommendationStatus)
 		if status == "" || !isValidRecommendationStatus(status) {
@@ -146,7 +153,6 @@ func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string,
 		sceneTags := trimStringSlice(*input.SceneTags)
 		input.SceneTags = &sceneTags
 	}
-	trimStringPtr(input.Name)
 	trimStringPtr(input.Category)
 	trimStringPtr(input.Color)
 	trimStringPtr(input.Silhouette)

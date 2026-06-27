@@ -194,6 +194,18 @@ func TestUpdateItemTrimsNameRecommendationStatusAndSceneTags(t *testing.T) {
 	}
 }
 
+func TestUpdateItemRejectsEmptyNameWithSentinelError(t *testing.T) {
+	service := NewService(&captureWardrobeRepo{items: []Item{
+		{PublicID: "wdi_blazer", UserID: 12, Name: "黑色西装", Category: "outerwear", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true},
+	}})
+
+	name := "   "
+	_, err := service.UpdateItem(context.Background(), 12, "wdi_blazer", UpdateInput{Name: &name})
+	if err != ErrInvalidItemName {
+		t.Fatalf("expected ErrInvalidItemName, got %v", err)
+	}
+}
+
 func TestAdviceContextExcludesPausedAndSortsPreferredFirst(t *testing.T) {
 	now := time.Now()
 	repo := &captureWardrobeRepo{items: []Item{
