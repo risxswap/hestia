@@ -1,0 +1,165 @@
+package profile_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"hestia/server/internal/common/auth"
+	"hestia/server/internal/domain/profile"
+
+	"github.com/gin-gonic/gin"
+)
+
+func TestSummaryReturnsDashboardData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	generatedAt := time.Date(2026, 6, 27, 6, 0, 0, 0, time.UTC)
+	repo := &routeProfileRepo{
+		summary: profile.Summary{
+			User: profile.UserSummary{
+				UserPublicID:     "usr_test",
+				Nickname:         "明明",
+				OnboardingStatus: "completed",
+			},
+			Profile: &profile.ProfileSummary{
+				ProfilePublicID:    "prf_test",
+				Gender:             "female",
+				HeightCM:           intPtr(165),
+				LifestyleScenarios: []string{"通勤", "周末见朋友"},
+				StyleGoalSummary:   "更利落",
+			},
+			MemorySummary: profile.MemorySummary{
+				FactCount:                4,
+				PreferenceCount:          2,
+				AvoidanceCount:           1,
+				InferenceCount:           3,
+				PendingConfirmationCount: 1,
+			},
+			LatestReport: &profile.LatestReportSummary{
+				PublicID:    "rpt_test",
+				Title:       "初版个人形象报告",
+				Status:      "ready",
+				GeneratedAt: &generatedAt,
+			},
+		},
+	}
+	router := newProfileRouteTestRouter(repo)
+	request := httptest.NewRequest(http.MethodGet, "/api/user/profile/summary", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string          `json:"code"`
+		Data profile.Summary `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "ok" {
+		t.Fatalf("expected code ok, got %q", body.Code)
+	}
+	if body.Data.User.UserPublicID != "usr_test" {
+		t.Fatalf("expected user summary, got %#v", body.Data.User)
+	}
+	if body.Data.Profile == nil || body.Data.Profile.ProfilePublicID != "prf_test" {
+		t.Fatalf("expected profile summary, got %#v", body.Data.Profile)
+	}
+	if body.Data.LatestReport == nil || body.Data.LatestReport.PublicID != "rpt_test" {
+		t.Fatalf("expected latest report summary, got %#v", body.Data.LatestReport)
+	}
+	if len(body.Data.QuickEntries) != 4 {
+		t.Fatalf("expected four quick entries, got %#v", body.Data.QuickEntries)
+	}
+}
+
+func TestSummaryReturnsEmptyStateWithoutProfileOrReport(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &routeProfileRepo{
+		summary: profile.Summary{
+			User: profile.UserSummary{
+				UserPublicID:     "usr_test",
+				Nickname:         "明明",
+				OnboardingStatus: "not_started",
+			},
+			MemorySummary: profile.MemorySummary{},
+		},
+	}
+	router := newProfileRouteTestRouter(repo)
+	request := httptest.NewRequest(http.MethodGet, "/api/user/profile/summary", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Data profile.Summary `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.Profile != nil {
+		t.Fatalf("expected nil profile, got %#v", body.Data.Profile)
+	}
+	if body.Data.LatestReport != nil {
+		t.Fatalf("expected nil report, got %#v", body.Data.LatestReport)
+	}
+	if len(body.Data.QuickEntries) != 4 {
+		t.Fatalf("expected four quick entries for empty state, got %#v", body.Data.QuickEntries)
+	}
+}
+
+func newProfileRouteTestRouter(repo *routeProfileRepo) *gin.Engine {
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
+		c.Next()
+	})
+	profile.RegisterUserRoutesWithService(router.Group("/api/user/profile"), profile.NewService(repo), nil)
+	return router
+}
+
+type routeProfileRepo struct {
+	summary profile.Summary
+	err     error
+}
+
+func (r *routeProfileRepo) Summary(context.Context, int64) (profile.Summary, error) {
+	if r.err != nil {
+		return profile.Summary{}, r.err
+	}
+	return r.summary, nil
+}
+
+func (*routeProfileRepo) Upsert(context.Context, profile.Profile) (profile.Profile, error) {
+	return profile.Profile{}, errors.New("unused")
+}
+
+func (*routeProfileRepo) ReplaceFacts(context.Context, int64, int64, []profile.Fact) error {
+	return errors.New("unused")
+}
+
+func (*routeProfileRepo) ReplacePrefs(context.Context, int64, int64, []profile.Pref) error {
+	return errors.New("unused")
+}
+
+func (*routeProfileRepo) CreateInferences(context.Context, []profile.Inference) error {
+	return errors.New("unused")
+}
+
+func (*routeProfileRepo) MarkUserOnboardingCompleted(context.Context, int64) error {
+	return errors.New("unused")
+}
+
+func intPtr(value int) *int {
+	return &value
+}

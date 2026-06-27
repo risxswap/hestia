@@ -2,6 +2,8 @@ package profile
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"hestia/server/internal/common/id"
@@ -25,12 +27,32 @@ type Repository interface {
 	MarkUserOnboardingCompleted(ctx context.Context, userID int64) error
 }
 
+type summaryRepository interface {
+	Summary(ctx context.Context, userID int64) (Summary, error)
+}
+
 type Service struct {
 	repo Repository
 }
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
+}
+
+func (s *Service) Summary(ctx context.Context, userID int64) (Summary, error) {
+	if s == nil || s.repo == nil {
+		return Summary{}, errors.New("profile service dependencies are nil")
+	}
+	repo, ok := s.repo.(summaryRepository)
+	if !ok {
+		return Summary{}, errors.New("profile repository summary dependency is nil")
+	}
+	summary, err := repo.Summary(ctx, userID)
+	if err != nil {
+		return Summary{}, err
+	}
+	summary.QuickEntries = buildQuickEntries(summary)
+	return summary, nil
 }
 
 func (s *Service) UpsertFromOnboarding(ctx context.Context, userID int64, input OnboardingInput) (Profile, error) {
@@ -100,4 +122,48 @@ func (s *Service) SaveGeneratorInferences(ctx context.Context, userID int64, pro
 
 func (s *Service) CompleteOnboarding(ctx context.Context, userID int64) error {
 	return s.repo.MarkUserOnboardingCompleted(ctx, userID)
+}
+
+func buildQuickEntries(summary Summary) []QuickEntry {
+	profileSummary := "还没有完成形象档案"
+	if summary.Profile != nil {
+		profileSummary = firstNonEmpty(summary.Profile.StyleGoalSummary, "已完成基础形象档案")
+	}
+
+	reportSummary := "暂无初版形象报告"
+	if summary.LatestReport != nil {
+		reportSummary = firstNonEmpty(summary.LatestReport.Title, "已生成初版形象报告")
+	}
+
+	return []QuickEntry{
+		{
+			Key:     "profile",
+			Title:   "形象档案",
+			Summary: profileSummary,
+		},
+		{
+			Key:     "memory",
+			Title:   "长期记忆",
+			Summary: fmt.Sprintf("已沉淀 %d 条事实、%d 条偏好", summary.MemorySummary.FactCount, summary.MemorySummary.PreferenceCount),
+		},
+		{
+			Key:     "report",
+			Title:   "形象报告",
+			Summary: reportSummary,
+		},
+		{
+			Key:     "feedback",
+			Title:   "反馈校准",
+			Summary: fmt.Sprintf("%d 条推断待确认", summary.MemorySummary.PendingConfirmationCount),
+		},
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
