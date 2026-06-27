@@ -11,16 +11,28 @@ import (
 )
 
 const (
-	StatusActive      = "active"
-	SourceOnboarding  = "onboarding"
-	PolarityPositive  = "positive"
-	PolarityNegative  = "negative"
-	PrefTypeStyleGoal = "style_goal"
-	PrefTypeAvoidance = "avoidance"
+	StatusActive               = "active"
+	SourceOnboarding           = "onboarding"
+	SourceUser                 = "user"
+	PolarityPositive           = "positive"
+	PolarityNegative           = "negative"
+	PrefTypeStyleGoal          = "style_goal"
+	PrefTypeAvoidance          = "avoidance"
+	PrefTypeScenarioPreference = "scenario_preference"
+)
+
+const (
+	maxProfileTextLength = 220
+	maxScenarioCount     = 8
+	maxScenarioLength    = 40
+	maxPreferenceCount   = 12
+	maxPreferenceLength  = 60
 )
 
 type Repository interface {
 	Summary(ctx context.Context, userID int64) (Summary, error)
+	UpdateExplicitProfile(ctx context.Context, userID int64, input UpdateProfileInput) (Summary, error)
+	UpdateExplicitPreferences(ctx context.Context, userID int64, input UpdatePreferencesInput) (Summary, error)
 	Upsert(ctx context.Context, item Profile) (Profile, error)
 	ReplaceFacts(ctx context.Context, userID int64, profileID int64, facts []Fact) error
 	ReplacePrefs(ctx context.Context, userID int64, profileID int64, prefs []Pref) error
@@ -32,6 +44,24 @@ type Service struct {
 	repo Repository
 }
 
+var ErrValidation = errors.New("profile validation failed")
+
+type ValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e ValidationError) Error() string {
+	if e.Field == "" {
+		return ErrValidation.Error()
+	}
+	return fmt.Sprintf("%s: %s", e.Field, e.Message)
+}
+
+func (e ValidationError) Is(target error) bool {
+	return target == ErrValidation
+}
+
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
@@ -41,6 +71,38 @@ func (s *Service) Summary(ctx context.Context, userID int64) (Summary, error) {
 		return Summary{}, errors.New("profile service dependencies are nil")
 	}
 	summary, err := s.repo.Summary(ctx, userID)
+	if err != nil {
+		return Summary{}, err
+	}
+	summary.QuickEntries = buildQuickEntries(summary)
+	return summary, nil
+}
+
+func (s *Service) UpdateProfile(ctx context.Context, userID int64, request UpdateProfileRequest) (Summary, error) {
+	if s == nil || s.repo == nil {
+		return Summary{}, errors.New("profile service dependencies are nil")
+	}
+	input, err := validateUpdateProfile(request)
+	if err != nil {
+		return Summary{}, err
+	}
+	summary, err := s.repo.UpdateExplicitProfile(ctx, userID, input)
+	if err != nil {
+		return Summary{}, err
+	}
+	summary.QuickEntries = buildQuickEntries(summary)
+	return summary, nil
+}
+
+func (s *Service) UpdatePreferences(ctx context.Context, userID int64, request UpdatePreferencesRequest) (Summary, error) {
+	if s == nil || s.repo == nil {
+		return Summary{}, errors.New("profile service dependencies are nil")
+	}
+	input, err := validateUpdatePreferences(request)
+	if err != nil {
+		return Summary{}, err
+	}
+	summary, err := s.repo.UpdateExplicitPreferences(ctx, userID, input)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -115,6 +177,73 @@ func (s *Service) SaveGeneratorInferences(ctx context.Context, userID int64, pro
 
 func (s *Service) CompleteOnboarding(ctx context.Context, userID int64) error {
 	return s.repo.MarkUserOnboardingCompleted(ctx, userID)
+}
+
+func validateUpdateProfile(request UpdateProfileRequest) (UpdateProfileInput, error) {
+	input := UpdateProfileInput{
+		Nickname:  strings.TrimSpace(request.Nickname),
+		Gender:    strings.TrimSpace(request.Gender),
+		HeightCM:  request.HeightCM,
+		BodyNotes: strings.TrimSpace(request.BodyNotes),
+		SkinNotes: strings.TrimSpace(request.SkinNotes),
+		HairNotes: strings.TrimSpace(request.HairNotes),
+	}
+	texts := map[string]string{
+		"nickname":   input.Nickname,
+		"gender":     input.Gender,
+		"body_notes": input.BodyNotes,
+		"skin_notes": input.SkinNotes,
+		"hair_notes": input.HairNotes,
+	}
+	for field, value := range texts {
+		if len([]rune(value)) > maxProfileTextLength {
+			return UpdateProfileInput{}, ValidationError{Field: field, Message: "too long"}
+		}
+	}
+	scenarios, err := sanitizeStringList(request.LifestyleScenarios, maxScenarioCount, maxScenarioLength, "lifestyle_scenarios")
+	if err != nil {
+		return UpdateProfileInput{}, err
+	}
+	input.LifestyleScenarios = scenarios
+	return input, nil
+}
+
+func validateUpdatePreferences(request UpdatePreferencesRequest) (UpdatePreferencesInput, error) {
+	styleGoals, err := sanitizeStringList(request.StyleGoals, maxPreferenceCount, maxPreferenceLength, "style_goals")
+	if err != nil {
+		return UpdatePreferencesInput{}, err
+	}
+	avoidances, err := sanitizeStringList(request.Avoidances, maxPreferenceCount, maxPreferenceLength, "avoidances")
+	if err != nil {
+		return UpdatePreferencesInput{}, err
+	}
+	scenarios, err := sanitizeStringList(request.ScenarioPreferences, maxPreferenceCount, maxPreferenceLength, "scenario_preferences")
+	if err != nil {
+		return UpdatePreferencesInput{}, err
+	}
+	return UpdatePreferencesInput{
+		StyleGoals:          styleGoals,
+		Avoidances:          avoidances,
+		ScenarioPreferences: scenarios,
+	}, nil
+}
+
+func sanitizeStringList(values []string, maxCount int, maxLength int, field string) ([]string, error) {
+	if len(values) > maxCount {
+		return nil, ValidationError{Field: field, Message: "too many"}
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if len([]rune(trimmed)) > maxLength {
+			return nil, ValidationError{Field: field, Message: "too long"}
+		}
+		result = append(result, trimmed)
+	}
+	return result, nil
 }
 
 func buildQuickEntries(summary Summary) []QuickEntry {

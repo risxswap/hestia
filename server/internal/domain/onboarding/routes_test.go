@@ -776,6 +776,23 @@ func (r *memoryProfileRepo) Summary(_ context.Context, userID int64) (profile.Su
 	}, nil
 }
 
+func (r *memoryProfileRepo) UpdateExplicitProfile(_ context.Context, userID int64, input profile.UpdateProfileInput) (profile.Summary, error) {
+	item := r.byUser[userID]
+	item.UserID = userID
+	item.Gender = input.Gender
+	item.HeightCM = input.HeightCM
+	item.BodyNotes = input.BodyNotes
+	item.SkinNotes = input.SkinNotes
+	item.HairNotes = input.HairNotes
+	item.LifestyleScenarios = append([]string(nil), input.LifestyleScenarios...)
+	r.byUser[userID] = item
+	return r.Summary(context.Background(), userID)
+}
+
+func (r *memoryProfileRepo) UpdateExplicitPreferences(_ context.Context, userID int64, _ profile.UpdatePreferencesInput) (profile.Summary, error) {
+	return r.Summary(context.Background(), userID)
+}
+
 func (r *memoryProfileRepo) ReplaceFacts(context.Context, int64, int64, []profile.Fact) error {
 	return nil
 }

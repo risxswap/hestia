@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"hestia/server/internal/common/dbutil"
+	"hestia/server/internal/common/id"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -71,6 +72,88 @@ LIMIT 1
 	return summary, nil
 }
 
+func (r *MySQLRepository) UpdateExplicitProfile(ctx context.Context, userID int64, input UpdateProfileInput) (Summary, error) {
+	if r == nil || r.ext == nil {
+		return Summary{}, errors.New("profile repository database is nil")
+	}
+	if starter, ok := r.ext.(txStarter); ok {
+		tx, err := starter.BeginTxx(ctx, nil)
+		if err != nil {
+			return Summary{}, err
+		}
+		txRepo := &MySQLRepository{ext: tx}
+		if err := txRepo.updateExplicitProfile(ctx, userID, input); err != nil {
+			_ = tx.Rollback()
+			return Summary{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return Summary{}, err
+		}
+		return r.Summary(ctx, userID)
+	}
+	if err := r.updateExplicitProfile(ctx, userID, input); err != nil {
+		return Summary{}, err
+	}
+	return r.Summary(ctx, userID)
+}
+
+func (r *MySQLRepository) UpdateExplicitPreferences(ctx context.Context, userID int64, input UpdatePreferencesInput) (Summary, error) {
+	if r == nil || r.ext == nil {
+		return Summary{}, errors.New("profile repository database is nil")
+	}
+	if starter, ok := r.ext.(txStarter); ok {
+		tx, err := starter.BeginTxx(ctx, nil)
+		if err != nil {
+			return Summary{}, err
+		}
+		txRepo := &MySQLRepository{ext: tx}
+		if err := txRepo.updateExplicitPreferences(ctx, userID, input); err != nil {
+			_ = tx.Rollback()
+			return Summary{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return Summary{}, err
+		}
+		return r.Summary(ctx, userID)
+	}
+	if err := r.updateExplicitPreferences(ctx, userID, input); err != nil {
+		return Summary{}, err
+	}
+	return r.Summary(ctx, userID)
+}
+
+func (r *MySQLRepository) updateExplicitProfile(ctx context.Context, userID int64, input UpdateProfileInput) error {
+	if input.Nickname != "" {
+		if _, err := r.ext.ExecContext(ctx, `UPDATE users SET nickname = NULLIF(?, '') WHERE id = ? AND deleted_at IS NULL`, input.Nickname, userID); err != nil {
+			return err
+		}
+	}
+	profile, err := r.upsertExplicitProfile(ctx, Profile{
+		PublicID:           id.NewPublicID("prf"),
+		UserID:             userID,
+		Status:             StatusActive,
+		Gender:             input.Gender,
+		HeightCM:           input.HeightCM,
+		BodyNotes:          input.BodyNotes,
+		SkinNotes:          input.SkinNotes,
+		HairNotes:          input.HairNotes,
+		LifestyleScenarios: input.LifestyleScenarios,
+	})
+	if err != nil {
+		return err
+	}
+	facts := explicitProfileFacts(input)
+	return r.ReplaceFacts(ctx, userID, profile.ID, facts)
+}
+
+func (r *MySQLRepository) updateExplicitPreferences(ctx context.Context, userID int64, input UpdatePreferencesInput) error {
+	profile, err := r.ensureActiveProfile(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return r.ReplacePrefs(ctx, userID, profile.ID, explicitPreferences(input))
+}
+
 func (r *MySQLRepository) Upsert(ctx context.Context, item Profile) (Profile, error) {
 	if r == nil || r.ext == nil {
 		return Profile{}, errors.New("profile repository database is nil")
@@ -119,6 +202,74 @@ LIMIT 1
 	}
 	saved.LifestyleScenarios = item.LifestyleScenarios
 	return saved, nil
+}
+
+func (r *MySQLRepository) upsertExplicitProfile(ctx context.Context, item Profile) (Profile, error) {
+	scenarios, err := jsonText(item.LifestyleScenarios)
+	if err != nil {
+		return Profile{}, err
+	}
+	_, err = r.ext.ExecContext(ctx, `
+INSERT INTO profiles
+  (public_id, user_id, status, gender, height_cm, body_notes, skin_notes, hair_notes, lifestyle_scenarios)
+VALUES
+  (?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CAST(? AS JSON))
+ON DUPLICATE KEY UPDATE
+  status = VALUES(status),
+  gender = VALUES(gender),
+  height_cm = VALUES(height_cm),
+  body_notes = VALUES(body_notes),
+  skin_notes = VALUES(skin_notes),
+  hair_notes = VALUES(hair_notes),
+  lifestyle_scenarios = VALUES(lifestyle_scenarios),
+  deleted_at = NULL
+`, item.PublicID, item.UserID, item.Status, item.Gender, item.HeightCM, item.BodyNotes, item.SkinNotes, item.HairNotes, scenarios)
+	if err != nil {
+		return Profile{}, err
+	}
+	saved, err := r.findProfileByUserID(ctx, item.UserID)
+	if err != nil {
+		return Profile{}, err
+	}
+	saved.LifestyleScenarios = item.LifestyleScenarios
+	return saved, nil
+}
+
+func (r *MySQLRepository) ensureActiveProfile(ctx context.Context, userID int64) (Profile, error) {
+	_, err := r.ext.ExecContext(ctx, `
+INSERT INTO profiles
+  (public_id, user_id, status)
+VALUES
+  (?, ?, ?)
+ON DUPLICATE KEY UPDATE
+  status = VALUES(status),
+  deleted_at = NULL
+`, id.NewPublicID("prf"), userID, StatusActive)
+	if err != nil {
+		return Profile{}, err
+	}
+	return r.findProfileByUserID(ctx, userID)
+}
+
+func (r *MySQLRepository) findProfileByUserID(ctx context.Context, userID int64) (Profile, error) {
+	var saved Profile
+	err := sqlx.GetContext(ctx, r.ext, &saved, `
+SELECT
+  id,
+  public_id,
+  user_id,
+  status,
+  COALESCE(gender, '') AS gender,
+  height_cm,
+  COALESCE(body_notes, '') AS body_notes,
+  COALESCE(skin_notes, '') AS skin_notes,
+  COALESCE(hair_notes, '') AS hair_notes,
+  COALESCE(style_goal_summary, '') AS style_goal_summary
+FROM profiles
+WHERE user_id = ? AND deleted_at IS NULL
+LIMIT 1
+`, userID)
+	return saved, err
 }
 
 func (r *MySQLRepository) ReplaceFacts(ctx context.Context, userID int64, profileID int64, facts []Fact) error {
@@ -320,4 +471,36 @@ func decodeStringSlice(raw json.RawMessage) ([]string, error) {
 		return []string{}, nil
 	}
 	return values, nil
+}
+
+func explicitProfileFacts(input UpdateProfileInput) []Fact {
+	facts := make([]Fact, 0, 3)
+	if input.Gender != "" {
+		facts = append(facts, Fact{Key: "gender", Value: input.Gender, Source: SourceUser})
+	}
+	if input.HeightCM != nil {
+		facts = append(facts, Fact{Key: "height_cm", Value: input.HeightCM, Source: SourceUser})
+	}
+	if len(input.LifestyleScenarios) > 0 {
+		facts = append(facts, Fact{Key: "lifestyle_scenarios", Value: input.LifestyleScenarios, Source: SourceUser})
+	}
+	return facts
+}
+
+func explicitPreferences(input UpdatePreferencesInput) []Pref {
+	prefs := make([]Pref, 0, len(input.StyleGoals)+len(input.Avoidances)+len(input.ScenarioPreferences))
+	for _, goal := range input.StyleGoals {
+		prefs = append(prefs, Pref{Type: PrefTypeStyleGoal, Key: goal, Value: goal, Polarity: PolarityPositive, Source: SourceUser})
+	}
+	for _, avoidance := range input.Avoidances {
+		prefs = append(prefs, Pref{Type: PrefTypeAvoidance, Key: avoidance, Value: avoidance, Polarity: PolarityNegative, Source: SourceUser})
+	}
+	for _, scenario := range input.ScenarioPreferences {
+		prefs = append(prefs, Pref{Type: PrefTypeScenarioPreference, Key: scenario, Value: scenario, Polarity: PolarityPositive, Source: SourceUser})
+	}
+	return prefs
+}
+
+type txStarter interface {
+	BeginTxx(ctx context.Context, opts *sql.TxOptions) (*sqlx.Tx, error)
 }

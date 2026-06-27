@@ -3,17 +3,17 @@ package profile
 import "time"
 
 type Profile struct {
-	ID                 int64
-	PublicID           string
-	UserID             int64
-	Status             string
-	Gender             string
-	HeightCM           *int
-	BodyNotes          string
-	SkinNotes          string
-	HairNotes          string
+	ID                 int64  `db:"id"`
+	PublicID           string `db:"public_id"`
+	UserID             int64  `db:"user_id"`
+	Status             string `db:"status"`
+	Gender             string `db:"gender"`
+	HeightCM           *int   `db:"height_cm"`
+	BodyNotes          string `db:"body_notes"`
+	SkinNotes          string `db:"skin_notes"`
+	HairNotes          string `db:"hair_notes"`
 	LifestyleScenarios []string
-	StyleGoalSummary   string
+	StyleGoalSummary   string `db:"style_goal_summary"`
 }
 
 type Fact struct {
@@ -49,6 +49,38 @@ type OnboardingInput struct {
 	LifestyleScenarios []string
 	StyleGoals         []string
 	Avoidances         []string
+}
+
+type UpdateProfileRequest struct {
+	Nickname           string   `json:"nickname"`
+	Gender             string   `json:"gender"`
+	HeightCM           *int     `json:"height_cm"`
+	BodyNotes          string   `json:"body_notes"`
+	SkinNotes          string   `json:"skin_notes"`
+	HairNotes          string   `json:"hair_notes"`
+	LifestyleScenarios []string `json:"lifestyle_scenarios"`
+}
+
+type UpdatePreferencesRequest struct {
+	StyleGoals          []string `json:"style_goals"`
+	Avoidances          []string `json:"avoidances"`
+	ScenarioPreferences []string `json:"scenario_preferences"`
+}
+
+type UpdateProfileInput struct {
+	Nickname           string
+	Gender             string
+	HeightCM           *int
+	BodyNotes          string
+	SkinNotes          string
+	HairNotes          string
+	LifestyleScenarios []string
+}
+
+type UpdatePreferencesInput struct {
+	StyleGoals          []string
+	Avoidances          []string
+	ScenarioPreferences []string
 }
 
 type UserSummary struct {

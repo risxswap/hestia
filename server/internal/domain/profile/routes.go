@@ -21,4 +21,6 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service, logger *slog.Logger) {
 	handler := NewHandler(service, logger)
 	group.GET("/summary", handler.Summary)
+	group.PATCH("", handler.UpdateProfile)
+	group.PATCH("/preferences", handler.UpdatePreferences)
 }
