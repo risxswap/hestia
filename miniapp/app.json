@@ -3,6 +3,7 @@
     "pages/home/home",
     "pages/advisor/advisor",
     "pages/wardrobe/wardrobe",
+    "pages/wardrobe-detail/wardrobe-detail",
     "pages/profile/profile",
     "pages/report/report",
     "pages/onboarding/onboarding"

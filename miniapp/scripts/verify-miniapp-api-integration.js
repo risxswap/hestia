@@ -222,6 +222,13 @@ function runNavigateCase(action) {
 async function main() {
   await verifyFirstEntryAppRouting();
 
+  const appJson = JSON.parse(read("app.json"));
+  assert(appJson.pages.includes("pages/wardrobe-detail/wardrobe-detail"), "app should register wardrobe detail page");
+  assert(
+    !appJson.tabBar.list.some((item) => item.pagePath === "pages/wardrobe-detail/wardrobe-detail"),
+    "wardrobe detail page should not be a tabBar page"
+  );
+
   [
     "pages/home/home.js",
     "pages/report/report.js",
@@ -548,16 +555,18 @@ async function main() {
   });
   assert(wardrobe.config, "wardrobe.js should register a Page config");
   assert(typeof wardrobe.config.loadWardrobe === "function", "wardrobe should load core wardrobe items");
+  assert(typeof wardrobe.config.onShow === "function", "wardrobe should refresh when returning from detail changes");
   assert(typeof wardrobe.config.handleCategoryFilter === "function", "wardrobe should filter by category");
   assert(typeof wardrobe.config.handleOpenCreate === "function", "wardrobe should open create form");
   assert(typeof wardrobe.config.handleCloseEditor === "function", "wardrobe should close item editor modal");
+  assert(typeof wardrobe.config.handleOpenDetail === "function", "wardrobe should open item detail page");
   assert(typeof wardrobe.config.handleSaveItem === "function", "wardrobe should save item");
   assert(typeof wardrobe.config.handleDeleteItem === "function", "wardrobe should delete item");
   assert(typeof wardrobe.config.loadWardrobeGaps === "function", "wardrobe should load gaps from latest report");
   assert(typeof wardrobe.mod.priorityItems === "function", "wardrobe should export priorityItems helper");
   assert(
-    wardrobe.config.data.categoryOptions.map((item) => item.value).join(",") === "all,top,bottom,outerwear,shoes,bag,accessory",
-    "wardrobe category options should split shoes, bag and accessory"
+    wardrobe.config.data.categoryOptions.map((item) => item.value).join(",") === "all,top,bottom,outerwear,shoes,bag,accessory,sport,home,other",
+    "wardrobe category options should support gallery categories"
   );
   assert(
     !wardrobe.config.data.categoryOptions.some((item) => item.label === "鞋包配饰"),
@@ -582,7 +591,9 @@ async function main() {
   assert(fallbackPriorityItems[0].public_id === "wdi_core_only", "priorityItems fallback should use normal core item");
   const wardrobeInstance = createPageInstance(wardrobe.config);
   await wardrobe.config.loadWardrobe.call(wardrobeInstance);
+  assert(wardrobeInstance.data.activeCategory === "all", "wardrobe should default to all category");
   assert(wardrobeInstance.data.items.length === 2, "wardrobe should load two core wardrobe items");
+  assert(wardrobeInstance.data.visibleItems.length === 2, "wardrobe all category should show all loaded items");
   assert(
     wardrobeInstance.data.items[0].primaryImageSrc === "wardrobe/wdi_shirt/main.jpg",
     "wardrobe should normalize primary image object_key into primaryImageSrc"
@@ -591,6 +602,33 @@ async function main() {
   assert(
     wardrobeInstance.data.priorityItems.some((item) => item.public_id === "wdi_shirt"),
     "wardrobe should put preferred items into priorityItems"
+  );
+  assert(
+    wardrobeInstance.data.categoryOptions[0].countLabel === "全部 2",
+    "wardrobe should show all count in category chip"
+  );
+  const originalWardrobeWx = global.wx;
+  let wardrobeDetailUrl = "";
+  global.wx = {
+    navigateTo(options) {
+      wardrobeDetailUrl = options && options.url ? options.url : "";
+    }
+  };
+  wardrobe.config.handleOpenDetail.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        publicId: "wdi_shirt"
+      }
+    }
+  });
+  if (typeof originalWardrobeWx === "undefined") {
+    delete global.wx;
+  } else {
+    global.wx = originalWardrobeWx;
+  }
+  assert(
+    wardrobeDetailUrl === "/pages/wardrobe-detail/wardrobe-detail?public_id=wdi_shirt",
+    "wardrobe item tap should navigate to detail page"
   );
 
   wardrobe.config.handleCategoryFilter.call(wardrobeInstance, {
@@ -602,6 +640,16 @@ async function main() {
   });
   assert(wardrobeInstance.data.visibleItems.length === 1, "wardrobe category=top should show one item");
   assert(wardrobeInstance.data.visibleItems[0].public_id === "wdi_shirt", "wardrobe category=top should keep top item");
+  wardrobe.config.handleCategoryFilter.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        category: "bag"
+      }
+    }
+  });
+  wardrobe.config.handleOpenCreate.call(wardrobeInstance);
+  assert(wardrobeInstance.data.draft.category === "bag", "wardrobe create from an active category should default to that category");
+  wardrobe.config.handleCloseEditor.call(wardrobeInstance);
 
   wardrobe.config.handleOpenCreate.call(wardrobeInstance);
   assert(wardrobeInstance.data.editorVisible === true, "wardrobe create should open editor modal");
@@ -714,13 +762,21 @@ async function main() {
   assert(wardrobeInstance.data.gaps[0] === "浅色短外套", "wardrobe loadWardrobeGaps should stay compatible");
 
   const wardrobeMarkup = read("pages/wardrobe/wardrobe.wxml");
-  assert(wardrobeMarkup.includes("核心衣橱"), "wardrobe page should show core wardrobe title");
-  assert(wardrobeMarkup.includes("priorityItems"), "wardrobe page should render priority item summary");
+  const wardrobeStyles = read("pages/wardrobe/wardrobe.wxss");
+  assert(wardrobeMarkup.includes("我的衣服"), "wardrobe gallery should use gallery title");
+  assert(wardrobeMarkup.includes("category-scroll"), "wardrobe category row should be horizontally scrollable");
+  assert(wardrobeMarkup.includes("gallery-grid"), "wardrobe page should render gallery grid");
+  assert(
+    wardrobeStyles.includes(".gallery-grid") && wardrobeStyles.includes("grid-template-columns: repeat(2, minmax(0, 1fr))"),
+    "wardrobe gallery grid should use two columns"
+  );
+  assert(wardrobeMarkup.includes("gallery-add-card"), "wardrobe page should include grid add card");
+  assert(wardrobeMarkup.includes("handleOpenDetail"), "wardrobe cards should bind detail navigation");
   assert(wardrobeMarkup.includes("visibleItems"), "wardrobe page should render filtered wardrobe cards");
   assert(wardrobeMarkup.includes("建议补齐"), "wardrobe page should keep wardrobe gaps section");
   assert(wardrobeMarkup.includes("handleSaveItem"), "wardrobe page should bind save item action");
   assert(wardrobeMarkup.includes("handleCategoryFilter"), "wardrobe page should bind category filter action");
-  assert(wardrobeMarkup.includes("handleEditItem"), "wardrobe page should bind edit item action");
+  assert(!wardrobeMarkup.includes("bind:tap=\"handleEditItem\""), "wardrobe gallery cards should not open editor directly");
   assert(wardrobeMarkup.includes("modal-layer"), "wardrobe editor should render as modal layer");
   assert(wardrobeMarkup.includes("modal-backdrop"), "wardrobe editor should include a backdrop");
   assert(wardrobeMarkup.includes("modal-sheet"), "wardrobe editor should use a bottom sheet");
@@ -734,6 +790,138 @@ async function main() {
     !wardrobeMarkup.includes("这里展示服务端报告识别出的关键缺口"),
     "wardrobe page should remove old report-gap-only copy"
   );
+
+  const detailApiCalls = [];
+  const wardrobeDetail = loadPage("pages/wardrobe-detail/wardrobe-detail.js", {
+    getWardrobeItems: async () => ({
+      items: [
+        {
+          public_id: "wdi_shirt",
+          name: "米白衬衫",
+          category: "top",
+          color: "米白",
+          material: "棉",
+          season: "春秋",
+          silhouette: "微宽松",
+          user_notes: "下摆处理要干净",
+          is_core: true,
+          recommendation_status: "preferred",
+          scene_tags: ["通勤", "见客户"],
+          primary_image: { object_key: "wardrobe/wdi_shirt/main.jpg" }
+        }
+      ]
+    }),
+    updateWardrobeItem: async (publicID, payload) => {
+      detailApiCalls.push(["update", publicID, payload]);
+      return Object.assign({ public_id: publicID, status: "active" }, payload);
+    },
+    deleteWardrobeItem: async (publicID) => {
+      detailApiCalls.push(["delete", publicID]);
+      return { public_id: publicID };
+    }
+  });
+  assert(wardrobeDetail.config, "wardrobe detail should register a Page config");
+  assert(typeof wardrobeDetail.config.loadWardrobeItem === "function", "wardrobe detail should load item");
+  assert(typeof wardrobeDetail.config.handleOpenEdit === "function", "wardrobe detail should open edit modal");
+  assert(typeof wardrobeDetail.config.handleSaveItem === "function", "wardrobe detail should save edits");
+
+  const detailInstance = createPageInstance(wardrobeDetail.config);
+  const originalGetAppForWardrobeDirty = global.getApp;
+  const appGlobalData = {
+    wardrobeDirty: false
+  };
+  global.getApp = () => ({
+    globalData: appGlobalData
+  });
+  await wardrobeDetail.config.onLoad.call(detailInstance, { public_id: "wdi_shirt" });
+  assert(detailInstance.data.item.public_id === "wdi_shirt", "wardrobe detail should find item by public_id");
+  assert(detailInstance.data.item.styleLogic, "wardrobe detail should expose style logic text");
+  wardrobeDetail.config.handleOpenEdit.call(detailInstance);
+  assert(detailInstance.data.editorVisible === true, "wardrobe detail edit should open editor modal");
+  wardrobeDetail.config.handleDraftInput.call(detailInstance, {
+    currentTarget: {
+      dataset: {
+        field: "color"
+      }
+    },
+    detail: {
+      value: "暖白"
+    }
+  });
+  wardrobeDetail.config.handleDraftInput.call(detailInstance, {
+    currentTarget: {
+      dataset: {
+        field: "primary_asset_public_id"
+      }
+    },
+    detail: {
+      value: ""
+    }
+  });
+  await wardrobeDetail.config.handleSaveItem.call(detailInstance);
+  assert(detailApiCalls[0][0] === "update", "wardrobe detail save should call updateWardrobeItem");
+  assert(detailApiCalls[0][1] === "wdi_shirt", "wardrobe detail save should update current item");
+  assert(
+    Object.prototype.hasOwnProperty.call(detailApiCalls[0][2], "primary_asset_public_id"),
+    "wardrobe detail save should include primary asset field when user clears it"
+  );
+  assert(detailApiCalls[0][2].primary_asset_public_id === "", "wardrobe detail save should allow clearing primary asset");
+  assert(detailInstance.data.item.color === "暖白", "wardrobe detail save should refresh current detail");
+  assert(detailInstance.data.editorVisible === false, "wardrobe detail save should close editor modal");
+  assert(detailInstance.data.wardrobeDirty === true, "wardrobe detail save should mark wardrobe list dirty");
+  assert(appGlobalData.wardrobeDirty === true, "wardrobe detail save should mark app wardrobe dirty");
+
+  const originalDetailWx = global.wx;
+  let detailSwitchUrl = "";
+  global.wx = {
+    switchTab(options) {
+      detailSwitchUrl = options && options.url ? options.url : "";
+    }
+  };
+  await wardrobeDetail.config.handleDeleteItem.call(detailInstance, {
+    currentTarget: {
+      dataset: {
+        publicId: "wdi_shirt"
+      }
+    }
+  });
+  if (typeof originalDetailWx === "undefined") {
+    delete global.wx;
+  } else {
+    global.wx = originalDetailWx;
+  }
+  assert(detailApiCalls.some((call) => call[0] === "delete" && call[1] === "wdi_shirt"), "wardrobe detail delete should call API");
+  assert(detailSwitchUrl === "/pages/wardrobe/wardrobe", "wardrobe detail delete should return to wardrobe tab");
+  assert(detailInstance.data.wardrobeDirty === true, "wardrobe detail delete should mark wardrobe list dirty");
+  assert(appGlobalData.wardrobeDirty === true, "wardrobe detail delete should keep app wardrobe dirty");
+
+  await wardrobe.config.onShow.call(wardrobeInstance);
+  assert(wardrobeInstance.data.items.length === 2, "wardrobe onShow should refresh dirty list");
+  assert(wardrobeInstance.data.wardrobeDirty === false, "wardrobe onShow should clear dirty flag after refresh");
+  assert(appGlobalData.wardrobeDirty === false, "wardrobe onShow should clear app dirty flag");
+
+  const failingWardrobe = loadPage("pages/wardrobe/wardrobe.js", {
+    getWardrobeItems: async () => {
+      throw new Error("wardrobe refresh failed");
+    },
+    getLatestReport: async () => sampleReport
+  });
+  const failingWardrobeInstance = createPageInstance(failingWardrobe.config);
+  appGlobalData.wardrobeDirty = true;
+  await failingWardrobe.config.onShow.call(failingWardrobeInstance);
+  assert(appGlobalData.wardrobeDirty === true, "wardrobe onShow should keep dirty flag when refresh fails");
+  assert(failingWardrobeInstance.data.wardrobeDirty === true, "wardrobe failed refresh should keep page dirty state");
+
+  if (typeof originalGetAppForWardrobeDirty === "undefined") {
+    delete global.getApp;
+  } else {
+    global.getApp = originalGetAppForWardrobeDirty;
+  }
+
+  const detailMarkup = read("pages/wardrobe-detail/wardrobe-detail.wxml");
+  assert(detailMarkup.includes("搭配逻辑"), "wardrobe detail should render style logic section");
+  assert(detailMarkup.includes("结构化档案"), "wardrobe detail should render structured profile section");
+  assert(detailMarkup.includes("最近反馈"), "wardrobe detail should render recent feedback section");
 
   const profile = loadPage("pages/profile/profile.js", {
     ensureDevSession: async () => ({

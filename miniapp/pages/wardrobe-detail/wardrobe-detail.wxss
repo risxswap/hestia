@@ -1,0 +1,392 @@
+.wardrobe-detail-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.detail-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.nav-button {
+  min-width: 156rpx;
+  padding: 0 24rpx;
+}
+
+.detail-media {
+  overflow: hidden;
+}
+
+.detail-image,
+.detail-placeholder {
+  width: 100%;
+  height: 720rpx;
+}
+
+.detail-placeholder {
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12rpx;
+  padding: 32rpx;
+  background: #e8e0d2;
+}
+
+.placeholder-category {
+  color: #71695d;
+  font-size: 25rpx;
+  font-weight: 700;
+}
+
+.placeholder-name {
+  color: #27231f;
+  font-size: 42rpx;
+  font-weight: 700;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.info-card,
+.section-card,
+.state-card {
+  padding: 28rpx;
+}
+
+.info-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.info-title-block,
+.section-card,
+.state-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.title {
+  color: #27231f;
+  font-size: 40rpx;
+  font-weight: 700;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.section-title {
+  color: #27231f;
+  font-size: 30rpx;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.muted,
+.section-copy {
+  color: #71695d;
+  font-size: 25rpx;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.error-text {
+  color: #8a3b2f;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.status-label {
+  flex: 0 0 auto;
+  max-width: 176rpx;
+  padding: 8rpx 12rpx;
+  border: 1rpx solid #e6ded0;
+  border-radius: 8rpx;
+  color: #71695d;
+  background: #fffdf8;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+  word-break: break-word;
+}
+
+.status-label--preferred {
+  border-color: #245d4f;
+  color: #fffdf8;
+  background: #245d4f;
+}
+
+.status-label--paused {
+  border-color: #8a3b2f;
+  color: #fffdf8;
+  background: #8a3b2f;
+}
+
+.basic-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 20rpx;
+}
+
+.basic-line text {
+  padding: 8rpx 12rpx;
+  border-radius: 8rpx;
+  color: #27231f;
+  background: #f7f3eb;
+  font-size: 23rpx;
+  line-height: 1.35;
+}
+
+.facts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14rpx;
+}
+
+.fact-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6rpx;
+  padding: 16rpx;
+  border-radius: 10rpx;
+  background: #f7f3eb;
+}
+
+.fact-label {
+  color: #71695d;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.fact-value {
+  color: #27231f;
+  font-size: 25rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.note-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  padding-top: 12rpx;
+}
+
+.chip,
+.primary-button,
+.secondary-button,
+.status-button,
+.danger-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72rpx;
+  margin: 0;
+  border-radius: 12rpx;
+  font-size: 25rpx;
+  line-height: 1.25;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.chip::after,
+.primary-button::after,
+.secondary-button::after,
+.status-button::after,
+.danger-button::after {
+  border: 0;
+}
+
+.primary-button {
+  color: #fffdf8;
+  background: #245d4f;
+}
+
+.secondary-button {
+  border: 1rpx solid #e6ded0;
+  color: #27231f;
+  background: #fffdf8;
+}
+
+.modal-layer {
+  position: fixed;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.modal-backdrop {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(39, 35, 31, 0.42);
+}
+
+.modal-sheet {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 88vh;
+  padding: 28rpx;
+  border-radius: 28rpx 28rpx 0 0;
+  background: #fffaf1;
+  box-shadow: 0 -18rpx 44rpx rgba(39, 35, 31, 0.16);
+}
+
+.modal-header {
+  padding-bottom: 20rpx;
+  border-bottom: 1rpx solid #e6ded0;
+}
+
+.modal-close {
+  flex: 0 0 auto;
+  min-width: 120rpx;
+  min-height: 64rpx;
+  padding: 0 22rpx;
+}
+
+.modal-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+  max-height: 62vh;
+  padding: 24rpx 0;
+}
+
+.editor-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18rpx;
+}
+
+.field-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.field-label {
+  color: #27231f;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.field,
+.textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1rpx solid #e6ded0;
+  border-radius: 12rpx;
+  color: #27231f;
+  background: #fffdf8;
+  font-size: 25rpx;
+}
+
+.field {
+  min-height: 72rpx;
+  padding: 0 18rpx;
+}
+
+.textarea {
+  min-height: 150rpx;
+  padding: 18rpx;
+  line-height: 1.45;
+}
+
+.status-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.status-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12rpx;
+}
+
+.status-button {
+  min-height: 72rpx;
+  padding: 0 10rpx;
+  border: 1rpx solid #e6ded0;
+  color: #71695d;
+  background: #fffdf8;
+  font-size: 23rpx;
+}
+
+.status-button--active {
+  border-color: #245d4f;
+  color: #fffdf8;
+  background: #245d4f;
+  font-weight: 700;
+}
+
+.status-button--paused {
+  background: #71695d;
+}
+
+.core-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+  padding: 18rpx;
+  border: 1rpx solid #e6ded0;
+  border-radius: 12rpx;
+}
+
+.core-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.editor-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16rpx;
+}
+
+.modal-actions {
+  padding-top: 20rpx;
+  border-top: 1rpx solid #e6ded0;
+  background: #fffaf1;
+}
+
+.save-button,
+.danger-button {
+  min-height: 76rpx;
+}
+
+.danger-button {
+  border: 1rpx solid #e6ded0;
+  color: #8a3b2f;
+  background: #fffdf8;
+}

@@ -1,192 +1,22 @@
 const api = require("../../utils/api");
+const wardrobeUtils = require("../../utils/wardrobe");
 
-const categoryOptions = [
-  { label: "全部", value: "all" },
-  { label: "上装", value: "top" },
-  { label: "下装", value: "bottom" },
-  { label: "外套", value: "outerwear" },
-  { label: "鞋", value: "shoes" },
-  { label: "包", value: "bag" },
-  { label: "配饰", value: "accessory" }
-];
-
-const categoryLabels = categoryOptions.reduce((result, option) => {
-  result[option.value] = option.label;
-  return result;
-}, {});
-
-const recommendationLabels = {
-  preferred: "优先推荐",
-  normal: "正常推荐",
-  paused: "暂不推荐"
-};
-
-const emptyDraft = {
-  name: "",
-  category: "top",
-  color: "",
-  silhouette: "",
-  material: "",
-  season: "",
-  scene_tags: [],
-  sceneText: "",
-  user_notes: "",
-  is_core: true,
-  recommendation_status: "normal",
-  primary_asset_public_id: ""
-};
-
-function normalizeTextList(value) {
-  if (!Array.isArray(value)) {
-    return value ? [String(value)] : [];
-  }
-  return value.filter(Boolean).map((item) => String(item));
-}
-
-function normalizeSceneTags(value) {
-  if (Array.isArray(value)) {
-    return normalizeTextList(value);
-  }
-
-  return String(value || "")
-    .split(/[,\n，、；;]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function cloneDraft(overrides) {
-  return Object.assign({}, emptyDraft, overrides || {}, {
-    scene_tags: normalizeSceneTags(overrides && overrides.scene_tags),
-    sceneText: overrides && Object.prototype.hasOwnProperty.call(overrides, "sceneText")
-      ? overrides.sceneText
-      : normalizeSceneTags(overrides && overrides.scene_tags).join("，")
-  });
-}
-
-function normalizeWardrobeItems(response) {
-  const body = response && response.data ? response.data : response;
-  const items = Array.isArray(body) ? body : body && Array.isArray(body.items) ? body.items : [];
-  return items.map((item) => decorateWardrobeItem(item));
-}
-
-function decorateWardrobeItem(item) {
-  const source = item || {};
-  const sceneTags = normalizeTextList(source.scene_tags);
-  const recommendationStatus = source.recommendation_status || "normal";
-  const primaryImage = source.primary_image || null;
-  const primaryImageSrc = primaryImage && (primaryImage.url || primaryImage.object_key)
-    ? primaryImage.url || primaryImage.object_key
-    : "";
-
-  return Object.assign({}, source, {
-    public_id: source.public_id || source.publicID || "",
-    name: source.name || "未命名单品",
-    category: source.category || "",
-    color: source.color || "",
-    silhouette: source.silhouette || "",
-    material: source.material || "",
-    season: source.season || "",
-    scene_tags: sceneTags,
-    sceneText: sceneTags.join(" / "),
-    user_notes: source.user_notes || source.notes || "",
-    is_core: source.is_core !== false,
-    recommendation_status: recommendationStatus,
-    recommendationLabel: recommendationLabels[recommendationStatus] || "正常推荐",
-    categoryLabel: categoryLabels[source.category] || source.category || "未分类",
-    primary_image: primaryImage,
-    primaryImageSrc,
-    status: source.status || "active",
-    isPreferred: recommendationStatus === "preferred",
-    isPaused: recommendationStatus === "paused"
-  });
-}
-
-function filterItems(items, category) {
-  const activeCategory = category || "all";
-  if (!activeCategory || activeCategory === "all") {
-    return items.slice();
-  }
-  return items.filter((item) => item.category === activeCategory);
-}
-
-function priorityItems(items) {
-  return items
-    .filter((item) => {
-      const status = item.status || "active";
-      const recommendationStatus = item.recommendation_status || "normal";
-      return status === "active" && recommendationStatus !== "paused" && (
-        recommendationStatus === "preferred" || item.is_core === true
-      );
-    })
-    .sort((left, right) => {
-      const leftPreferred = left.recommendation_status === "preferred";
-      const rightPreferred = right.recommendation_status === "preferred";
-      if (leftPreferred !== rightPreferred) {
-        return leftPreferred ? -1 : 1;
-      }
-      if (left.is_core !== right.is_core) {
-        return left.is_core ? -1 : 1;
-      }
-      return String(left.name || "").localeCompare(String(right.name || ""), "zh-Hans-CN");
-    });
-}
-
-function normalizeWardrobeGaps(report) {
-  const content = report && report.content_json ? report.content_json : {};
-  if (!Array.isArray(content.wardrobe_gaps)) {
-    return [];
-  }
-  return content.wardrobe_gaps
-    .map((item) => {
-      if (typeof item === "string") {
-        return item;
-      }
-      return item.title || item.name || item.description || "";
-    })
-    .filter(Boolean);
-}
-
-function buildPayload(draft) {
-  const source = draft || {};
-  const sceneTags = normalizeSceneTags(source.scene_tags && source.scene_tags.length ? source.scene_tags : source.sceneText);
-  const payload = {
-    name: String(source.name || "").trim(),
-    category: String(source.category || "").trim(),
-    color: String(source.color || "").trim(),
-    silhouette: String(source.silhouette || "").trim(),
-    material: String(source.material || "").trim(),
-    season: String(source.season || "").trim(),
-    scene_tags: sceneTags,
-    user_notes: String(source.user_notes || "").trim(),
-    is_core: source.is_core !== false,
-    recommendation_status: source.recommendation_status || "normal"
-  };
-
-  if (source.primary_asset_public_id) {
-    payload.primary_asset_public_id = String(source.primary_asset_public_id).trim();
-  }
-
-  return payload;
-}
-
-function itemToDraft(item) {
-  const decorated = decorateWardrobeItem(item);
-  return cloneDraft({
-    name: decorated.name,
-    category: decorated.category || "top",
-    color: decorated.color,
-    silhouette: decorated.silhouette,
-    material: decorated.material,
-    season: decorated.season,
-    scene_tags: decorated.scene_tags,
-    user_notes: decorated.user_notes,
-    is_core: decorated.is_core,
-    recommendation_status: decorated.recommendation_status,
-    primary_asset_public_id: decorated.primary_image && decorated.primary_image.asset_public_id
-      ? decorated.primary_image.asset_public_id
-      : ""
-  });
-}
+const {
+  categoryOptions,
+  categoryLabels,
+  recommendationLabels,
+  cloneDraft,
+  normalizeSceneTags,
+  normalizeWardrobeItems,
+  decorateWardrobeItem,
+  filterItems,
+  priorityItems,
+  normalizeWardrobeGaps,
+  buildPayload,
+  itemToDraft,
+  categoryOptionsWithCounts,
+  styleLogicForItem
+} = wardrobeUtils;
 
 function getDataset(event) {
   return event && event.currentTarget && event.currentTarget.dataset ? event.currentTarget.dataset : {};
@@ -231,7 +61,8 @@ function nextWardrobeState(items, category) {
   return {
     items,
     visibleItems: filterItems(items, category),
-    priorityItems: priorityItems(items)
+    priorityItems: priorityItems(items),
+    categoryOptions: categoryOptionsWithCounts(items)
   };
 }
 
@@ -244,8 +75,9 @@ const wardrobePageConfig = {
     visibleItems: [],
     priorityItems: [],
     gaps: [],
-    categoryOptions,
+    categoryOptions: categoryOptionsWithCounts([]),
     activeCategory: "all",
+    wardrobeDirty: false,
     editorVisible: false,
     draft: cloneDraft(),
     editingPublicID: ""
@@ -253,6 +85,24 @@ const wardrobePageConfig = {
 
   onLoad() {
     return this.loadWardrobe();
+  },
+
+  async onShow() {
+    const app = typeof getApp === "function" ? getApp() : null;
+    const globalData = app && app.globalData ? app.globalData : {};
+    if (globalData.wardrobeDirty) {
+      this.setData({
+        wardrobeDirty: true
+      });
+      await this.loadWardrobe();
+      if (!this.data.errorMessage) {
+        globalData.wardrobeDirty = false;
+        this.setData({
+          wardrobeDirty: false
+        });
+      }
+    }
+    return Promise.resolve();
   },
 
   async loadWardrobe() {
@@ -277,6 +127,7 @@ const wardrobePageConfig = {
         items: [],
         visibleItems: [],
         priorityItems: [],
+        categoryOptions: categoryOptionsWithCounts([]),
         gaps: [],
         errorMessage: error && error.message ? error.message : "读取核心衣橱失败"
       });
@@ -313,11 +164,33 @@ const wardrobePageConfig = {
     });
   },
 
+  handleOpenDetail(event) {
+    const dataset = getDataset(event);
+    const publicID = dataset.publicId || dataset.public_id || dataset.id || "";
+    if (!publicID) {
+      this.setData({
+        errorMessage: "未找到要查看的单品"
+      });
+      return;
+    }
+
+    if (typeof wx !== "undefined" && wx.navigateTo) {
+      wx.navigateTo({
+        url: `/pages/wardrobe-detail/wardrobe-detail?public_id=${publicID}`
+      });
+    }
+  },
+
   handleOpenCreate() {
+    const category = this.data.activeCategory && this.data.activeCategory !== "all"
+      ? this.data.activeCategory
+      : "top";
     this.setData({
       editorVisible: true,
       editingPublicID: "",
-      draft: cloneDraft(),
+      draft: cloneDraft({
+        category
+      }),
       errorMessage: ""
     });
   },
@@ -487,12 +360,21 @@ if (typeof Page === "function") {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    categoryOptions,
+    categoryLabels,
+    recommendationLabels,
+    cloneDraft,
+    normalizeSceneTags,
     normalizeWardrobeItems,
     decorateWardrobeItem,
     filterItems,
     priorityItems,
     normalizeWardrobeGaps,
     buildPayload,
+    itemToDraft,
+    categoryOptionsWithCounts,
+    styleLogicForItem,
+    nextWardrobeState,
     wardrobePageConfig
   };
 }
