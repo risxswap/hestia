@@ -55,36 +55,10 @@ func (r *MySQLRepository) ListItems(ctx context.Context, userID int64, filter Li
 	if r == nil || r.ext == nil {
 		return nil, errors.New("wardrobe repository database is nil")
 	}
-	query := `
-SELECT
-  wi.id,
-  wi.public_id,
-  wi.user_id,
-  wi.name,
-  wi.category,
-  wi.color,
-  wi.silhouette,
-  wi.material,
-  wi.season,
-  wi.scene_tags,
-  wi.user_notes,
-  wi.is_core,
-  wi.recommendation_status,
-  wi.status,
-  wi.created_at,
-  wi.updated_at,
-  a.public_id AS primary_asset_public_id,
-  a.object_key AS primary_object_key
-FROM wardrobe_items wi
-LEFT JOIN wardrobe_item_assets wia
-  ON wia.wardrobe_item_id = wi.id
-  AND wia.is_primary = 1
-LEFT JOIN assets a
-  ON a.id = wia.asset_id
-  AND a.deleted_at IS NULL
+	query := wardrobeItemSelectSQL(`
 WHERE wi.user_id = ?
   AND wi.status <> ?
-  AND wi.deleted_at IS NULL`
+  AND wi.deleted_at IS NULL`)
 	args := []any{userID, StatusDeleted}
 	if filter.Category != "" {
 		query += `
@@ -108,15 +82,7 @@ ORDER BY wi.is_core DESC, wi.updated_at DESC, wi.id DESC`
 	if err := sqlx.SelectContext(ctx, r.ext, &rows, query, args...); err != nil {
 		return nil, err
 	}
-	items := make([]Item, 0, len(rows))
-	for _, row := range rows {
-		item, err := row.toItem()
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, nil
+	return wardrobeItemsFromRows(rows)
 }
 
 func (r *MySQLRepository) CreateItem(ctx context.Context, item Item, primaryAssetPublicID string) (Item, error) {
@@ -312,47 +278,18 @@ WHERE id = ?
 }
 
 func (r *MySQLRepository) findItemByPublicIDForUser(ctx context.Context, userID int64, publicID string) (Item, error) {
-	var row wardrobeItemRow
-	err := sqlx.GetContext(ctx, r.ext, &row, `
-SELECT
-  wi.id,
-  wi.public_id,
-  wi.user_id,
-  wi.name,
-  wi.category,
-  wi.color,
-  wi.silhouette,
-  wi.material,
-  wi.season,
-  wi.scene_tags,
-  wi.user_notes,
-  wi.is_core,
-  wi.recommendation_status,
-  wi.status,
-  wi.created_at,
-  wi.updated_at,
-  a.public_id AS primary_asset_public_id,
-  a.object_key AS primary_object_key
-FROM wardrobe_items wi
-LEFT JOIN wardrobe_item_assets wia
-  ON wia.wardrobe_item_id = wi.id
-  AND wia.is_primary = 1
-LEFT JOIN assets a
-  ON a.id = wia.asset_id
-  AND a.deleted_at IS NULL
+	var rows []wardrobeItemRow
+	err := sqlx.SelectContext(ctx, r.ext, &rows, wardrobeItemSelectSQL(`
 WHERE wi.user_id = ?
   AND wi.public_id = ?
   AND wi.status <> ?
   AND wi.deleted_at IS NULL
 LIMIT 1
-`, userID, publicID, StatusDeleted)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Item{}, ErrItemNotFound
-	}
+`), userID, publicID, StatusDeleted)
 	if err != nil {
 		return Item{}, err
 	}
-	return row.toItem()
+	return firstWardrobeItemFromRows(rows)
 }
 
 func (r *MySQLRepository) setPrimaryAsset(ctx context.Context, userID int64, wardrobeItemID int64, assetPublicID string) (Image, error) {
@@ -407,29 +344,77 @@ LIMIT 1
 	return row, nil
 }
 
+func wardrobeItemSelectSQL(where string) string {
+	return `
+SELECT
+  wi.id,
+  wi.public_id,
+  wi.user_id,
+  wi.name,
+  wi.category,
+  wi.color,
+  wi.silhouette,
+  wi.material,
+  wi.season,
+  wi.scene_tags,
+  wi.user_notes,
+  wi.is_core,
+  wi.recommendation_status,
+  wi.status,
+  wi.created_at,
+  wi.updated_at,
+  primary_wia.id AS primary_asset_relation_id,
+  primary_wia.sort_order AS primary_asset_sort_order,
+  a.public_id AS primary_asset_public_id,
+  a.object_key AS primary_object_key
+FROM wardrobe_items wi
+` + primaryImageJoinSQL() + where
+}
+
+func primaryImageJoinSQL() string {
+	return `LEFT JOIN wardrobe_item_assets primary_wia
+  ON primary_wia.id = (
+    SELECT wia_pick.id
+    FROM wardrobe_item_assets wia_pick
+    JOIN assets a_pick
+      ON a_pick.id = wia_pick.asset_id
+      AND a_pick.deleted_at IS NULL
+    WHERE wia_pick.wardrobe_item_id = wi.id
+      AND wia_pick.is_primary = 1
+    ORDER BY wia_pick.sort_order ASC, wia_pick.id DESC
+    LIMIT 1
+  )
+LEFT JOIN assets a
+  ON a.id = primary_wia.asset_id
+  AND a.deleted_at IS NULL
+`
+}
+
 type txStarter interface {
 	BeginTxx(ctx context.Context, opts *sql.TxOptions) (*sqlx.Tx, error)
 }
 
 type wardrobeItemRow struct {
-	ID                   int64           `db:"id"`
-	PublicID             string          `db:"public_id"`
-	UserID               int64           `db:"user_id"`
-	Name                 string          `db:"name"`
-	Category             string          `db:"category"`
-	Color                sql.NullString  `db:"color"`
-	Silhouette           sql.NullString  `db:"silhouette"`
-	Material             sql.NullString  `db:"material"`
-	Season               sql.NullString  `db:"season"`
-	SceneTags            json.RawMessage `db:"scene_tags"`
-	UserNotes            sql.NullString  `db:"user_notes"`
-	IsCore               bool            `db:"is_core"`
-	RecommendationStatus string          `db:"recommendation_status"`
-	Status               string          `db:"status"`
-	PrimaryAssetPublicID sql.NullString  `db:"primary_asset_public_id"`
-	PrimaryObjectKey     sql.NullString  `db:"primary_object_key"`
-	CreatedAt            time.Time       `db:"created_at"`
-	UpdatedAt            time.Time       `db:"updated_at"`
+	ID                     int64           `db:"id"`
+	PublicID               string          `db:"public_id"`
+	UserID                 int64           `db:"user_id"`
+	Name                   string          `db:"name"`
+	Category               string          `db:"category"`
+	Color                  sql.NullString  `db:"color"`
+	Silhouette             sql.NullString  `db:"silhouette"`
+	Material               sql.NullString  `db:"material"`
+	Season                 sql.NullString  `db:"season"`
+	SceneTags              json.RawMessage `db:"scene_tags"`
+	UserNotes              sql.NullString  `db:"user_notes"`
+	IsCore                 bool            `db:"is_core"`
+	RecommendationStatus   string          `db:"recommendation_status"`
+	Status                 string          `db:"status"`
+	PrimaryAssetRelationID sql.NullInt64   `db:"primary_asset_relation_id"`
+	PrimaryAssetSortOrder  sql.NullInt64   `db:"primary_asset_sort_order"`
+	PrimaryAssetPublicID   sql.NullString  `db:"primary_asset_public_id"`
+	PrimaryObjectKey       sql.NullString  `db:"primary_object_key"`
+	CreatedAt              time.Time       `db:"created_at"`
+	UpdatedAt              time.Time       `db:"updated_at"`
 }
 
 func (r wardrobeItemRow) toItem() (Item, error) {
@@ -462,6 +447,79 @@ func (r wardrobeItemRow) toItem() (Item, error) {
 		}
 	}
 	return item, nil
+}
+
+func wardrobeItemsFromRows(rows []wardrobeItemRow) ([]Item, error) {
+	items := make([]Item, 0, len(rows))
+	indexByID := make(map[int64]int, len(rows))
+	primaryByID := make(map[int64]primaryImageCandidate, len(rows))
+	for _, row := range rows {
+		index, ok := indexByID[row.ID]
+		if !ok {
+			item, err := row.toItem()
+			if err != nil {
+				return nil, err
+			}
+			indexByID[row.ID] = len(items)
+			items = append(items, item)
+			index = len(items) - 1
+		}
+		candidate, ok := row.primaryImageCandidate()
+		if !ok {
+			continue
+		}
+		current, hasCurrent := primaryByID[row.ID]
+		if !hasCurrent || candidate.betterThan(current) {
+			primaryByID[row.ID] = candidate
+			items[index].PrimaryImage = &Image{
+				AssetPublicID: candidate.assetPublicID,
+				ObjectKey:     candidate.objectKey,
+			}
+		}
+	}
+	return items, nil
+}
+
+func firstWardrobeItemFromRows(rows []wardrobeItemRow) (Item, error) {
+	items, err := wardrobeItemsFromRows(rows)
+	if err != nil {
+		return Item{}, err
+	}
+	if len(items) == 0 {
+		return Item{}, ErrItemNotFound
+	}
+	return items[0], nil
+}
+
+type primaryImageCandidate struct {
+	relationID    int64
+	sortOrder     int64
+	assetPublicID string
+	objectKey     string
+}
+
+func (r wardrobeItemRow) primaryImageCandidate() (primaryImageCandidate, bool) {
+	if !r.PrimaryAssetPublicID.Valid {
+		return primaryImageCandidate{}, false
+	}
+	candidate := primaryImageCandidate{
+		assetPublicID: r.PrimaryAssetPublicID.String,
+		objectKey:     nullStringValue(r.PrimaryObjectKey),
+	}
+	if r.PrimaryAssetRelationID.Valid {
+		candidate.relationID = r.PrimaryAssetRelationID.Int64
+	}
+	if r.PrimaryAssetSortOrder.Valid {
+		candidate.sortOrder = r.PrimaryAssetSortOrder.Int64
+	}
+	return candidate, true
+}
+
+func (c primaryImageCandidate) betterThan(other primaryImageCandidate) bool {
+	if c.sortOrder != other.sortOrder {
+		return c.sortOrder < other.sortOrder
+	}
+	return c.relationID > other.relationID
 }
 
 type wardrobeAssetRow struct {

@@ -50,6 +50,17 @@ func TestListItemsReturnsOnlyCurrentUserItems(t *testing.T) {
 	}
 }
 
+func TestListItemsReturnsRequestFailedWhenRepositoryUnsupported(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newWardrobeRouteTestRouterWithService(wardrobe.NewService(routeCoreOnlyWardrobeRepo{}))
+
+	body := routeWardrobeErrorResponse(t, router, http.MethodGet, "/api/user/wardrobe/items", "", http.StatusInternalServerError)
+
+	if body.Code != "wardrobe.request_failed" {
+		t.Fatalf("expected request failed code, got %q", body.Code)
+	}
+}
+
 func TestCreateItemRejectsInvalidRecommendationStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newWardrobeRouteTestRouter(newRouteMemoryWardrobeRepo())
@@ -150,6 +161,10 @@ func TestDeleteItemReturnsNotFoundForOtherUserItem(t *testing.T) {
 }
 
 func newWardrobeRouteTestRouter(repo *routeMemoryWardrobeRepo) *gin.Engine {
+	return newWardrobeRouteTestRouterWithService(wardrobe.NewService(repo))
+}
+
+func newWardrobeRouteTestRouterWithService(service *wardrobe.Service) *gin.Engine {
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		auth.SetUserContext(c, auth.User{
@@ -159,7 +174,7 @@ func newWardrobeRouteTestRouter(repo *routeMemoryWardrobeRepo) *gin.Engine {
 		})
 		c.Next()
 	})
-	wardrobe.RegisterUserRoutesWithService(router.Group("/api/user/wardrobe"), wardrobe.NewService(repo), nil)
+	wardrobe.RegisterUserRoutesWithService(router.Group("/api/user/wardrobe"), service, nil)
 	return router
 }
 
@@ -193,6 +208,12 @@ func routeWardrobeErrorResponse(t *testing.T, router *gin.Engine, method string,
 
 type routeMemoryWardrobeRepo struct {
 	items map[string]wardrobe.Item
+}
+
+type routeCoreOnlyWardrobeRepo struct{}
+
+func (routeCoreOnlyWardrobeRepo) CreateCoreItems(_ context.Context, items []wardrobe.Item) ([]wardrobe.Item, error) {
+	return items, nil
 }
 
 func newRouteMemoryWardrobeRepo() *routeMemoryWardrobeRepo {

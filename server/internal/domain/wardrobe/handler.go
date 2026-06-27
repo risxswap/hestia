@@ -122,7 +122,7 @@ func (h *Handler) writeError(c *gin.Context, err error, logMessage string, userI
 		response.Error(c, http.StatusNotFound, "wardrobe.item_not_found", "单品不存在")
 	case errors.Is(err, ErrRepositoryUnsupported):
 		h.logger.Error(logMessage, "error", err, "user_id", userID, "item_public_id", publicID)
-		response.Error(c, http.StatusInternalServerError, "wardrobe.repository_unsupported", "衣橱服务暂不可用")
+		response.Error(c, http.StatusInternalServerError, "wardrobe.request_failed", "衣橱请求失败")
 	default:
 		h.logger.Error(logMessage, "error", err, "user_id", userID, "item_public_id", publicID)
 		response.Error(c, http.StatusInternalServerError, "wardrobe.request_failed", "衣橱请求失败")
