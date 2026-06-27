@@ -20,15 +20,12 @@ const (
 )
 
 type Repository interface {
+	Summary(ctx context.Context, userID int64) (Summary, error)
 	Upsert(ctx context.Context, item Profile) (Profile, error)
 	ReplaceFacts(ctx context.Context, userID int64, profileID int64, facts []Fact) error
 	ReplacePrefs(ctx context.Context, userID int64, profileID int64, prefs []Pref) error
 	CreateInferences(ctx context.Context, inferences []Inference) error
 	MarkUserOnboardingCompleted(ctx context.Context, userID int64) error
-}
-
-type summaryRepository interface {
-	Summary(ctx context.Context, userID int64) (Summary, error)
 }
 
 type Service struct {
@@ -43,11 +40,7 @@ func (s *Service) Summary(ctx context.Context, userID int64) (Summary, error) {
 	if s == nil || s.repo == nil {
 		return Summary{}, errors.New("profile service dependencies are nil")
 	}
-	repo, ok := s.repo.(summaryRepository)
-	if !ok {
-		return Summary{}, errors.New("profile repository summary dependency is nil")
-	}
-	summary, err := repo.Summary(ctx, userID)
+	summary, err := s.repo.Summary(ctx, userID)
 	if err != nil {
 		return Summary{}, err
 	}

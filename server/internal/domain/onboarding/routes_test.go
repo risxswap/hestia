@@ -757,6 +757,25 @@ func (r *memoryProfileRepo) Upsert(ctx context.Context, item profile.Profile) (p
 	return item, nil
 }
 
+func (r *memoryProfileRepo) Summary(_ context.Context, userID int64) (profile.Summary, error) {
+	item, ok := r.byUser[userID]
+	if !ok {
+		return profile.Summary{}, nil
+	}
+	return profile.Summary{
+		Profile: &profile.ProfileSummary{
+			ProfilePublicID:    item.PublicID,
+			Gender:             item.Gender,
+			HeightCM:           item.HeightCM,
+			BodyNotes:          item.BodyNotes,
+			SkinNotes:          item.SkinNotes,
+			HairNotes:          item.HairNotes,
+			LifestyleScenarios: append([]string(nil), item.LifestyleScenarios...),
+			StyleGoalSummary:   item.StyleGoalSummary,
+		},
+	}, nil
+}
+
 func (r *memoryProfileRepo) ReplaceFacts(context.Context, int64, int64, []profile.Fact) error {
 	return nil
 }

@@ -6,15 +6,15 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"hestia/server/internal/common/auth"
 	"hestia/server/internal/domain/profile"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 )
 
 func TestSummaryReturnsDashboardData(t *testing.T) {
@@ -127,12 +127,93 @@ func TestSummaryReturnsEmptyStateWithoutProfileOrReport(t *testing.T) {
 }
 
 func TestMySQLSummaryFiltersActiveProfile(t *testing.T) {
-	source, err := os.ReadFile("repo.go")
+	db, mock, err := sqlmock.New()
 	if err != nil {
-		t.Fatalf("read repo source: %v", err)
+		t.Fatalf("create sql mock: %v", err)
 	}
-	if !strings.Contains(string(source), "p.status = 'active'") {
-		t.Fatalf("expected summary query to filter active profile")
+	defer db.Close()
+	repo := profile.NewMySQLRepository(sqlx.NewDb(db, "sqlmock"))
+	userID := int64(12)
+
+	mock.ExpectQuery(`(?s)FROM users u.*LEFT JOIN profiles p.*p\.status = 'active'.*WHERE u\.id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"user_public_id",
+			"nickname",
+			"onboarding_status",
+			"profile_id",
+			"profile_public_id",
+			"gender",
+			"height_cm",
+			"body_notes",
+			"skin_notes",
+			"hair_notes",
+			"lifestyle_scenarios",
+			"style_goal_summary",
+		}).AddRow(
+			"usr_test",
+			"明明",
+			"completed",
+			int64(34),
+			"prf_test",
+			"female",
+			165,
+			"肩颈偏窄",
+			"中性偏暖",
+			"锁骨发",
+			[]byte(`["通勤","周末见朋友"]`),
+			"更利落",
+		))
+	mock.ExpectQuery(`(?s)SELECT.*fact_count.*preference_count.*avoidance_count.*inference_count.*pending_confirmation_count`).
+		WithArgs(userID, userID, userID, userID, userID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"fact_count",
+			"preference_count",
+			"avoidance_count",
+			"inference_count",
+			"pending_confirmation_count",
+		}).AddRow(4, 2, 1, 3, 1))
+	mock.ExpectQuery(`(?s)FROM reports.*report_type = 'initial'.*status = 'ready'.*LIMIT 1`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"public_id", "title", "status", "generated_at"}))
+
+	summary, err := repo.Summary(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if summary.User.UserPublicID != "usr_test" || summary.User.Nickname != "明明" || summary.User.OnboardingStatus != "completed" {
+		t.Fatalf("unexpected user summary: %#v", summary.User)
+	}
+	if summary.Profile == nil {
+		t.Fatalf("expected profile summary")
+	}
+	if summary.Profile.ProfilePublicID != "prf_test" || summary.Profile.Gender != "female" {
+		t.Fatalf("unexpected profile summary: %#v", summary.Profile)
+	}
+	if summary.Profile.HeightCM == nil || *summary.Profile.HeightCM != 165 {
+		t.Fatalf("unexpected height: %#v", summary.Profile.HeightCM)
+	}
+	if summary.Profile.BodyNotes != "肩颈偏窄" || summary.Profile.SkinNotes != "中性偏暖" || summary.Profile.HairNotes != "锁骨发" {
+		t.Fatalf("unexpected profile notes: %#v", summary.Profile)
+	}
+	if len(summary.Profile.LifestyleScenarios) != 2 || summary.Profile.LifestyleScenarios[0] != "通勤" || summary.Profile.LifestyleScenarios[1] != "周末见朋友" {
+		t.Fatalf("unexpected scenarios: %#v", summary.Profile.LifestyleScenarios)
+	}
+	if summary.Profile.StyleGoalSummary != "更利落" {
+		t.Fatalf("unexpected style goal: %q", summary.Profile.StyleGoalSummary)
+	}
+	if summary.MemorySummary.FactCount != 4 ||
+		summary.MemorySummary.PreferenceCount != 2 ||
+		summary.MemorySummary.AvoidanceCount != 1 ||
+		summary.MemorySummary.InferenceCount != 3 ||
+		summary.MemorySummary.PendingConfirmationCount != 1 {
+		t.Fatalf("unexpected memory summary: %#v", summary.MemorySummary)
+	}
+	if summary.LatestReport != nil {
+		t.Fatalf("expected nil latest report, got %#v", summary.LatestReport)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
 	}
 }
 
