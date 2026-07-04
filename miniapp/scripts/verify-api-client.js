@@ -50,12 +50,14 @@ async function main() {
     "sendAgentMessage",
     "parseSSEEvents",
     "getWardrobeItems",
+    "getWardrobeOptions",
     "createWardrobeItem",
     "updateWardrobeItem",
     "deleteWardrobeItem",
-    "createAssetUploadToken",
-    "confirmAssetUpload",
-    "uploadAssetToQiniu",
+    "recognizeWardrobeItemImage",
+    "createFileUploadToken",
+    "confirmFileUpload",
+    "uploadFileToQiniu",
     "getProfileSummary",
     "updateProfile",
     "updateProfilePreferences"
@@ -168,9 +170,11 @@ async function main() {
     const updatePayload = { color: "米白" };
     await api.getWardrobeItems();
     await api.getWardrobeItems({ category: "top" });
+    await api.getWardrobeOptions();
     await api.createWardrobeItem(createPayload);
     await api.updateWardrobeItem("wdi_test", updatePayload);
     await api.deleteWardrobeItem("wdi_test");
+    await api.recognizeWardrobeItemImage("ast_test");
   });
 
   const wardrobePaths = wardrobeCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
@@ -178,15 +182,20 @@ async function main() {
   assert(wardrobePaths[0] === "/api/user/wardrobe/items", `wardrobe list path mismatch: ${wardrobePaths[0]}`);
   assert(wardrobeCalls[1].method === "GET", "filtered getWardrobeItems should use GET");
   assert(wardrobePaths[1] === "/api/user/wardrobe/items?category=top", `wardrobe filtered path mismatch: ${wardrobePaths[1]}`);
-  assert(wardrobeCalls[2].method === "POST", "createWardrobeItem should use POST");
-  assert(wardrobePaths[2] === "/api/user/wardrobe/items", `wardrobe create path mismatch: ${wardrobePaths[2]}`);
-  assert(wardrobeCalls[2].data.name === "米白衬衫", "createWardrobeItem should pass create payload name");
-  assert(wardrobeCalls[2].data.category === "top", "createWardrobeItem should pass create payload category");
-  assert(wardrobeCalls[3].method === "PATCH", "updateWardrobeItem should use PATCH");
-  assert(wardrobePaths[3] === "/api/user/wardrobe/items/wdi_test", `wardrobe update path mismatch: ${wardrobePaths[3]}`);
-  assert(wardrobeCalls[3].data.color === "米白", "updateWardrobeItem should pass update payload");
-  assert(wardrobeCalls[4].method === "DELETE", "deleteWardrobeItem should use DELETE");
-  assert(wardrobePaths[4] === "/api/user/wardrobe/items/wdi_test", `wardrobe delete path mismatch: ${wardrobePaths[4]}`);
+  assert(wardrobeCalls[2].method === "GET", "getWardrobeOptions should use GET");
+  assert(wardrobePaths[2] === "/api/user/wardrobe/options", `wardrobe options path mismatch: ${wardrobePaths[2]}`);
+  assert(wardrobeCalls[3].method === "POST", "createWardrobeItem should use POST");
+  assert(wardrobePaths[3] === "/api/user/wardrobe/items", `wardrobe create path mismatch: ${wardrobePaths[3]}`);
+  assert(wardrobeCalls[3].data.name === "米白衬衫", "createWardrobeItem should pass create payload name");
+  assert(wardrobeCalls[3].data.category === "top", "createWardrobeItem should pass create payload category");
+  assert(wardrobeCalls[4].method === "PATCH", "updateWardrobeItem should use PATCH");
+  assert(wardrobePaths[4] === "/api/user/wardrobe/items/wdi_test", `wardrobe update path mismatch: ${wardrobePaths[4]}`);
+  assert(wardrobeCalls[4].data.color === "米白", "updateWardrobeItem should pass update payload");
+  assert(wardrobeCalls[5].method === "DELETE", "deleteWardrobeItem should use DELETE");
+  assert(wardrobePaths[5] === "/api/user/wardrobe/items/wdi_test", `wardrobe delete path mismatch: ${wardrobePaths[5]}`);
+  assert(wardrobeCalls[6].method === "POST", "recognizeWardrobeItemImage should use POST");
+  assert(wardrobePaths[6] === "/api/user/wardrobe/items/recognize", `wardrobe recognize path mismatch: ${wardrobePaths[6]}`);
+  assert(wardrobeCalls[6].data.asset_public_id === "ast_test", "recognizeWardrobeItemImage should pass asset_public_id");
 
   const profileCalls = [];
   await withGlobals({
@@ -272,13 +281,13 @@ async function main() {
       }
     }
   }, async () => {
-    await api.createAssetUploadToken({
+    await api.createFileUploadToken({
       asset_type: "wardrobe_item_photo",
       mime_type: "image/png",
       file_size: 1024,
       file_ext: "png"
     });
-    await api.confirmAssetUpload({
+    await api.confirmFileUpload({
       asset_public_id: "ast_1",
       bucket: "hestia-assets",
       object_key: "users/u1/assets/ast_1.png",
@@ -289,12 +298,12 @@ async function main() {
   });
 
   const assetPaths = assetCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
-  assert(assetCalls[0].method === "POST", "createAssetUploadToken should use POST");
-  assert(assetPaths[0] === "/api/user/assets/upload-token", `asset upload-token path mismatch: ${assetPaths[0]}`);
-  assert(assetCalls[0].data.asset_type === "wardrobe_item_photo", "createAssetUploadToken should pass asset_type");
-  assert(assetCalls[1].method === "POST", "confirmAssetUpload should use POST");
-  assert(assetPaths[1] === "/api/user/assets/confirm", `asset confirm path mismatch: ${assetPaths[1]}`);
-  assert(assetCalls[1].data.object_key === "users/u1/assets/ast_1.png", "confirmAssetUpload should pass object_key");
+  assert(assetCalls[0].method === "POST", "createFileUploadToken should use POST");
+  assert(assetPaths[0] === "/api/user/files/upload-token", `file upload-token path mismatch: ${assetPaths[0]}`);
+  assert(assetCalls[0].data.asset_type === "wardrobe_item_photo", "createFileUploadToken should pass asset_type");
+  assert(assetCalls[1].method === "POST", "confirmFileUpload should use POST");
+  assert(assetPaths[1] === "/api/user/files/confirm", `file confirm path mismatch: ${assetPaths[1]}`);
+  assert(assetCalls[1].data.object_key === "users/u1/assets/ast_1.png", "confirmFileUpload should pass object_key");
 
   const uploadRequests = [];
   const uploadFiles = [];
@@ -306,7 +315,7 @@ async function main() {
       },
       request(options) {
         uploadRequests.push(options);
-        if (options.url.endsWith("/api/user/assets/upload-token")) {
+        if (options.url.endsWith("/api/user/files/upload-token")) {
           options.success({
             statusCode: 200,
             data: {
@@ -345,7 +354,7 @@ async function main() {
       }
     }
   }, async () => {
-    const uploaded = await api.uploadAssetToQiniu(
+    const uploaded = await api.uploadFileToQiniu(
       {
         tempFilePath: "/tmp/wardrobe.webp",
         size: 2048,
@@ -358,31 +367,33 @@ async function main() {
       }
     );
 
-    assert(uploaded.asset_public_id === "ast_upload", "uploadAssetToQiniu should return confirmed asset_public_id");
-    assert(uploaded.object_key === "users/u1/assets/ast_upload.webp", "uploadAssetToQiniu should return confirmed object_key");
-    assert(uploaded.url === "https://cdn.example.com/users/u1/assets/ast_upload.webp", "uploadAssetToQiniu should return confirmed url");
-    assert(uploaded.asset_type === "wardrobe_item_photo", "uploadAssetToQiniu should return confirmed asset_type");
+    assert(uploaded.asset_public_id === "ast_upload", "uploadFileToQiniu should return confirmed asset_public_id");
+    assert(uploaded.object_key === "users/u1/assets/ast_upload.webp", "uploadFileToQiniu should return confirmed object_key");
+    assert(uploaded.url === "https://cdn.example.com/users/u1/assets/ast_upload.webp", "uploadFileToQiniu should return confirmed url");
+    assert(uploaded.asset_type === "wardrobe_item_photo", "uploadFileToQiniu should return confirmed asset_type");
   });
 
   assert(uploadFiles.length === 1, `expected 1 wx.uploadFile call, got ${uploadFiles.length}`);
   assert(uploadFiles[0].url === "https://upload.qiniup.com", `upload url mismatch: ${uploadFiles[0].url}`);
   assert(uploadFiles[0].filePath === "/tmp/wardrobe.webp", `upload filePath mismatch: ${uploadFiles[0].filePath}`);
-  assert(uploadFiles[0].name === "file", "uploadAssetToQiniu should use file field name");
+  assert(uploadFiles[0].name === "file", "uploadFileToQiniu should use file field name");
   assert(uploadFiles[0].formData.token === "qiniu_token", "wx.uploadFile formData should include upload token");
   assert(uploadFiles[0].formData.key === "users/u1/assets/ast_upload.webp", "wx.uploadFile formData should include object key");
   assert(uploadRequests.length === 2, `expected token and confirm requests, got ${uploadRequests.length}`);
-  assert(uploadRequests[0].data.asset_type === "wardrobe_item_photo", "uploadAssetToQiniu should request token with asset_type");
-  assert(uploadRequests[0].data.mime_type === "image/webp", "uploadAssetToQiniu should request token with inferred mime_type");
-  assert(uploadRequests[0].data.file_size === 2048, "uploadAssetToQiniu should request token with file size");
-  assert(uploadRequests[0].data.file_ext === "webp", "uploadAssetToQiniu should request token with inferred file_ext");
-  assert(uploadRequests[1].data.asset_public_id === "ast_upload", "uploadAssetToQiniu should confirm asset_public_id");
-  assert(uploadRequests[1].data.bucket === "hestia-assets", "uploadAssetToQiniu should confirm bucket");
-  assert(uploadRequests[1].data.object_key === "users/u1/assets/ast_upload.webp", "uploadAssetToQiniu should confirm object_key");
-  assert(uploadRequests[1].data.mime_type === "image/webp", "uploadAssetToQiniu should confirm mime_type");
-  assert(uploadRequests[1].data.file_size === 2048, "uploadAssetToQiniu should confirm file_size");
-  assert(uploadRequests[1].data.width === 640, "uploadAssetToQiniu should confirm width");
-  assert(uploadRequests[1].data.height === 960, "uploadAssetToQiniu should confirm height");
-  assert(uploadRequests[1].data.asset_type === "wardrobe_item_photo", "uploadAssetToQiniu should confirm asset_type");
+  assert(uploadRequests[0].url.endsWith("/api/user/files/upload-token"), "uploadFileToQiniu should request file token endpoint");
+  assert(uploadRequests[0].data.asset_type === "wardrobe_item_photo", "uploadFileToQiniu should request token with asset_type");
+  assert(uploadRequests[0].data.mime_type === "image/webp", "uploadFileToQiniu should request token with inferred mime_type");
+  assert(uploadRequests[0].data.file_size === 2048, "uploadFileToQiniu should request token with file size");
+  assert(uploadRequests[0].data.file_ext === "webp", "uploadFileToQiniu should request token with inferred file_ext");
+  assert(uploadRequests[1].url.endsWith("/api/user/files/confirm"), "uploadFileToQiniu should confirm file endpoint");
+  assert(uploadRequests[1].data.asset_public_id === "ast_upload", "uploadFileToQiniu should confirm asset_public_id");
+  assert(uploadRequests[1].data.bucket === "hestia-assets", "uploadFileToQiniu should confirm bucket");
+  assert(uploadRequests[1].data.object_key === "users/u1/assets/ast_upload.webp", "uploadFileToQiniu should confirm object_key");
+  assert(uploadRequests[1].data.mime_type === "image/webp", "uploadFileToQiniu should confirm mime_type");
+  assert(uploadRequests[1].data.file_size === 2048, "uploadFileToQiniu should confirm file_size");
+  assert(uploadRequests[1].data.width === 640, "uploadFileToQiniu should confirm width");
+  assert(uploadRequests[1].data.height === 960, "uploadFileToQiniu should confirm height");
+  assert(uploadRequests[1].data.asset_type === "wardrobe_item_photo", "uploadFileToQiniu should confirm asset_type");
 
   const tdesignUploadRequests = [];
   const tdesignUploadFiles = [];
@@ -394,7 +405,7 @@ async function main() {
       },
       request(options) {
         tdesignUploadRequests.push(options);
-        if (options.url.endsWith("/api/user/assets/upload-token")) {
+        if (options.url.endsWith("/api/user/files/upload-token")) {
           options.success({
             statusCode: 200,
             data: {
@@ -433,7 +444,7 @@ async function main() {
       }
     }
   }, async () => {
-    await api.uploadAssetToQiniu(
+    await api.uploadFileToQiniu(
       {
         url: "wxfile://tmp-no-extension",
         size: 4096,
@@ -445,33 +456,33 @@ async function main() {
     );
   });
 
-  assert(tdesignUploadFiles[0].filePath === "wxfile://tmp-no-extension", "uploadAssetToQiniu should support TDesign file.url");
+  assert(tdesignUploadFiles[0].filePath === "wxfile://tmp-no-extension", "uploadFileToQiniu should support TDesign file.url");
   assert(tdesignUploadRequests[0].data.mime_type === "image/jpeg", "TDesign type=image should default to image/jpeg");
   assert(tdesignUploadRequests[0].data.file_ext === "jpg", "TDesign type=image should default to jpg extension");
 
   let missingAssetTypeRejected = false;
   try {
-    await api.uploadAssetToQiniu({ tempFilePath: "/tmp/wardrobe.png", size: 1 }, {});
+    await api.uploadFileToQiniu({ tempFilePath: "/tmp/wardrobe.png", size: 1 }, {});
   } catch (error) {
     missingAssetTypeRejected = error instanceof api.ApiError && error.code === "asset.asset_type_required";
   }
-  assert(missingAssetTypeRejected, "uploadAssetToQiniu should reject without assetType");
+  assert(missingAssetTypeRejected, "uploadFileToQiniu should reject without assetType");
 
   let missingFilePathRejected = false;
   try {
-    await api.uploadAssetToQiniu({ size: 1, type: "image" }, { assetType: "wardrobe_item_photo" });
+    await api.uploadFileToQiniu({ size: 1, type: "image" }, { assetType: "wardrobe_item_photo" });
   } catch (error) {
     missingFilePathRejected = error instanceof api.ApiError && error.code === "asset.file_path_required";
   }
-  assert(missingFilePathRejected, "uploadAssetToQiniu should reject without a file path");
+  assert(missingFilePathRejected, "uploadFileToQiniu should reject without a file path");
 
   let invalidImageRejected = false;
   try {
-    await api.uploadAssetToQiniu({ tempFilePath: "/tmp/file", size: 1, type: "video" }, { assetType: "wardrobe_item_photo" });
+    await api.uploadFileToQiniu({ tempFilePath: "/tmp/file", size: 1, type: "video" }, { assetType: "wardrobe_item_photo" });
   } catch (error) {
     invalidImageRejected = error instanceof api.ApiError && error.code === "asset.invalid_image_type";
   }
-  assert(invalidImageRejected, "uploadAssetToQiniu should reject files without image mime or extension");
+  assert(invalidImageRejected, "uploadFileToQiniu should reject files without image mime or extension");
 
   let uploadStatusRejected = false;
   await withGlobals({
@@ -504,12 +515,12 @@ async function main() {
     }
   }, async () => {
     try {
-      await api.uploadAssetToQiniu({ tempFilePath: "/tmp/wardrobe.jpg", size: 1 }, { assetType: "wardrobe_item_photo" });
+      await api.uploadFileToQiniu({ tempFilePath: "/tmp/wardrobe.jpg", size: 1 }, { assetType: "wardrobe_item_photo" });
     } catch (error) {
       uploadStatusRejected = error instanceof api.ApiError && error.code === "asset.upload_failed" && error.statusCode === 500;
     }
   });
-  assert(uploadStatusRejected, "uploadAssetToQiniu should reject non-2xx wx.uploadFile responses");
+  assert(uploadStatusRejected, "uploadFileToQiniu should reject non-2xx wx.uploadFile responses");
 
   let uploadFailRejected = false;
   await withGlobals({
@@ -541,12 +552,12 @@ async function main() {
     }
   }, async () => {
     try {
-      await api.uploadAssetToQiniu({ path: "/tmp/wardrobe.jpg", size: 1 }, { assetType: "wardrobe_item_photo" });
+      await api.uploadFileToQiniu({ path: "/tmp/wardrobe.jpg", size: 1 }, { assetType: "wardrobe_item_photo" });
     } catch (error) {
       uploadFailRejected = error instanceof api.ApiError && error.code === "asset.upload_failed";
     }
   });
-  assert(uploadFailRejected, "uploadAssetToQiniu should reject wx.uploadFile fail callbacks");
+  assert(uploadFailRejected, "uploadFileToQiniu should reject wx.uploadFile fail callbacks");
 }
 
 main()

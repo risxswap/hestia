@@ -1,9 +1,14 @@
 package wardrobe
 
 import (
+	"context"
 	"database/sql"
+	"regexp"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/jmoiron/sqlx"
 )
 
 func TestWardrobeItemsFromRowsDeduplicatesRepeatedPrimaryRows(t *testing.T) {
@@ -45,6 +50,50 @@ func TestFirstWardrobeItemFromRowsSelectsDeterministicPrimary(t *testing.T) {
 	}
 	if item.PrimaryImage.AssetPublicID != "ast_lower_sort" {
 		t.Fatalf("expected lowest sort_order primary image, got %#v", item.PrimaryImage)
+	}
+}
+
+func TestMySQLRepositoryListWardrobeOptionsReadsSystemConfigs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("new sqlmock: %v", err)
+	}
+	defer db.Close()
+	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
+	rows := sqlmock.NewRows([]string{"key", "value"}).
+		AddRow("categories", `[{"label":"上装","value":"top"}]`).
+		AddRow("materials", `[{"label":"棉","value":"cotton"}]`).
+		AddRow("seasons", `[{"label":"春秋","value":"spring_autumn"}]`).
+		AddRow("silhouettes", `[{"label":"微宽松","value":"slightly_relaxed"}]`)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT `key`, `value`")).
+		WillReturnRows(rows)
+
+	options, err := repo.ListWardrobeOptions(context.Background())
+	if err != nil {
+		t.Fatalf("list wardrobe options: %v", err)
+	}
+
+	if options.Categories[0].Value != "top" ||
+		options.Materials[0].Value != "cotton" ||
+		options.Seasons[0].Value != "spring_autumn" ||
+		options.Silhouettes[0].Value != "slightly_relaxed" {
+		t.Fatalf("expected options from system configs, got %#v", options)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestPrimaryImageJoinSQLReadsFilesTable(t *testing.T) {
+	sql := primaryImageJoinSQL()
+	if !regexp.MustCompile(`(?s)JOIN files a_pick`).MatchString(sql) {
+		t.Fatalf("expected primary image subquery to join files table, got %s", sql)
+	}
+	if !regexp.MustCompile(`(?s)LEFT JOIN files a`).MatchString(sql) {
+		t.Fatalf("expected primary image join to read files table, got %s", sql)
+	}
+	if regexp.MustCompile(`(?s)JOIN assets|LEFT JOIN assets`).MatchString(sql) {
+		t.Fatalf("primary image join should not read assets table, got %s", sql)
 	}
 }
 

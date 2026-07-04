@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,6 +64,32 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	if !containsStatement(exec.queries, "ALTER TABLE wardrobe_items ADD COLUMN recommendation_status") {
 		t.Fatalf("expected wardrobe recommendation status migration statement")
 	}
+	if !containsStatement(exec.queries, "wardrobe.item_options") {
+		t.Fatalf("expected wardrobe item options system config migration statement")
+	}
+	if !containsStatement(exec.queries, "INSERT IGNORE INTO `files`") {
+		t.Fatalf("expected assets-to-files data copy migration statement")
+	}
+	if !containsStatement(exec.queries, "DROP TABLE `assets`") {
+		t.Fatalf("expected old assets table drop migration statement")
+	}
+	if !containsStatement(exec.queries, "CREATE TABLE IF NOT EXISTS `llm_providers`") {
+		t.Fatalf("expected llm providers table migration statement")
+	}
+	if !containsStatement(exec.queries, "CREATE TABLE IF NOT EXISTS `llm_models`") {
+		t.Fatalf("expected llm models table migration statement")
+	}
+	if !containsStatement(exec.queries, "llm.usages") {
+		t.Fatalf("expected llm usages system config migration statement")
+	}
+	if !containsStatement(exec.queries, "caps_json") {
+		t.Fatalf("expected llm model caps_json field")
+	}
+	for _, key := range []string{"categories", "materials", "seasons", "silhouettes"} {
+		if !containsStatement(exec.queries, "`key`, `value`, `value_type`, `description`, `status`)") || !containsStatement(exec.queries, key) {
+			t.Fatalf("expected wardrobe item option config key %s", key)
+		}
+	}
 	for _, query := range exec.queries {
 		if strings.TrimSpace(query) == "" {
 			t.Fatal("expected no empty SQL statements to be executed")
@@ -107,7 +134,7 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 		"profile_facts",
 		"profile_inferences",
 		"profile_prefs",
-		"assets",
+		"files",
 		"wardrobe_items",
 		"wardrobe_item_assets",
 		"wardrobe_gaps",
@@ -134,6 +161,8 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 		"benefits",
 		"benefit_txns",
 		"system_configs",
+		"llm_providers",
+		"llm_models",
 		"jobs",
 	}
 	for _, table := range expectedTables {
@@ -141,10 +170,15 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 			t.Fatalf("schema should create table %s", table)
 		}
 	}
+	if regexp.MustCompile("(?i)CREATE TABLE IF NOT EXISTS `assets`").MatchString(sql) {
+		t.Fatal("schema should create files table instead of assets table")
+	}
 
 	for _, token := range []string{
 		"`public_id` varchar(32) NOT NULL",
 		"UNIQUE KEY `uk_users_public_id` (`public_id`)",
+		"UNIQUE KEY `uk_files_public_id` (`public_id`)",
+		"UNIQUE KEY `uk_files_bucket_object_key` (`bucket`, `object_key`)",
 		"UNIQUE KEY `uk_system_configs_group_key` (`group`, `key`)",
 		"KEY `idx_advices_user_date_scene` (`user_id`, `advice_date`, `scene_key`, `status`)",
 		"KEY `idx_jobs_status_next_retry` (`status`, `next_retry_at`)",
@@ -175,6 +209,28 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 
 	if strings.Contains(strings.ToLower(sql), "foreign key") {
 		t.Fatal("initial schema should keep relations as indexed ids without database foreign keys")
+	}
+}
+
+func TestMySQLMigrationsAvoidProcedureBodies(t *testing.T) {
+	err := filepath.WalkDir("mysql", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(strings.ToLower(string(raw)), "create procedure") {
+			t.Fatalf("%s uses CREATE PROCEDURE, but the migration runner splits SQL by semicolon", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan mysql migrations: %v", err)
 	}
 }
 

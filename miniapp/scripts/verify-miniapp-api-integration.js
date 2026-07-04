@@ -281,36 +281,50 @@ async function main() {
     ]
   };
 
+  let homeLatestReportCalls = 0;
+  let homeWardrobeCalls = 0;
   const home = loadPage("pages/home/home.js", {
-    getLatestReport: async () => sampleReport,
-    getWardrobeItems: async () => ({
-      items: [
-        {
-          public_id: "wdi_shirt",
-          name: "米白衬衫",
-          category: "top",
-          is_core: true,
-          recommendation_status: "preferred",
-          status: "active"
-        },
-        {
-          public_id: "wdi_paused",
-          name: "黑色长裙",
-          category: "bottom",
-          is_core: true,
-          recommendation_status: "paused",
-          status: "active"
-        }
-      ]
-    }),
+    getLatestReport: async () => {
+      homeLatestReportCalls += 1;
+      return sampleReport;
+    },
+    getWardrobeItems: async () => {
+      homeWardrobeCalls += 1;
+      return {
+        items: [
+          {
+            public_id: "wdi_shirt",
+            name: "米白衬衫",
+            category: "top",
+            is_core: true,
+            recommendation_status: "preferred",
+            status: "active"
+          },
+          {
+            public_id: "wdi_paused",
+            name: "黑色长裙",
+            category: "bottom",
+            is_core: true,
+            recommendation_status: "paused",
+            status: "active"
+          }
+        ]
+      };
+    },
     sendImageRouteFeedback: async () => ({ public_id: "irt_test", status: "active" })
   });
   assert(home.config, "home.js should register a Page config");
   assert(typeof home.config.loadToday === "function", "home page should define loadToday");
+  assert(typeof home.config.onShow === "function", "home tab should refresh from API on tab show");
   assert(typeof home.mod.normalizeTodayFromReport === "function", "home.js should export normalizeTodayFromReport");
 
   const homeInstance = createPageInstance(home.config);
   await home.config.loadToday.call(homeInstance);
+  assert(homeLatestReportCalls === 1, "home loadToday should request latest report once");
+  await home.config.onShow.call(homeInstance);
+  await home.config.onShow.call(homeInstance);
+  assert(homeLatestReportCalls === 3, "home tab onShow should re-request latest report every time");
+  assert(homeWardrobeCalls === 3, "home tab onShow should re-request wardrobe context every time");
   assert(homeInstance.data.todayRecommendation.title === "干净 + 有气质", "home should derive title from latest report route");
   assert(homeInstance.data.routePublicID === "irt_test", "home should keep route public id for feedback");
   const coreWardrobeSection = homeInstance.data.todayPlanSections.find((section) => section.title === "核心衣橱");
@@ -527,35 +541,66 @@ async function main() {
   );
 
   const wardrobeApiCalls = [];
+  let wardrobeListCalls = 0;
+  let wardrobeReportCalls = 0;
+  let wardrobeOptionsCalls = 0;
+  const wardrobeRecognizeCalls = [];
   const wardrobeUploadCalls = [];
   const wardrobeUploads = [];
   const wardrobe = loadPage("pages/wardrobe/wardrobe.js", {
-    getWardrobeItems: async () => ({
-      items: [
-        {
-          public_id: "wdi_shirt",
-          name: "米白衬衫",
-          category: "top",
-          color: "米白",
-          is_core: true,
-          recommendation_status: "preferred",
-          scene_tags: ["通勤"],
-          primary_image: {
-            object_key: "wardrobe/wdi_shirt/main.jpg"
+    getWardrobeItems: async () => {
+      wardrobeListCalls += 1;
+      return {
+        items: [
+          {
+            public_id: "wdi_shirt",
+            name: "米白衬衫",
+            category: "top",
+            color: "米白",
+            is_core: true,
+            recommendation_status: "preferred",
+            scene_tags: ["通勤"],
+            primary_image: {
+              object_key: "wardrobe/wdi_shirt/main.jpg"
+            }
+          },
+          {
+            public_id: "wdi_jeans",
+            name: "直筒牛仔裤",
+            category: "bottom",
+            color: "蓝色",
+            is_core: true,
+            recommendation_status: "normal",
+            scene_tags: ["日常"]
           }
-        },
-        {
-          public_id: "wdi_jeans",
-          name: "直筒牛仔裤",
-          category: "bottom",
-          color: "蓝色",
-          is_core: true,
-          recommendation_status: "normal",
-          scene_tags: ["日常"]
-        }
-      ]
-    }),
-    getLatestReport: async () => sampleReport,
+        ]
+      };
+    },
+    getLatestReport: async () => {
+      wardrobeReportCalls += 1;
+      return sampleReport;
+    },
+    getWardrobeOptions: async () => {
+      wardrobeOptionsCalls += 1;
+      return {
+        categories: [
+          { label: "上装", value: "top" },
+          { label: "下装", value: "bottom" },
+          { label: "外套", value: "outerwear" },
+          { label: "包", value: "bag" }
+        ],
+        materials: [
+          { label: "棉", value: "cotton" },
+          { label: "针织", value: "knit" }
+        ],
+        seasons: [
+          { label: "春秋", value: "spring_autumn" }
+        ],
+        silhouettes: [
+          { label: "微宽松", value: "slightly_relaxed" }
+        ]
+      };
+    },
     createWardrobeItem: async (payload) => {
       wardrobeApiCalls.push(["create", payload]);
       return Object.assign({ public_id: "wdi_new", status: "active" }, payload);
@@ -568,7 +613,21 @@ async function main() {
       wardrobeApiCalls.push(["delete", publicID]);
       return { public_id: publicID };
     },
-    uploadAssetToQiniu: async (file, options) => {
+    recognizeWardrobeItemImage: async (assetPublicID) => {
+      wardrobeRecognizeCalls.push(assetPublicID);
+      return {
+        name: "AI 识别开衫",
+        category: "outerwear",
+        color: "米白",
+        silhouette: "微宽松",
+        material: "针织",
+        season: "春秋",
+        scene_tags: ["通勤", "周末"],
+        user_notes: "建议内搭简洁上衣",
+        confidence: 0.78
+      };
+    },
+    uploadFileToQiniu: async (file, options) => {
       wardrobeUploadCalls.push(["upload", file, options]);
       const upload = createDeferred();
       wardrobeUploads.push(upload);
@@ -586,8 +645,13 @@ async function main() {
   assert(typeof wardrobe.config.handleDeleteItem === "function", "wardrobe should delete item");
   assert(typeof wardrobe.config.handleImageUpload === "function", "wardrobe should handle public image upload");
   assert(typeof wardrobe.config.handleImageRemove === "function", "wardrobe should remove uploaded public image");
+  assert(typeof wardrobe.config.recognizeUploadedWardrobeImage === "function", "wardrobe should recognize uploaded image");
+  assert(typeof wardrobe.config.loadWardrobeOptions === "function", "wardrobe should load wardrobe options");
+  assert(typeof wardrobe.config.handleOptionChange === "function", "wardrobe should handle picker option changes");
   assert(typeof wardrobe.config.loadWardrobeGaps === "function", "wardrobe should load gaps from latest report");
   assert(typeof wardrobe.mod.priorityItems === "function", "wardrobe should export priorityItems helper");
+  assert(typeof wardrobe.mod.mergeRecognizedFieldsIntoDraft === "function", "wardrobe should export recognized field merge helper");
+  assert(typeof wardrobe.mod.normalizeWardrobeOptions === "function", "wardrobe should export wardrobe options normalizer");
   assert(
     wardrobe.config.data.categoryOptions.map((item) => item.value).join(",") === "all,top,bottom,outerwear,shoes,bag,accessory,sport,home,other",
     "wardrobe category options should support gallery categories"
@@ -613,8 +677,50 @@ async function main() {
   ]);
   assert(fallbackPriorityItems.length === 1, "priorityItems should keep normal core item when no preferred item exists");
   assert(fallbackPriorityItems[0].public_id === "wdi_core_only", "priorityItems fallback should use normal core item");
+  const normalizedOptions = wardrobe.mod.normalizeWardrobeOptions({
+    categories: [{ label: "外套", value: "outerwear" }],
+    materials: [{ label: "针织", value: "knit" }],
+    seasons: [{ label: "春秋", value: "spring_autumn" }],
+    silhouettes: [{ label: "微宽松", value: "slightly_relaxed" }]
+  });
+  const mergedRecognizedDraft = wardrobe.mod.mergeRecognizedFieldsIntoDraft({
+    name: "用户已填名称",
+    category: "top",
+    color: "",
+    silhouette: "",
+    material: "",
+    season: "",
+    sceneText: "",
+    scene_tags: [],
+    user_notes: "",
+    primary_asset_public_id: "ast_existing"
+  }, {
+    name: "AI 名称",
+    category: "outerwear",
+    color: "米白",
+    silhouette: "微宽松",
+    material: "针织",
+    season: "春秋",
+    scene_tags: ["通勤", "周末"],
+    user_notes: "建议内搭简洁上衣"
+  }, normalizedOptions);
+  assert(mergedRecognizedDraft.name === "用户已填名称", "recognized merge should not overwrite existing name");
+  assert(mergedRecognizedDraft.category === "top", "recognized merge should not overwrite existing category");
+  assert(mergedRecognizedDraft.color === "米白", "recognized merge should fill empty color");
+  assert(mergedRecognizedDraft.material === "knit", "recognized merge should map material label to configured value");
+  assert(mergedRecognizedDraft.season === "spring_autumn", "recognized merge should map season label to configured value");
+  assert(mergedRecognizedDraft.silhouette === "slightly_relaxed", "recognized merge should map silhouette label to configured value");
+  assert(mergedRecognizedDraft.sceneText === "通勤，周末", "recognized merge should fill empty scene text");
+  assert(mergedRecognizedDraft.user_notes === "建议内搭简洁上衣", "recognized merge should fill empty notes");
   const wardrobeInstance = createPageInstance(wardrobe.config);
   await wardrobe.config.loadWardrobe.call(wardrobeInstance);
+  assert(wardrobeListCalls === 1, "wardrobe loadWardrobe should request wardrobe items once");
+  assert(wardrobeOptionsCalls === 1, "wardrobe loadWardrobe should request wardrobe options once");
+  assert(wardrobeInstance.data.materialOptions[0].label === "不选择", "wardrobe material picker should include empty option");
+  assert(wardrobeInstance.data.materialOptions[1].value === "cotton", "wardrobe should load material options");
+  await wardrobe.config.onShow.call(wardrobeInstance);
+  assert(wardrobeListCalls === 2, "wardrobe tab onShow should re-request wardrobe items without dirty flag");
+  assert(wardrobeReportCalls === 2, "wardrobe tab onShow should re-request report gaps without dirty flag");
   assert(wardrobeInstance.data.activeCategory === "all", "wardrobe should default to all category");
   assert(wardrobeInstance.data.items.length === 2, "wardrobe should load two core wardrobe items");
   assert(wardrobeInstance.data.visibleItems.length === 2, "wardrobe all category should show all loaded items");
@@ -676,14 +782,38 @@ async function main() {
   wardrobe.config.handleCloseEditor.call(wardrobeInstance);
 
   wardrobe.config.handleOpenCreate.call(wardrobeInstance);
+  wardrobe.config.handleOptionChange.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        field: "material",
+        optionKey: "materialOptions"
+      }
+    },
+    detail: {
+      value: 2
+    }
+  });
+  assert(wardrobeInstance.data.draft.material === "knit", "wardrobe option picker should write selected value to draft");
   assert(wardrobeInstance.data.editorVisible === true, "wardrobe create should open editor modal");
   assert(Array.isArray(wardrobeInstance.data.imageFiles) && wardrobeInstance.data.imageFiles.length === 0, "wardrobe create should initialize empty imageFiles");
+  assert(wardrobeInstance.data.imageRecognizing === false, "wardrobe create should initialize imageRecognizing");
+  assert(wardrobeInstance.data.imageRecognizeError === "", "wardrobe create should clear image recognize error");
   wardrobe.config.handleCloseEditor.call(wardrobeInstance);
   assert(wardrobeInstance.data.editorVisible === false, "wardrobe close should hide editor modal");
   assert(wardrobeInstance.data.editingPublicID === "", "wardrobe close should clear editingPublicID");
   assert(wardrobeInstance.data.draft.name === "", "wardrobe close should reset draft");
   assert(Array.isArray(wardrobeInstance.data.imageFiles) && wardrobeInstance.data.imageFiles.length === 0, "wardrobe close should clear imageFiles");
   wardrobe.config.handleOpenCreate.call(wardrobeInstance);
+  wardrobe.config.handleDraftInput.call(wardrobeInstance, {
+    currentTarget: {
+      dataset: {
+        field: "name"
+      }
+    },
+    detail: {
+      value: "用户手动名称"
+    }
+  });
   const pendingWardrobeUpload = wardrobe.config.handleImageUpload.call(wardrobeInstance, {
     detail: {
       files: [{ url: "wxfile://wardrobe-create.jpg", size: 2048, type: "image/jpeg" }]
@@ -701,13 +831,32 @@ async function main() {
   wardrobeUploads[0].resolve({
     asset_public_id: "ast_create",
     url: "https://cdn.example.com/wardrobe-create.jpg",
-    object_key: "users/u1/assets/ast_create.jpg"
+    object_key: "users/u1/assets/ast_create.jpg",
+    recognized_fields: {
+      name: "AI 识别开衫",
+      category: "outerwear",
+      color: "米白",
+      silhouette: "微宽松",
+      material: "针织",
+      season: "春秋",
+      scene_tags: ["通勤", "周末"],
+      user_notes: "建议内搭简洁上衣",
+      confidence: 0.78
+    }
   });
   await pendingWardrobeUpload;
   await duplicateWardrobeUpload;
   assert(wardrobeInstance.data.draft.primary_asset_public_id === "ast_create", "wardrobe upload success should set draft primary asset id");
   assert(wardrobeInstance.data.imageFiles[0].url === "https://cdn.example.com/wardrobe-create.jpg", "wardrobe upload success should show uploaded image url");
   assert(wardrobeInstance.data.imageUploadError === "", "wardrobe upload success should clear image error");
+  assert(wardrobeRecognizeCalls.length === 0, "wardrobe upload confirm recognized_fields should skip extra image recognition request");
+  assert(wardrobeInstance.data.imageRecognizing === false, "wardrobe recognize success should clear recognizing state");
+  assert(wardrobeInstance.data.imageRecognizeError === "", "wardrobe recognize success should clear recognize error");
+  assert(wardrobeInstance.data.draft.name === "用户手动名称", "wardrobe recognition should not overwrite manual name");
+  assert(wardrobeInstance.data.draft.color === "米白", "wardrobe recognition should fill empty color");
+  assert(wardrobeInstance.data.draft.silhouette === "slightly_relaxed", "wardrobe recognition should fill configured silhouette value");
+  assert(wardrobeInstance.data.draft.season === "spring_autumn", "wardrobe recognition should fill configured season value");
+  assert(wardrobeInstance.data.draft.sceneText === "通勤，周末", "wardrobe recognition should fill empty scene text");
   wardrobe.config.handleDraftInput.call(wardrobeInstance, {
     currentTarget: {
       dataset: {
@@ -866,6 +1015,18 @@ async function main() {
   assert(wardrobeMarkup.includes("sizeLimit=\"{{imageSizeLimit}}\""), "wardrobe upload should pass TDesign sizeLimit prop");
   assert(wardrobeMarkup.includes("handleImageUpload"), "wardrobe editor should bind image upload handler");
   assert(wardrobeMarkup.includes("handleImageRemove"), "wardrobe editor should bind image remove handler");
+  assert(wardrobeMarkup.includes("<picker"), "wardrobe editor should render picker controls");
+  assert(wardrobeMarkup.includes("handleOptionChange"), "wardrobe editor should bind option picker handler");
+  assert(!wardrobeMarkup.includes("data-field=\"category\" bindinput=\"handleDraftInput\""), "wardrobe category should not be free text input");
+  assert(!wardrobeMarkup.includes("data-field=\"material\" bindinput=\"handleDraftInput\""), "wardrobe material should not be free text input");
+  assert(!wardrobeMarkup.includes("data-field=\"season\" bindinput=\"handleDraftInput\""), "wardrobe season should not be free text input");
+  assert(!wardrobeMarkup.includes("data-field=\"silhouette\" bindinput=\"handleDraftInput\""), "wardrobe silhouette should not be free text input");
+  assert(wardrobeMarkup.includes("imageRecognizing"), "wardrobe editor should show image recognizing state");
+  assert(wardrobeMarkup.includes("imageRecognizeError"), "wardrobe editor should show image recognize errors");
+  assert(
+    wardrobeMarkup.indexOf("<t-upload") >= 0 && wardrobeMarkup.indexOf("<t-upload") < wardrobeMarkup.indexOf("data-field=\"name\""),
+    "wardrobe upload block should appear before name input"
+  );
   assert(!wardrobeMarkup.includes("主图资产 ID"), "wardrobe editor should not ask users to type primary asset id");
   assert(
     !wardrobeMarkup.includes("这里展示服务端报告识别出的关键缺口"),
@@ -911,7 +1072,7 @@ async function main() {
       detailApiCalls.push(["delete", publicID]);
       return { public_id: publicID };
     },
-    uploadAssetToQiniu: async (file, options) => {
+    uploadFileToQiniu: async (file, options) => {
       detailUploadCalls.push(["upload", file, options]);
       if (file && file.url === "wxfile://detail-fail.jpg") {
         throw new Error("七牛上传失败");

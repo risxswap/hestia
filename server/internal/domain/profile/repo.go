@@ -537,18 +537,18 @@ ORDER BY id ASC
 }
 
 type profileSummaryRow struct {
-	UserPublicID       string          `db:"user_public_id"`
-	Nickname           string          `db:"nickname"`
-	OnboardingStatus   string          `db:"onboarding_status"`
-	ProfileID          sql.NullInt64   `db:"profile_id"`
-	ProfilePublicID    sql.NullString  `db:"profile_public_id"`
-	Gender             sql.NullString  `db:"gender"`
-	HeightCM           sql.NullInt64   `db:"height_cm"`
-	BodyNotes          sql.NullString  `db:"body_notes"`
-	SkinNotes          sql.NullString  `db:"skin_notes"`
-	HairNotes          sql.NullString  `db:"hair_notes"`
-	LifestyleScenarios json.RawMessage `db:"lifestyle_scenarios"`
-	StyleGoalSummary   sql.NullString  `db:"style_goal_summary"`
+	UserPublicID       string         `db:"user_public_id"`
+	Nickname           string         `db:"nickname"`
+	OnboardingStatus   string         `db:"onboarding_status"`
+	ProfileID          sql.NullInt64  `db:"profile_id"`
+	ProfilePublicID    sql.NullString `db:"profile_public_id"`
+	Gender             sql.NullString `db:"gender"`
+	HeightCM           sql.NullInt64  `db:"height_cm"`
+	BodyNotes          sql.NullString `db:"body_notes"`
+	SkinNotes          sql.NullString `db:"skin_notes"`
+	HairNotes          sql.NullString `db:"hair_notes"`
+	LifestyleScenarios sql.NullString `db:"lifestyle_scenarios"`
+	StyleGoalSummary   sql.NullString `db:"style_goal_summary"`
 }
 
 func (r profileSummaryRow) toSummary() (Summary, error) {
@@ -562,7 +562,7 @@ func (r profileSummaryRow) toSummary() (Summary, error) {
 	if !r.ProfileID.Valid {
 		return summary, nil
 	}
-	scenarios, err := decodeStringSlice(r.LifestyleScenarios)
+	scenarios, err := decodeStringSlice(json.RawMessage(r.LifestyleScenarios.String))
 	if err != nil {
 		return Summary{}, err
 	}

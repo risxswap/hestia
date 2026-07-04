@@ -45,7 +45,7 @@ func (r *MySQLRepository) CreateMany(ctx context.Context, items []Asset) ([]Asse
 			return nil, err
 		}
 		result, err := r.ext.ExecContext(ctx, `
-INSERT INTO assets
+INSERT INTO files
   (public_id, owner_user_id, bucket, object_key, mime_type, file_size, width, height, asset_type, source, status, review_status, metadata_json)
 VALUES
   (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON))
@@ -72,7 +72,7 @@ func (r *MySQLRepository) FindByPublicID(ctx context.Context, publicID string) (
 	var row assetRow
 	err := sqlx.GetContext(ctx, r.ext, &row, `
 SELECT id, public_id, owner_user_id, bucket, object_key, mime_type, file_size, width, height, asset_type, source, status, review_status, metadata_json
-FROM assets
+FROM files
 WHERE public_id = ?
   AND deleted_at IS NULL
 LIMIT 1

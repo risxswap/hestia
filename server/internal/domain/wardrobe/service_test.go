@@ -2,17 +2,138 @@ package wardrobe
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"hestia/server/internal/infra/llm"
 )
+
+type recognizeImageFunc func(ctx context.Context, userID int64, input RecognizeImageInput) (RecognizedItemFields, error)
+
+func (f recognizeImageFunc) RecognizeWardrobeItemImage(ctx context.Context, userID int64, input RecognizeImageInput) (RecognizedItemFields, error) {
+	return f(ctx, userID, input)
+}
+
+type generateFunc func(ctx context.Context, request llm.Request) (llm.Response, error)
+
+func (f generateFunc) Generate(ctx context.Context, request llm.Request) (llm.Response, error) {
+	return f(ctx, request)
+}
 
 type captureWardrobeRepo struct {
 	created                  []Item
 	items                    []Item
+	options                  WardrobeOptions
 	primaryAssetPublicID     string
 	lastUpdatePublicID       string
 	lastUpdateRecommendation *string
 	lastUpdateInput          UpdateInput
+}
+
+func TestRecognizeItemImageTrimsAndNormalizesFields(t *testing.T) {
+	service := NewService(&captureWardrobeRepo{})
+	var capturedUserID int64
+	var capturedInput RecognizeImageInput
+	service.SetImageRecognizer(recognizeImageFunc(func(_ context.Context, userID int64, input RecognizeImageInput) (RecognizedItemFields, error) {
+		capturedUserID = userID
+		capturedInput = input
+		return RecognizedItemFields{
+			Name:       " 米白针织开衫 ",
+			Category:   " outerwear ",
+			Color:      " 米白 ",
+			Silhouette: " 微宽松 ",
+			Material:   " 针织 ",
+			Season:     " 春秋 ",
+			SceneTags:  []string{" 通勤 ", "", " 周末 "},
+			UserNotes:  " 建议内搭简洁上衣 ",
+			Confidence: 0.78,
+		}, nil
+	}))
+
+	result, err := service.RecognizeItemImage(context.Background(), 12, RecognizeImageInput{
+		AssetPublicID: " ast_primary ",
+	})
+	if err != nil {
+		t.Fatalf("recognize item image: %v", err)
+	}
+
+	if capturedUserID != 12 || capturedInput.AssetPublicID != "ast_primary" {
+		t.Fatalf("expected recognizer to receive trimmed input, user=%d input=%#v", capturedUserID, capturedInput)
+	}
+	if result.Name != "米白针织开衫" ||
+		result.Category != "outerwear" ||
+		result.Color != "米白" ||
+		result.Silhouette != "微宽松" ||
+		result.Material != "针织" ||
+		result.Season != "春秋" ||
+		result.UserNotes != "建议内搭简洁上衣" {
+		t.Fatalf("expected trimmed recognized fields, got %#v", result)
+	}
+	if len(result.SceneTags) != 2 || result.SceneTags[0] != "通勤" || result.SceneTags[1] != "周末" {
+		t.Fatalf("expected normalized scene tags, got %#v", result.SceneTags)
+	}
+	if result.Confidence != 0.78 {
+		t.Fatalf("expected confidence preserved, got %v", result.Confidence)
+	}
+}
+
+func TestRecognizeItemImageRejectsMissingAssetPublicID(t *testing.T) {
+	service := NewService(&captureWardrobeRepo{})
+
+	_, err := service.RecognizeItemImage(context.Background(), 12, RecognizeImageInput{
+		AssetPublicID: "   ",
+	})
+
+	if err != ErrInvalidPrimaryAsset {
+		t.Fatalf("expected ErrInvalidPrimaryAsset, got %v", err)
+	}
+}
+
+func TestLLMImageRecognizerParsesJSONFields(t *testing.T) {
+	var prompt string
+	var request llm.Request
+	recognizer := NewLLMImageRecognizer(generateFunc(func(_ context.Context, input llm.Request) (llm.Response, error) {
+		request = input
+		if len(input.Messages) > 0 {
+			prompt = input.Messages[0].Content
+		}
+		return llm.Response{Text: "```json\n{\"name\":\"米白衬衫\",\"category\":\"top\",\"scene_tags\":[\"通勤\"],\"confidence\":0.66}\n```"}, nil
+	}))
+
+	result, err := recognizer.RecognizeWardrobeItemImage(context.Background(), 12, RecognizeImageInput{
+		AssetPublicID: "ast_primary",
+		ImageURL:      "https://example.test/private.jpg",
+	})
+	if err != nil {
+		t.Fatalf("recognize with llm: %v", err)
+	}
+
+	if request.UsageKey != "wardrobe_image_recognition" || len(request.RequiredCaps) != 2 {
+		t.Fatalf("expected wardrobe image usage request, got %#v", request)
+	}
+	if len(request.ImageURLs) != 1 || request.ImageURLs[0] != "https://example.test/private.jpg" {
+		t.Fatalf("expected image url in request, got %#v", request.ImageURLs)
+	}
+	if !strings.Contains(prompt, "ast_primary") || !strings.Contains(prompt, "不要输出身材") {
+		t.Fatalf("expected safe prompt with asset id, got %q", prompt)
+	}
+	if result.Name != "米白衬衫" || result.Category != "top" || len(result.SceneTags) != 1 || result.Confidence != 0.66 {
+		t.Fatalf("expected parsed recognized fields, got %#v", result)
+	}
+}
+
+func TestLLMImageRecognizerReturnsUnavailableWithoutGenerator(t *testing.T) {
+	recognizer := NewLLMImageRecognizer(nil)
+
+	_, err := recognizer.RecognizeWardrobeItemImage(context.Background(), 12, RecognizeImageInput{
+		AssetPublicID: "ast_primary",
+	})
+
+	if !errors.Is(err, ErrImageRecognizerUnavailable) {
+		t.Fatalf("expected ErrImageRecognizerUnavailable, got %v", err)
+	}
 }
 
 type coreOnlyWardrobeRepo struct{}
@@ -41,6 +162,16 @@ func (r *captureWardrobeRepo) ListItems(_ context.Context, userID int64, filter 
 		result = append(result, item)
 	}
 	return result, nil
+}
+
+func (r *captureWardrobeRepo) ListWardrobeOptions(context.Context) (WardrobeOptions, error) {
+	if len(r.options.Categories) == 0 &&
+		len(r.options.Materials) == 0 &&
+		len(r.options.Seasons) == 0 &&
+		len(r.options.Silhouettes) == 0 {
+		return DefaultWardrobeOptions(), nil
+	}
+	return r.options, nil
 }
 
 func (r *captureWardrobeRepo) CreateItem(_ context.Context, item Item, primaryAssetPublicID string) (Item, error) {
@@ -121,7 +252,7 @@ func TestCreateItemTrimsAndDefaultsFields(t *testing.T) {
 
 	item, err := service.CreateItem(context.Background(), 12, CreateInput{
 		Name:                 " 黑色西装 ",
-		Category:             "   ",
+		Category:             " top ",
 		Color:                " 黑色 ",
 		SceneTags:            []string{" 通勤 ", "", " 晚宴 "},
 		UserNotes:            " 可配白衬衫 ",
@@ -134,8 +265,8 @@ func TestCreateItemTrimsAndDefaultsFields(t *testing.T) {
 	if item.Name != "黑色西装" {
 		t.Fatalf("expected trimmed name, got %q", item.Name)
 	}
-	if item.Category != "unknown" {
-		t.Fatalf("expected default category unknown, got %q", item.Category)
+	if item.Category != "top" {
+		t.Fatalf("expected trimmed category top, got %q", item.Category)
 	}
 	if item.RecommendationStatus != RecommendationStatusNormal {
 		t.Fatalf("expected default recommendation status normal, got %q", item.RecommendationStatus)
@@ -151,6 +282,57 @@ func TestCreateItemTrimsAndDefaultsFields(t *testing.T) {
 	}
 	if repo.primaryAssetPublicID != "ast_primary" {
 		t.Fatalf("expected trimmed primary asset public id, got %q", repo.primaryAssetPublicID)
+	}
+}
+
+func TestCreateItemRejectsInvalidConfiguredOption(t *testing.T) {
+	service := NewService(&captureWardrobeRepo{
+		options: WardrobeOptions{
+			Categories:  []OptionItem{{Label: "上装", Value: "top"}},
+			Materials:   []OptionItem{{Label: "棉", Value: "cotton"}},
+			Seasons:     []OptionItem{{Label: "春秋", Value: "spring_autumn"}},
+			Silhouettes: []OptionItem{{Label: "微宽松", Value: "slightly_relaxed"}},
+		},
+	})
+
+	_, err := service.CreateItem(context.Background(), 12, CreateInput{
+		Name:     "黑色西装",
+		Category: "outerwear",
+	})
+	if err != ErrInvalidWardrobeOption {
+		t.Fatalf("expected ErrInvalidWardrobeOption for invalid category, got %v", err)
+	}
+
+	_, err = service.CreateItem(context.Background(), 12, CreateInput{
+		Name:     "米白衬衫",
+		Category: "top",
+		Material: "silk",
+	})
+	if err != ErrInvalidWardrobeOption {
+		t.Fatalf("expected ErrInvalidWardrobeOption for invalid material, got %v", err)
+	}
+}
+
+func TestCreateItemAllowsEmptyOptionalConfiguredOptions(t *testing.T) {
+	repo := &captureWardrobeRepo{
+		options: WardrobeOptions{
+			Categories:  []OptionItem{{Label: "上装", Value: "top"}},
+			Materials:   []OptionItem{{Label: "棉", Value: "cotton"}},
+			Seasons:     []OptionItem{{Label: "春秋", Value: "spring_autumn"}},
+			Silhouettes: []OptionItem{{Label: "微宽松", Value: "slightly_relaxed"}},
+		},
+	}
+	service := NewService(repo)
+
+	_, err := service.CreateItem(context.Background(), 12, CreateInput{
+		Name:     "米白衬衫",
+		Category: "top",
+	})
+	if err != nil {
+		t.Fatalf("expected empty optional options to pass, got %v", err)
+	}
+	if len(repo.created) != 1 {
+		t.Fatalf("expected item created, got %#v", repo.created)
 	}
 }
 
@@ -242,7 +424,7 @@ func TestWardrobeAssetRowEligibilityRequiresWardrobeUploadScope(t *testing.T) {
 
 func TestCreateItemReturnsUnsupportedWhenRepoDoesNotSupportItems(t *testing.T) {
 	service := NewService(coreOnlyWardrobeRepo{})
-	_, err := service.CreateItem(context.Background(), 12, CreateInput{Name: "黑色西装"})
+	_, err := service.CreateItem(context.Background(), 12, CreateInput{Name: "黑色西装", Category: "top"})
 	if err != ErrRepositoryUnsupported {
 		t.Fatalf("expected ErrRepositoryUnsupported, got %v", err)
 	}

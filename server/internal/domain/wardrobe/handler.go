@@ -44,6 +44,19 @@ func (h *Handler) ListItems(c *gin.Context) {
 	response.OK(c, gin.H{"items": items})
 }
 
+func (h *Handler) GetOptions(c *gin.Context) {
+	if _, ok := auth.UserFromContext(c); !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	options, err := h.service.ListWardrobeOptions(c.Request.Context())
+	if err != nil {
+		h.writeError(c, err, "list wardrobe options failed", 0, "")
+		return
+	}
+	response.OK(c, options)
+}
+
 func (h *Handler) CreateItem(c *gin.Context) {
 	user, ok := auth.UserFromContext(c)
 	if !ok {
@@ -97,6 +110,25 @@ func (h *Handler) DeleteItem(c *gin.Context) {
 	response.OK(c, gin.H{"public_id": strings.TrimSpace(publicID)})
 }
 
+func (h *Handler) RecognizeItemImage(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	var input RecognizeImageInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_request", "请求参数不正确")
+		return
+	}
+	result, err := h.service.RecognizeItemImage(c.Request.Context(), user.UserID, input)
+	if err != nil {
+		h.writeError(c, err, "recognize wardrobe item image failed", user.UserID, "")
+		return
+	}
+	response.OK(c, result)
+}
+
 func wardrobeListFilter(c *gin.Context) (ListFilter, bool) {
 	filter := ListFilter{
 		Category:             strings.TrimSpace(c.Query("category")),
@@ -120,6 +152,10 @@ func (h *Handler) writeError(c *gin.Context, err error, logMessage string, userI
 		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_item", "单品名称不能为空")
 	case errors.Is(err, ErrInvalidPrimaryAsset):
 		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_primary_asset", "主图资产不可用于衣橱")
+	case errors.Is(err, ErrInvalidWardrobeOption):
+		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_option", "衣服字段选项不支持")
+	case errors.Is(err, ErrImageRecognizerUnavailable):
+		response.Error(c, http.StatusInternalServerError, "wardrobe.image_recognizer_unavailable", "图片识别暂不可用")
 	case errors.Is(err, ErrItemNotFound):
 		response.Error(c, http.StatusNotFound, "wardrobe.item_not_found", "单品不存在")
 	case errors.Is(err, ErrRepositoryUnsupported):

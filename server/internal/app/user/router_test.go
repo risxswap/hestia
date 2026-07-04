@@ -76,3 +76,19 @@ func TestDevLoginRouteIsKeptInDevelopment(t *testing.T) {
 		t.Fatalf("expected dev-login route in development")
 	}
 }
+
+func TestLegacyAssetsUploadRoutesAreNotRegistered(t *testing.T) {
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/user/assets/upload-token",
+		strings.NewReader(`{"asset_type":"wardrobe_item_photo","mime_type":"image/jpeg","file_size":1024}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	NewRouter(nil).ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy assets upload route to be removed, got status %d", response.Code)
+	}
+}

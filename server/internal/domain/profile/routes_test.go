@@ -248,6 +248,75 @@ func TestMySQLSummaryFiltersActiveProfile(t *testing.T) {
 	}
 }
 
+func TestMySQLSummaryTreatsNullLifestyleScenariosAsEmpty(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("create sql mock: %v", err)
+	}
+	defer db.Close()
+	repo := profile.NewMySQLRepository(sqlx.NewDb(db, "sqlmock"))
+	userID := int64(12)
+
+	mock.ExpectQuery(`(?s)FROM users u.*LEFT JOIN profiles p.*p\.status = 'active'.*WHERE u\.id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"user_public_id",
+			"nickname",
+			"onboarding_status",
+			"profile_id",
+			"profile_public_id",
+			"gender",
+			"height_cm",
+			"body_notes",
+			"skin_notes",
+			"hair_notes",
+			"lifestyle_scenarios",
+			"style_goal_summary",
+		}).AddRow(
+			"usr_test",
+			"明明",
+			"completed",
+			int64(34),
+			"prf_test",
+			"female",
+			165,
+			"肩颈偏窄",
+			"中性偏暖",
+			"锁骨发",
+			nil,
+			"更利落",
+		))
+	mock.ExpectQuery(`(?s)SELECT.*fact_count.*preference_count.*avoidance_count.*inference_count.*pending_confirmation_count`).
+		WithArgs(userID, userID, userID, userID, userID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"fact_count",
+			"preference_count",
+			"avoidance_count",
+			"inference_count",
+			"pending_confirmation_count",
+		}).AddRow(4, 2, 1, 3, 1))
+	mock.ExpectQuery(`(?s)FROM profile_prefs.*WHERE user_id = \?.*deleted_at IS NULL`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"pref_type", "pref_key", "polarity"}))
+	mock.ExpectQuery(`(?s)FROM reports.*report_type = 'initial'.*status = 'ready'.*LIMIT 1`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"public_id", "title", "status", "generated_at"}))
+
+	summary, err := repo.Summary(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if summary.Profile == nil {
+		t.Fatalf("expected profile summary")
+	}
+	if len(summary.Profile.LifestyleScenarios) != 0 {
+		t.Fatalf("expected empty scenarios, got %#v", summary.Profile.LifestyleScenarios)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestPatchProfileUpdatesExplicitProfileFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &routeProfileRepo{

@@ -114,6 +114,52 @@ func TestListItemsReturnsRequestFailedWhenRepositoryUnsupported(t *testing.T) {
 	}
 }
 
+func TestGetWardrobeOptionsRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newRouteMemoryWardrobeRepo()
+	repo.options = wardrobe.WardrobeOptions{
+		Categories:  []wardrobe.OptionItem{{Label: "上装", Value: "top"}},
+		Materials:   []wardrobe.OptionItem{{Label: "棉", Value: "cotton"}},
+		Seasons:     []wardrobe.OptionItem{{Label: "春秋", Value: "spring_autumn"}},
+		Silhouettes: []wardrobe.OptionItem{{Label: "微宽松", Value: "slightly_relaxed"}},
+	}
+	router := newWardrobeRouteTestRouter(repo)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/user/wardrobe/options", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string                   `json:"code"`
+		Data wardrobe.WardrobeOptions `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "ok" || body.Data.Categories[0].Value != "top" || body.Data.Materials[0].Value != "cotton" {
+		t.Fatalf("expected options response, got %#v", body)
+	}
+}
+
+func TestCreateItemRejectsInvalidOptionRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newRouteMemoryWardrobeRepo()
+	repo.options = wardrobe.WardrobeOptions{
+		Categories: []wardrobe.OptionItem{{Label: "上装", Value: "top"}},
+	}
+	router := newWardrobeRouteTestRouter(repo)
+
+	body := routeWardrobeErrorResponse(t, router, http.MethodPost, "/api/user/wardrobe/items", `{"name":"黑色西装","category":"outerwear"}`, http.StatusBadRequest)
+
+	if body.Code != "wardrobe.invalid_option" {
+		t.Fatalf("expected invalid option code, got %q", body.Code)
+	}
+}
+
 func TestCreateItemRejectsInvalidRecommendationStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newWardrobeRouteTestRouter(newRouteMemoryWardrobeRepo())
@@ -336,6 +382,77 @@ func TestDeleteItemReturnsNotFoundForOtherUserItem(t *testing.T) {
 	}
 }
 
+func TestRecognizeItemImageRouteReturnsRecognizedFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := wardrobe.NewService(newRouteMemoryWardrobeRepo())
+	service.SetImageRecognizer(routeImageRecognizerFunc(func(_ context.Context, userID int64, input wardrobe.RecognizeImageInput) (wardrobe.RecognizedItemFields, error) {
+		if userID != 12 || input.AssetPublicID != "ast_primary" {
+			t.Fatalf("expected current user and asset id, user=%d input=%#v", userID, input)
+		}
+		return wardrobe.RecognizedItemFields{
+			Name:       "米白针织开衫",
+			Category:   "outerwear",
+			Color:      "米白",
+			Silhouette: "微宽松",
+			Material:   "针织",
+			Season:     "春秋",
+			SceneTags:  []string{"通勤", "周末"},
+			UserNotes:  "建议内搭简洁上衣",
+			Confidence: 0.78,
+		}, nil
+	}))
+	router := newWardrobeRouteTestRouterWithService(service)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/user/wardrobe/items/recognize", bytes.NewBufferString(`{"asset_public_id":" ast_primary "}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string                        `json:"code"`
+		Data wardrobe.RecognizedItemFields `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "ok" {
+		t.Fatalf("expected code ok, got %q", body.Code)
+	}
+	if body.Data.Name != "米白针织开衫" || body.Data.Category != "outerwear" || len(body.Data.SceneTags) != 2 {
+		t.Fatalf("expected recognized fields response, got %#v", body.Data)
+	}
+}
+
+func TestRecognizeItemImageRejectsMissingAsset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := wardrobe.NewService(newRouteMemoryWardrobeRepo())
+	service.SetImageRecognizer(routeImageRecognizerFunc(func(_ context.Context, _ int64, _ wardrobe.RecognizeImageInput) (wardrobe.RecognizedItemFields, error) {
+		return wardrobe.RecognizedItemFields{}, nil
+	}))
+	router := newWardrobeRouteTestRouterWithService(service)
+
+	body := routeWardrobeErrorResponse(t, router, http.MethodPost, "/api/user/wardrobe/items/recognize", `{"asset_public_id":" "}`, http.StatusBadRequest)
+
+	if body.Code != "wardrobe.invalid_primary_asset" {
+		t.Fatalf("expected invalid primary asset code, got %q", body.Code)
+	}
+}
+
+func TestRecognizeItemImageReturnsUnavailableWithoutRecognizer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newWardrobeRouteTestRouter(newRouteMemoryWardrobeRepo())
+
+	body := routeWardrobeErrorResponse(t, router, http.MethodPost, "/api/user/wardrobe/items/recognize", `{"asset_public_id":"ast_primary"}`, http.StatusInternalServerError)
+
+	if body.Code != "wardrobe.image_recognizer_unavailable" {
+		t.Fatalf("expected image recognizer unavailable code, got %q", body.Code)
+	}
+}
+
 func newWardrobeRouteTestRouter(repo *routeMemoryWardrobeRepo) *gin.Engine {
 	return newWardrobeRouteTestRouterWithService(wardrobe.NewService(repo))
 }
@@ -383,7 +500,8 @@ func routeWardrobeErrorResponse(t *testing.T, router *gin.Engine, method string,
 }
 
 type routeMemoryWardrobeRepo struct {
-	items map[string]wardrobe.Item
+	items   map[string]wardrobe.Item
+	options wardrobe.WardrobeOptions
 }
 
 type routeCoreOnlyWardrobeRepo struct{}
@@ -392,6 +510,12 @@ type routeImageURLSignerFunc func(ctx context.Context, objectKey string) (string
 
 func (f routeImageURLSignerFunc) PrivateDownloadURL(ctx context.Context, objectKey string) (string, error) {
 	return f(ctx, objectKey)
+}
+
+type routeImageRecognizerFunc func(ctx context.Context, userID int64, input wardrobe.RecognizeImageInput) (wardrobe.RecognizedItemFields, error)
+
+func (f routeImageRecognizerFunc) RecognizeWardrobeItemImage(ctx context.Context, userID int64, input wardrobe.RecognizeImageInput) (wardrobe.RecognizedItemFields, error) {
+	return f(ctx, userID, input)
 }
 
 func (routeCoreOnlyWardrobeRepo) CreateCoreItems(_ context.Context, items []wardrobe.Item) ([]wardrobe.Item, error) {
@@ -434,6 +558,16 @@ func (r *routeMemoryWardrobeRepo) ListItems(_ context.Context, userID int64, fil
 		result = append(result, item)
 	}
 	return result, nil
+}
+
+func (r *routeMemoryWardrobeRepo) ListWardrobeOptions(context.Context) (wardrobe.WardrobeOptions, error) {
+	if len(r.options.Categories) == 0 &&
+		len(r.options.Materials) == 0 &&
+		len(r.options.Seasons) == 0 &&
+		len(r.options.Silhouettes) == 0 {
+		return wardrobe.DefaultWardrobeOptions(), nil
+	}
+	return r.options, nil
 }
 
 func (r *routeMemoryWardrobeRepo) CreateItem(_ context.Context, item wardrobe.Item, primaryAssetPublicID string) (wardrobe.Item, error) {

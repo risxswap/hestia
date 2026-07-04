@@ -161,7 +161,7 @@ function normalizeTodayFromReport(report) {
 const homePageConfig = {
   data: emptyToday,
 
-  onLoad() {
+  onShow() {
     return this.loadToday();
   },
 

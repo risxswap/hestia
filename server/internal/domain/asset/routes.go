@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
+func RegisterFileRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 	var repo Repository
 	var logger *slog.Logger
 	var service *Service
@@ -19,10 +19,10 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 	} else {
 		service = NewService(repo)
 	}
-	RegisterUserRoutesWithService(group, service, logger)
+	RegisterFileRoutesWithService(group, service, logger)
 }
 
-func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service, logger *slog.Logger) {
+func RegisterFileRoutesWithService(group *gin.RouterGroup, service *Service, logger *slog.Logger) {
 	handler := NewHandler(service, logger)
 	group.POST("/upload-token", handler.UploadToken)
 	group.POST("/confirm", handler.Confirm)

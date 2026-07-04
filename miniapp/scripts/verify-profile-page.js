@@ -165,6 +165,7 @@ async function main() {
 
   assert(pageConfig, "profile.js should register Page config");
   assert(typeof pageConfig.loadProfile === "function", "profile page should define loadProfile");
+  assert(typeof pageConfig.onShow === "function", "profile tab should refresh from API on tab show");
   assert(typeof pageConfig.handleSaveProfile === "function", "profile page should define handleSaveProfile");
   assert(typeof pageConfig.handleSavePreferences === "function", "profile page should define handleSavePreferences");
   assert(typeof pageConfig.handleClearLocalSession === "function", "profile page should define handleClearLocalSession");
@@ -197,6 +198,31 @@ async function main() {
     "loadProfile should keep profile quick entry contract"
   );
   assert(page.data.memoryItems.length === 5, "loadProfile should normalize memory summary items");
+
+  await page.onShow.call(page);
+  assert(apiCalls.filter((call) => call.name === "getProfileSummary").length === 2, "profile onShow should re-request profile summary");
+  page.setData({
+    savingProfile: true,
+    profileDraft: Object.assign({}, page.data.profileDraft, {
+      nickname: "保存中的昵称"
+    })
+  });
+  await page.onShow.call(page);
+  assert(apiCalls.filter((call) => call.name === "getProfileSummary").length === 2, "profile onShow should skip refresh while profile save is pending");
+  assert(page.data.profileDraft.nickname === "保存中的昵称", "profile onShow should not overwrite profile draft while saving");
+  page.setData({
+    savingProfile: false,
+    savingPreferences: true,
+    preferencesDraft: Object.assign({}, page.data.preferencesDraft, {
+      avoidancesText: "保存中的禁忌"
+    })
+  });
+  await page.onShow.call(page);
+  assert(apiCalls.filter((call) => call.name === "getProfileSummary").length === 2, "profile onShow should skip refresh while preferences save is pending");
+  assert(page.data.preferencesDraft.avoidancesText === "保存中的禁忌", "profile onShow should not overwrite preferences draft while saving");
+  page.setData({
+    savingPreferences: false
+  });
 
   page.setData({
     profileDraft: Object.assign({}, page.data.profileDraft, {

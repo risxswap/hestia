@@ -242,7 +242,7 @@ const wardrobeDetailPageConfig = {
 
     const uploadRunID = (this._imageUploadRunID || 0) + 1;
     this._imageUploadRunID = uploadRunID;
-    this._imageUploadPromise = api.uploadAssetToQiniu(file, {
+    this._imageUploadPromise = api.uploadFileToQiniu(file, {
       assetType: "wardrobe_item_photo"
     })
       .then((uploaded) => {

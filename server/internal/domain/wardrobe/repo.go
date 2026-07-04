@@ -92,6 +92,41 @@ ORDER BY wi.is_core DESC, wi.updated_at DESC, wi.id DESC`
 	return wardrobeItemsFromRows(rows)
 }
 
+func (r *MySQLRepository) ListWardrobeOptions(ctx context.Context) (WardrobeOptions, error) {
+	if r == nil || r.ext == nil {
+		return WardrobeOptions{}, errors.New("wardrobe repository database is nil")
+	}
+	var rows []systemConfigOptionRow
+	if err := sqlx.SelectContext(ctx, r.ext, &rows, `
+SELECT `+"`key`, `value`"+`
+FROM system_configs
+WHERE `+"`group`"+` = ?
+  AND status = ?
+  AND `+"`key`"+` IN ('categories', 'materials', 'seasons', 'silhouettes')
+`, "wardrobe.item_options", StatusActive); err != nil {
+		return WardrobeOptions{}, err
+	}
+
+	options := WardrobeOptions{}
+	for _, row := range rows {
+		items, err := parseOptionItems(row.Value)
+		if err != nil {
+			return WardrobeOptions{}, err
+		}
+		switch row.Key {
+		case "categories":
+			options.Categories = items
+		case "materials":
+			options.Materials = items
+		case "seasons":
+			options.Seasons = items
+		case "silhouettes":
+			options.Silhouettes = items
+		}
+	}
+	return mergeWithDefaultWardrobeOptions(options), nil
+}
+
 func (r *MySQLRepository) CreateItem(ctx context.Context, item Item, primaryAssetPublicID string) (Item, error) {
 	if r == nil || r.ext == nil {
 		return Item{}, errors.New("wardrobe repository database is nil")
@@ -335,7 +370,7 @@ func (r *MySQLRepository) findAssetForUser(ctx context.Context, userID int64, pu
 	var row wardrobeAssetRow
 	err := sqlx.GetContext(ctx, r.ext, &row, `
 SELECT id, public_id, bucket, object_key, asset_type, source
-FROM assets
+FROM files
 WHERE public_id = ?
   AND owner_user_id = ?
   AND status <> 'deleted'
@@ -386,7 +421,7 @@ func primaryImageJoinSQL() string {
   ON primary_wia.id = (
     SELECT wia_pick.id
     FROM wardrobe_item_assets wia_pick
-    JOIN assets a_pick
+    JOIN files a_pick
       ON a_pick.id = wia_pick.asset_id
       AND a_pick.deleted_at IS NULL
       AND a_pick.status <> 'deleted'
@@ -399,7 +434,7 @@ func primaryImageJoinSQL() string {
     ORDER BY wia_pick.sort_order ASC, wia_pick.id DESC
     LIMIT 1
   )
-LEFT JOIN assets a
+LEFT JOIN files a
   ON a.id = primary_wia.asset_id
   AND a.deleted_at IS NULL
   AND a.status <> 'deleted'
@@ -545,6 +580,31 @@ type wardrobeAssetRow struct {
 	ObjectKey string `db:"object_key"`
 	AssetType string `db:"asset_type"`
 	Source    string `db:"source"`
+}
+
+type systemConfigOptionRow struct {
+	Key   string `db:"key"`
+	Value []byte `db:"value"`
+}
+
+func parseOptionItems(raw []byte) ([]OptionItem, error) {
+	var items []OptionItem
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, err
+	}
+	result := make([]OptionItem, 0, len(items))
+	for _, item := range items {
+		label := strings.TrimSpace(item.Label)
+		value := strings.TrimSpace(item.Value)
+		if label == "" || value == "" {
+			continue
+		}
+		result = append(result, OptionItem{
+			Label: label,
+			Value: value,
+		})
+	}
+	return result, nil
 }
 
 func (r wardrobeAssetRow) eligibleWardrobePrimaryAsset(userID int64) bool {

@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS `profile_prefs` (
   KEY `idx_profile_prefs_polarity` (`polarity`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS `assets` (
+CREATE TABLE IF NOT EXISTS `files` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `public_id` varchar(32) NOT NULL,
   `owner_user_id` bigint unsigned DEFAULT NULL,
@@ -119,10 +119,10 @@ CREATE TABLE IF NOT EXISTS `assets` (
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `deleted_at` datetime(3) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_assets_public_id` (`public_id`),
-  UNIQUE KEY `uk_assets_bucket_object_key` (`bucket`, `object_key`),
-  KEY `idx_assets_owner_type` (`owner_user_id`, `asset_type`),
-  KEY `idx_assets_status` (`status`)
+  UNIQUE KEY `uk_files_public_id` (`public_id`),
+  UNIQUE KEY `uk_files_bucket_object_key` (`bucket`, `object_key`),
+  KEY `idx_files_owner_type` (`owner_user_id`, `asset_type`),
+  KEY `idx_files_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `wardrobe_items` (
@@ -655,6 +655,39 @@ CREATE TABLE IF NOT EXISTS `system_configs` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_system_configs_group_key` (`group`, `key`),
   KEY `idx_system_configs_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `llm_providers` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `code` varchar(64) NOT NULL,
+  `name` varchar(128) NOT NULL,
+  `api_base_url` varchar(512) NOT NULL,
+  `token` varchar(2048) NOT NULL,
+  `auth_type` varchar(32) NOT NULL DEFAULT 'bearer',
+  `status` varchar(32) NOT NULL DEFAULT 'active',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_llm_providers_code` (`code`),
+  KEY `idx_llm_providers_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `llm_models` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `provider_id` bigint unsigned NOT NULL,
+  `model_code` varchar(128) NOT NULL,
+  `name` varchar(128) NOT NULL,
+  `caps_json` json NOT NULL,
+  `max_input_tokens` int unsigned DEFAULT NULL,
+  `max_output_tokens` int unsigned DEFAULT NULL,
+  `status` varchar(32) NOT NULL DEFAULT 'active',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_llm_models_provider_model` (`provider_id`, `model_code`),
+  KEY `idx_llm_models_provider_status` (`provider_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `jobs` (

@@ -170,6 +170,12 @@ function getWardrobeItems(filters) {
   });
 }
 
+function getWardrobeOptions() {
+  return authorizedRequest({
+    path: "/api/user/wardrobe/options"
+  });
+}
+
 function createWardrobeItem(data) {
   return authorizedRequest({
     path: "/api/user/wardrobe/items",
@@ -193,23 +199,33 @@ function deleteWardrobeItem(publicID) {
   });
 }
 
-function createAssetUploadToken(data) {
+function recognizeWardrobeItemImage(assetPublicID) {
   return authorizedRequest({
-    path: "/api/user/assets/upload-token",
+    path: "/api/user/wardrobe/items/recognize",
+    method: "POST",
+    data: {
+      asset_public_id: assetPublicID
+    }
+  });
+}
+
+function createFileUploadToken(data) {
+  return authorizedRequest({
+    path: "/api/user/files/upload-token",
     method: "POST",
     data
   });
 }
 
-function confirmAssetUpload(data) {
+function confirmFileUpload(data) {
   return authorizedRequest({
-    path: "/api/user/assets/confirm",
+    path: "/api/user/files/confirm",
     method: "POST",
     data
   });
 }
 
-async function uploadAssetToQiniu(file, options) {
+async function uploadFileToQiniu(file, options) {
   const source = file || {};
   const config = options || {};
   const assetType = config.assetType;
@@ -229,22 +245,23 @@ async function uploadAssetToQiniu(file, options) {
   }
   const fileExt = rawExt || mimeExt(mimeType);
   const fileSize = source.size;
-  const token = await createAssetUploadToken({
+  const token = await createFileUploadToken({
     asset_type: assetType,
     mime_type: mimeType,
     file_size: fileSize,
     file_ext: fileExt
   });
 
-  await uploadFileToQiniu({
+  await uploadRawFileToQiniu({
     uploadUrl: token.upload_url,
     uploadToken: token.upload_token,
     objectKey: token.object_key,
     filePath
   });
 
-  return confirmAssetUpload({
+  return confirmFileUpload({
     asset_public_id: token.asset_public_id,
+    file_public_id: token.file_public_id || token.asset_public_id,
     bucket: token.bucket,
     object_key: token.object_key,
     mime_type: mimeType,
@@ -255,7 +272,7 @@ async function uploadAssetToQiniu(file, options) {
   });
 }
 
-function uploadFileToQiniu(options) {
+function uploadRawFileToQiniu(options) {
   const config = options || {};
   return new Promise((resolve, reject) => {
     if (typeof wx === "undefined" || !wx.uploadFile) {
@@ -510,12 +527,14 @@ module.exports = {
   updateProfile,
   updateProfilePreferences,
   getWardrobeItems,
+  getWardrobeOptions,
   createWardrobeItem,
   updateWardrobeItem,
   deleteWardrobeItem,
-  createAssetUploadToken,
-  confirmAssetUpload,
-  uploadAssetToQiniu,
+  recognizeWardrobeItemImage,
+  createFileUploadToken,
+  confirmFileUpload,
+  uploadFileToQiniu,
   getOnboardingDraft,
   saveOnboardingDraft,
   submitOnboarding,

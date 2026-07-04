@@ -23,9 +23,10 @@ const (
 	StatusActive        = "active"
 	ReviewStatusPending = "pending"
 
-	maxImageFileSize  = 10 * 1024 * 1024
-	maxImageDimension = 20000
-	qiniuStatTimeout  = 5 * time.Second
+	defaultQiniuUploadHost = "https://upload.qiniup.com"
+	maxImageFileSize       = 10 * 1024 * 1024
+	maxImageDimension      = 20000
+	qiniuStatTimeout       = 5 * time.Second
 )
 
 var (
@@ -58,6 +59,7 @@ type ServiceOptions struct {
 	UploadSigner      UploadSigner
 	DownloadSigner    DownloadSigner
 	ObjectStatChecker ObjectStatChecker
+	UploadConfirmer   UploadConfirmer
 }
 
 type UploadSignRequest struct {
@@ -109,6 +111,27 @@ func (f ObjectStatCheckerFunc) StatObject(ctx context.Context, bucket string, ob
 	return f(ctx, bucket, objectKey)
 }
 
+type ConfirmedUpload struct {
+	FilePublicID string
+	FileType     string
+	ObjectKey    string
+	URL          string
+}
+
+type UploadConfirmResult struct {
+	RecognizedFields map[string]any
+}
+
+type UploadConfirmer interface {
+	AfterConfirmUpload(ctx context.Context, userID int64, upload ConfirmedUpload) (UploadConfirmResult, error)
+}
+
+type UploadConfirmerFunc func(ctx context.Context, userID int64, upload ConfirmedUpload) (UploadConfirmResult, error)
+
+func (f UploadConfirmerFunc) AfterConfirmUpload(ctx context.Context, userID int64, upload ConfirmedUpload) (UploadConfirmResult, error) {
+	return f(ctx, userID, upload)
+}
+
 type Service struct {
 	repo    Repository
 	options ServiceOptions
@@ -121,6 +144,9 @@ func NewService(repo Repository) *Service {
 func NewServiceWithOptions(repo Repository, options ServiceOptions) *Service {
 	options.Bucket = strings.TrimSpace(options.Bucket)
 	options.UploadHost = normalizeHTTPSURL(options.UploadHost)
+	if options.UploadHost == "" {
+		options.UploadHost = defaultQiniuUploadHost
+	}
 	options.PrivateDomain = normalizeHTTPSURL(options.PrivateDomain)
 	if options.UploadTTL <= 0 {
 		options.UploadTTL = time.Hour
@@ -129,6 +155,13 @@ func NewServiceWithOptions(repo Repository, options ServiceOptions) *Service {
 		options.DownloadTTL = 15 * time.Minute
 	}
 	return &Service{repo: repo, options: options}
+}
+
+func (s *Service) Options() ServiceOptions {
+	if s == nil {
+		return ServiceOptions{}
+	}
+	return s.options
 }
 
 func NewServiceFromConfig(repo Repository, cfg *config.Config) *Service {
@@ -246,6 +279,7 @@ func (s *Service) CreateUploadToken(ctx context.Context, userID int64, input Upl
 	expiresAt := time.Now().Add(s.options.UploadTTL).UTC().Format(time.RFC3339)
 	return UploadTokenResult{
 		AssetPublicID: publicID,
+		FilePublicID:  publicID,
 		Bucket:        s.options.Bucket,
 		ObjectKey:     objectKey,
 		UploadURL:     s.options.UploadHost,
@@ -460,12 +494,26 @@ func (s *Service) confirmResult(ctx context.Context, item Asset) (ConfirmResult,
 	if err != nil {
 		return ConfirmResult{}, err
 	}
-	return ConfirmResult{
+	result := ConfirmResult{
 		AssetPublicID: item.PublicID,
+		FilePublicID:  item.PublicID,
 		ObjectKey:     item.ObjectKey,
 		URL:           url,
 		AssetType:     item.AssetType,
-	}, nil
+		FileType:      item.AssetType,
+	}
+	if s != nil && s.options.UploadConfirmer != nil {
+		after, err := s.options.UploadConfirmer.AfterConfirmUpload(ctx, item.OwnerUserID, ConfirmedUpload{
+			FilePublicID: item.PublicID,
+			FileType:     item.AssetType,
+			ObjectKey:    item.ObjectKey,
+			URL:          url,
+		})
+		if err == nil && len(after.RecognizedFields) > 0 {
+			result.RecognizedFields = after.RecognizedFields
+		}
+	}
+	return result, nil
 }
 
 func validAssetPublicID(publicID string) bool {

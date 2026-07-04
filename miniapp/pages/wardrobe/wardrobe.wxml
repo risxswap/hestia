@@ -78,33 +78,6 @@
       </view>
 
       <scroll-view class="modal-scroll" scroll-y="true">
-        <view class="form-grid">
-          <label class="field-group">
-            <text class="field-label">名称</text>
-            <input class="field" placeholder="例如：米白衬衫" value="{{draft.name}}" data-field="name" bindinput="handleDraftInput" />
-          </label>
-          <label class="field-group">
-            <text class="field-label">分类</text>
-            <input class="field" placeholder="top / bottom / outerwear" value="{{draft.category}}" data-field="category" bindinput="handleDraftInput" />
-          </label>
-          <label class="field-group">
-            <text class="field-label">颜色</text>
-            <input class="field" placeholder="例如：米白、深蓝" value="{{draft.color}}" data-field="color" bindinput="handleDraftInput" />
-          </label>
-          <label class="field-group">
-            <text class="field-label">廓形</text>
-            <input class="field" placeholder="例如：微宽松、直筒" value="{{draft.silhouette}}" data-field="silhouette" bindinput="handleDraftInput" />
-          </label>
-          <label class="field-group">
-            <text class="field-label">材质</text>
-            <input class="field" placeholder="例如：棉、羊毛、牛仔" value="{{draft.material}}" data-field="material" bindinput="handleDraftInput" />
-          </label>
-          <label class="field-group">
-            <text class="field-label">季节</text>
-            <input class="field" placeholder="例如：春秋、四季" value="{{draft.season}}" data-field="season" bindinput="handleDraftInput" />
-          </label>
-        </view>
-
         <view class="field-group upload-field">
           <text class="field-label">主图</text>
           <t-upload
@@ -117,7 +90,44 @@
             bind:success="handleImageUpload"
             bind:remove="handleImageRemove"
           />
+          <text wx:if="{{imageRecognizing}}" class="muted">正在识别图片并回填表单...</text>
           <text wx:if="{{imageUploadError}}" class="upload-error">{{imageUploadError}}</text>
+          <text wx:if="{{imageRecognizeError}}" class="upload-error">{{imageRecognizeError}}</text>
+        </view>
+
+        <view class="form-grid">
+          <label class="field-group">
+            <text class="field-label">名称</text>
+            <input class="field" placeholder="例如：米白衬衫" value="{{draft.name}}" data-field="name" bindinput="handleDraftInput" />
+          </label>
+          <label class="field-group">
+            <text class="field-label">分类</text>
+            <picker range="{{editorCategoryOptions}}" range-key="label" value="{{draft.categoryIndex}}" data-field="category" data-option-key="editorCategoryOptions" bindchange="handleOptionChange">
+              <view class="field picker-field">{{draft.categoryLabel}}</view>
+            </picker>
+          </label>
+          <label class="field-group">
+            <text class="field-label">颜色</text>
+            <input class="field" placeholder="例如：米白、深蓝" value="{{draft.color}}" data-field="color" bindinput="handleDraftInput" />
+          </label>
+          <label class="field-group">
+            <text class="field-label">廓形</text>
+            <picker range="{{silhouetteOptions}}" range-key="label" value="{{draft.silhouetteIndex}}" data-field="silhouette" data-option-key="silhouetteOptions" bindchange="handleOptionChange">
+              <view class="field picker-field">{{draft.silhouetteLabel}}</view>
+            </picker>
+          </label>
+          <label class="field-group">
+            <text class="field-label">材质</text>
+            <picker range="{{materialOptions}}" range-key="label" value="{{draft.materialIndex}}" data-field="material" data-option-key="materialOptions" bindchange="handleOptionChange">
+              <view class="field picker-field">{{draft.materialLabel}}</view>
+            </picker>
+          </label>
+          <label class="field-group">
+            <text class="field-label">季节</text>
+            <picker range="{{seasonOptions}}" range-key="label" value="{{draft.seasonIndex}}" data-field="season" data-option-key="seasonOptions" bindchange="handleOptionChange">
+              <view class="field picker-field">{{draft.seasonLabel}}</view>
+            </picker>
+          </label>
         </view>
 
         <label class="field-group">

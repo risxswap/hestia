@@ -16,6 +16,42 @@ const categoryLabels = categoryOptions.reduce((result, option) => {
   return result;
 }, {});
 
+const defaultWardrobeOptions = {
+  categories: categoryOptions.filter((option) => option.value !== "all"),
+  materials: [
+    { label: "棉", value: "cotton" },
+    { label: "亚麻", value: "linen" },
+    { label: "羊毛", value: "wool" },
+    { label: "针织", value: "knit" },
+    { label: "牛仔", value: "denim" },
+    { label: "真丝", value: "silk" },
+    { label: "皮革", value: "leather" },
+    { label: "聚酯纤维", value: "polyester" },
+    { label: "混纺", value: "blend" },
+    { label: "其他", value: "other" }
+  ],
+  seasons: [
+    { label: "春夏", value: "spring_summer" },
+    { label: "春秋", value: "spring_autumn" },
+    { label: "秋冬", value: "autumn_winter" },
+    { label: "夏季", value: "summer" },
+    { label: "冬季", value: "winter" },
+    { label: "四季", value: "all_season" }
+  ],
+  silhouettes: [
+    { label: "修身", value: "fitted" },
+    { label: "合身", value: "regular" },
+    { label: "微宽松", value: "slightly_relaxed" },
+    { label: "宽松", value: "relaxed" },
+    { label: "直筒", value: "straight" },
+    { label: "A 字", value: "a_line" },
+    { label: "短款", value: "cropped" },
+    { label: "长款", value: "longline" },
+    { label: "高腰", value: "high_waist" },
+    { label: "其他", value: "other" }
+  ]
+};
+
 const recommendationLabels = {
   preferred: "优先推荐",
   normal: "正常推荐",
@@ -62,6 +98,99 @@ function cloneDraft(overrides) {
       ? overrides.sceneText
       : normalizeSceneTags(overrides && overrides.scene_tags).join("，")
   });
+}
+
+function hasDraftValue(value) {
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  return String(value || "").trim() !== "";
+}
+
+function normalizeOptionList(value, fallback) {
+  const source = Array.isArray(value) && value.length ? value : fallback || [];
+  return source
+    .map((item) => ({
+      label: String(item && item.label ? item.label : item && item.value ? item.value : "").trim(),
+      value: String(item && item.value ? item.value : "").trim()
+    }))
+    .filter((item) => item.label && item.value);
+}
+
+function normalizeWardrobeOptions(options) {
+  const source = options || {};
+  return {
+    categories: normalizeOptionList(source.categories, defaultWardrobeOptions.categories),
+    materials: normalizeOptionList(source.materials, defaultWardrobeOptions.materials),
+    seasons: normalizeOptionList(source.seasons, defaultWardrobeOptions.seasons),
+    silhouettes: normalizeOptionList(source.silhouettes, defaultWardrobeOptions.silhouettes)
+  };
+}
+
+function withEmptyOption(options) {
+  return [{ label: "不选择", value: "" }].concat(options || []);
+}
+
+function optionLabel(options, value, emptyLabel) {
+  const target = String(value || "").trim();
+  if (!target) {
+    return emptyLabel || "不选择";
+  }
+  const found = (options || []).find((item) => item.value === target);
+  return found ? found.label : target;
+}
+
+function optionIndex(options, value) {
+  const target = String(value || "").trim();
+  const index = (options || []).findIndex((item) => item.value === target);
+  return index >= 0 ? index : 0;
+}
+
+function matchOptionValue(options, value) {
+  const target = String(value || "").trim();
+  if (!target) {
+    return "";
+  }
+  const byValue = (options || []).find((item) => item.value === target);
+  if (byValue) {
+    return byValue.value;
+  }
+  const byLabel = (options || []).find((item) => item.label === target);
+  return byLabel ? byLabel.value : "";
+}
+
+function mergeRecognizedFieldsIntoDraft(draft, recognized, wardrobeOptions) {
+  const result = cloneDraft(draft || {});
+  const source = recognized || {};
+  const options = normalizeWardrobeOptions(wardrobeOptions);
+  [
+    "name",
+    "color",
+    "user_notes"
+  ].forEach((field) => {
+    if (!hasDraftValue(result[field]) && hasDraftValue(source[field])) {
+      result[field] = String(source[field]).trim();
+    }
+  });
+  [
+    ["category", options.categories],
+    ["silhouette", options.silhouettes],
+    ["material", options.materials],
+    ["season", options.seasons]
+  ].forEach(([field, optionList]) => {
+    const matched = matchOptionValue(optionList, source[field]);
+    if (!hasDraftValue(result[field]) && matched) {
+      result[field] = matched;
+    }
+  });
+
+  const recognizedSceneTags = normalizeSceneTags(source.scene_tags);
+  if (!hasDraftValue(result.sceneText) && !hasDraftValue(result.scene_tags) && recognizedSceneTags.length) {
+    result.scene_tags = recognizedSceneTags;
+    result.sceneText = recognizedSceneTags.join("，");
+  }
+
+  return result;
 }
 
 function normalizeWardrobeItems(response) {
@@ -287,8 +416,15 @@ module.exports = {
   categoryOptions,
   categoryLabels,
   recommendationLabels,
+  defaultWardrobeOptions,
   cloneDraft,
   normalizeSceneTags,
+  normalizeWardrobeOptions,
+  withEmptyOption,
+  optionLabel,
+  optionIndex,
+  matchOptionValue,
+  mergeRecognizedFieldsIntoDraft,
   normalizeWardrobeItems,
   decorateWardrobeItem,
   filterItems,

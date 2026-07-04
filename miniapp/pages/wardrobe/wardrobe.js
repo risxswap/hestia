@@ -17,7 +17,12 @@ const {
   imageFilesFromAsset,
   itemToDraft,
   categoryOptionsWithCounts,
-  styleLogicForItem
+  styleLogicForItem,
+  mergeRecognizedFieldsIntoDraft,
+  normalizeWardrobeOptions,
+  withEmptyOption,
+  optionLabel,
+  optionIndex
 } = wardrobeUtils;
 
 function getDataset(event) {
@@ -111,6 +116,27 @@ function nextWardrobeState(items, category) {
   };
 }
 
+function decorateDraftForOptions(draft, state) {
+  const source = draft || {};
+  const optionsState = state || {};
+  return Object.assign({}, source, {
+    categoryLabel: optionLabel(optionsState.editorCategoryOptions, source.category, "请选择"),
+    categoryIndex: optionIndex(optionsState.editorCategoryOptions, source.category),
+    materialLabel: optionLabel(optionsState.materialOptions, source.material, "不选择"),
+    materialIndex: optionIndex(optionsState.materialOptions, source.material),
+    seasonLabel: optionLabel(optionsState.seasonOptions, source.season, "不选择"),
+    seasonIndex: optionIndex(optionsState.seasonOptions, source.season),
+    silhouetteLabel: optionLabel(optionsState.silhouetteOptions, source.silhouette, "不选择"),
+    silhouetteIndex: optionIndex(optionsState.silhouetteOptions, source.silhouette)
+  });
+}
+
+function draftState(draft, state) {
+  return {
+    draft: decorateDraftForOptions(draft, state)
+  };
+}
+
 const wardrobePageConfig = {
   data: {
     loading: false,
@@ -121,14 +147,26 @@ const wardrobePageConfig = {
     priorityItems: [],
     gaps: [],
     categoryOptions: categoryOptionsWithCounts([]),
+    wardrobeOptions: normalizeWardrobeOptions(),
+    editorCategoryOptions: normalizeWardrobeOptions().categories,
+    materialOptions: withEmptyOption(normalizeWardrobeOptions().materials),
+    seasonOptions: withEmptyOption(normalizeWardrobeOptions().seasons),
+    silhouetteOptions: withEmptyOption(normalizeWardrobeOptions().silhouettes),
     activeCategory: "all",
     wardrobeDirty: false,
     editorVisible: false,
-    draft: cloneDraft(),
+    draft: decorateDraftForOptions(cloneDraft(), {
+      editorCategoryOptions: normalizeWardrobeOptions().categories,
+      materialOptions: withEmptyOption(normalizeWardrobeOptions().materials),
+      seasonOptions: withEmptyOption(normalizeWardrobeOptions().seasons),
+      silhouetteOptions: withEmptyOption(normalizeWardrobeOptions().silhouettes)
+    }),
     editingPublicID: "",
     imageFiles: [],
     imageUploading: false,
     imageUploadError: "",
+    imageRecognizing: false,
+    imageRecognizeError: "",
     imageGridConfig: {
       column: 4,
       width: 160,
@@ -149,17 +187,18 @@ const wardrobePageConfig = {
   async onShow() {
     const app = typeof getApp === "function" ? getApp() : null;
     const globalData = app && app.globalData ? app.globalData : {};
-    if (globalData.wardrobeDirty) {
+    const wasDirty = Boolean(globalData.wardrobeDirty || this.data.wardrobeDirty);
+    if (wasDirty) {
       this.setData({
         wardrobeDirty: true
       });
-      await this.loadWardrobe();
-      if (!this.data.errorMessage) {
-        globalData.wardrobeDirty = false;
-        this.setData({
-          wardrobeDirty: false
-        });
-      }
+    }
+    await this.loadWardrobe();
+    if (wasDirty && !this.data.errorMessage) {
+      globalData.wardrobeDirty = false;
+      this.setData({
+        wardrobeDirty: false
+      });
     }
     return Promise.resolve();
   },
@@ -171,12 +210,14 @@ const wardrobePageConfig = {
     });
 
     try {
+      const optionsRequest = typeof api.getWardrobeOptions === "function" ? api.getWardrobeOptions() : Promise.resolve(null);
       const reportRequest = typeof api.getLatestReport === "function" ? api.getLatestReport() : Promise.resolve(null);
       const itemRequest = typeof api.getWardrobeItems === "function" ? api.getWardrobeItems() : Promise.resolve({ items: [] });
-      const results = await Promise.all([itemRequest, reportRequest]);
+      const results = await Promise.all([itemRequest, reportRequest, optionsRequest]);
       const items = normalizeWardrobeItems(results[0]);
+      const optionsState = this.optionsState(results[2]);
 
-      this.setData(Object.assign({
+      this.setData(Object.assign({}, optionsState, draftState(this.data.draft, optionsState), {
         loading: false,
         gaps: normalizeWardrobeGaps(results[1])
       }, nextWardrobeState(items, this.data.activeCategory)));
@@ -190,6 +231,28 @@ const wardrobePageConfig = {
         gaps: [],
         errorMessage: error && error.message ? error.message : "读取核心衣橱失败"
       });
+    }
+  },
+
+  optionsState(rawOptions) {
+    const wardrobeOptions = normalizeWardrobeOptions(rawOptions);
+    return {
+      wardrobeOptions,
+      editorCategoryOptions: wardrobeOptions.categories,
+      materialOptions: withEmptyOption(wardrobeOptions.materials),
+      seasonOptions: withEmptyOption(wardrobeOptions.seasons),
+      silhouetteOptions: withEmptyOption(wardrobeOptions.silhouettes)
+    };
+  },
+
+  async loadWardrobeOptions() {
+    try {
+      const options = typeof api.getWardrobeOptions === "function" ? await api.getWardrobeOptions() : null;
+      this.setData(this.optionsState(options));
+      return options;
+    } catch (error) {
+      this.setData(this.optionsState(null));
+      return null;
     }
   },
 
@@ -248,12 +311,14 @@ const wardrobePageConfig = {
     this.setData({
       editorVisible: true,
       editingPublicID: "",
-      draft: cloneDraft({
+      draft: decorateDraftForOptions(cloneDraft({
         category
-      }),
+      }), this.data),
       imageFiles: [],
       imageUploading: false,
       imageUploadError: "",
+      imageRecognizing: false,
+      imageRecognizeError: "",
       errorMessage: ""
     });
   },
@@ -263,10 +328,12 @@ const wardrobePageConfig = {
     this.setData({
       editorVisible: false,
       editingPublicID: "",
-      draft: cloneDraft(),
+      draft: decorateDraftForOptions(cloneDraft(), this.data),
       imageFiles: [],
       imageUploading: false,
       imageUploadError: "",
+      imageRecognizing: false,
+      imageRecognizeError: "",
       errorMessage: ""
     });
     this._imageUploadPromise = null;
@@ -287,10 +354,12 @@ const wardrobePageConfig = {
     this.setData({
       editorVisible: true,
       editingPublicID: publicID,
-      draft: itemToDraft(item),
+      draft: decorateDraftForOptions(itemToDraft(item), this.data),
       imageFiles: imageFilesFromItem(item),
       imageUploading: false,
       imageUploadError: "",
+      imageRecognizing: false,
+      imageRecognizeError: "",
       errorMessage: ""
     });
   },
@@ -313,23 +382,25 @@ const wardrobePageConfig = {
 
     const uploadRunID = (this._imageUploadRunID || 0) + 1;
     this._imageUploadRunID = uploadRunID;
-    this._imageUploadPromise = api.uploadAssetToQiniu(file, {
+    this._imageUploadPromise = api.uploadFileToQiniu(file, {
       assetType: "wardrobe_item_photo"
     })
       .then((uploaded) => {
         if (this._imageUploadRunID !== uploadRunID) {
           return uploaded;
         }
-        const draft = Object.assign({}, this.data.draft, {
+        const draft = decorateDraftForOptions(Object.assign({}, this.data.draft, {
           primary_asset_public_id: uploaded && uploaded.asset_public_id ? uploaded.asset_public_id : ""
-        });
+        }), this.data);
         this.setData({
           draft,
           imageFiles: imageFilesFromAsset(uploaded),
           imageUploading: false,
-          imageUploadError: ""
+          imageUploadError: "",
+          imageRecognizeError: ""
         });
         this._imageUploadPromise = null;
+        this.applyUploadedWardrobeRecognition(uploaded, uploadRunID);
         return uploaded;
       })
       .catch((error) => {
@@ -340,7 +411,8 @@ const wardrobePageConfig = {
         this.setData({
           imageFiles: failedImageFiles(file, message),
           imageUploading: false,
-          imageUploadError: message
+          imageUploadError: message,
+          imageRecognizing: false
         });
         this._imageUploadPromise = null;
         return null;
@@ -356,10 +428,61 @@ const wardrobePageConfig = {
       imageFiles: [],
       imageUploading: false,
       imageUploadError: "",
-      draft: Object.assign({}, this.data.draft, {
+      imageRecognizing: false,
+      imageRecognizeError: "",
+      draft: decorateDraftForOptions(Object.assign({}, this.data.draft, {
         primary_asset_public_id: ""
-      })
+      }), this.data)
     });
+  },
+
+  async recognizeUploadedWardrobeImage(uploaded, uploadRunID) {
+    return this.applyUploadedWardrobeRecognition(uploaded, uploadRunID);
+  },
+
+  async applyUploadedWardrobeRecognition(uploaded, uploadRunID) {
+    const assetPublicID = uploaded && uploaded.asset_public_id ? uploaded.asset_public_id : "";
+    const confirmedFields = uploaded && uploaded.recognized_fields ? uploaded.recognized_fields : null;
+    if (!assetPublicID && !confirmedFields) {
+      return null;
+    }
+
+    const recognizeRunID = uploadRunID || this._imageUploadRunID || 0;
+    this.setData({
+      imageRecognizing: true,
+      imageRecognizeError: ""
+    });
+
+    try {
+      const recognized = confirmedFields || (typeof api.recognizeWardrobeItemImage === "function"
+        ? await api.recognizeWardrobeItemImage(assetPublicID)
+        : null);
+      if (this._imageUploadRunID !== recognizeRunID) {
+        return recognized;
+      }
+      if (!recognized) {
+        this.setData({
+          imageRecognizing: false,
+          imageRecognizeError: ""
+        });
+        return null;
+      }
+      this.setData({
+        draft: decorateDraftForOptions(mergeRecognizedFieldsIntoDraft(this.data.draft, recognized, this.data.wardrobeOptions), this.data),
+        imageRecognizing: false,
+        imageRecognizeError: ""
+      });
+      return recognized;
+    } catch (error) {
+      if (this._imageUploadRunID !== recognizeRunID) {
+        return null;
+      }
+      this.setData({
+        imageRecognizing: false,
+        imageRecognizeError: error && error.message ? error.message : "图片已上传，识别失败，可手动填写"
+      });
+      return null;
+    }
   },
 
   handleDraftInput(event) {
@@ -373,9 +496,22 @@ const wardrobePageConfig = {
     if (field === "sceneText") {
       draft.scene_tags = normalizeSceneTags(draft.sceneText);
     }
-    this.setData({
-      draft
-    });
+    this.setData(draftState(draft, this.data));
+  },
+
+  handleOptionChange(event) {
+    const dataset = getDataset(event);
+    const field = dataset.field;
+    const optionKey = dataset.optionKey;
+    if (!field || !optionKey) {
+      return;
+    }
+    const options = this.data[optionKey] || [];
+    const index = Number(getDetailValue(event));
+    const selected = options[index] || options[0] || { value: "" };
+    this.setData(draftState(Object.assign({}, this.data.draft, {
+      [field]: selected.value || ""
+    }), this.data));
   },
 
   handleSceneInput(event) {
@@ -384,18 +520,16 @@ const wardrobePageConfig = {
       sceneText,
       scene_tags: normalizeSceneTags(sceneText)
     });
-    this.setData({
-      draft
-    });
+    this.setData(draftState(draft, this.data));
   },
 
   handleRecommendationStatus(event) {
     const dataset = getDataset(event);
     const status = dataset.status || dataset.value || getDetailValue(event) || "normal";
     this.setData({
-      draft: Object.assign({}, this.data.draft, {
+      draft: decorateDraftForOptions(Object.assign({}, this.data.draft, {
         recommendation_status: status
-      })
+      }), this.data)
     });
   },
 
@@ -414,9 +548,9 @@ const wardrobePageConfig = {
     }
 
     this.setData({
-      draft: Object.assign({}, this.data.draft, {
+      draft: decorateDraftForOptions(Object.assign({}, this.data.draft, {
         is_core: value === true || value === "true" || value === 1 || value === "1"
-      })
+      }), this.data)
     });
   },
 
@@ -456,10 +590,12 @@ const wardrobePageConfig = {
         saving: false,
         editorVisible: false,
         editingPublicID: "",
-        draft: cloneDraft(),
+        draft: decorateDraftForOptions(cloneDraft(), this.data),
         imageFiles: [],
         imageUploading: false,
-        imageUploadError: ""
+        imageUploadError: "",
+        imageRecognizing: false,
+        imageRecognizeError: ""
       }, nextWardrobeState(nextItems, this.data.activeCategory)));
       showToast("已保存", "success");
     } catch (error) {
@@ -492,10 +628,12 @@ const wardrobePageConfig = {
         errorMessage: "",
         editorVisible: false,
         editingPublicID: "",
-        draft: cloneDraft(),
+        draft: decorateDraftForOptions(cloneDraft(), this.data),
         imageFiles: [],
         imageUploading: false,
-        imageUploadError: ""
+        imageUploadError: "",
+        imageRecognizing: false,
+        imageRecognizeError: ""
       }, nextWardrobeState(nextItems, this.data.activeCategory)));
       showToast("已删除", "success");
     } catch (error) {
@@ -526,6 +664,8 @@ if (typeof module !== "undefined") {
     itemToDraft,
     categoryOptionsWithCounts,
     styleLogicForItem,
+    normalizeWardrobeOptions,
+    mergeRecognizedFieldsIntoDraft,
     nextWardrobeState,
     wardrobePageConfig
   };

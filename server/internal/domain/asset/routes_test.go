@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -79,7 +80,7 @@ func (r *memoryRepo) FindByPublicID(_ context.Context, publicID string) (Asset, 
 }
 
 func TestUploadTokenGeneratesServerOwnedObjectKeyForSupportedAssetTypes(t *testing.T) {
-	router := newAuthenticatedAssetRouter(t, newMemoryRepo())
+	router := newAuthenticatedFileRouter(t, newMemoryRepo())
 
 	tests := map[string]string{
 		"wardrobe_item_photo": "wardrobe",
@@ -89,7 +90,7 @@ func TestUploadTokenGeneratesServerOwnedObjectKeyForSupportedAssetTypes(t *testi
 	}
 	for assetType, scope := range tests {
 		t.Run(assetType, func(t *testing.T) {
-			recorder := postJSON(t, router, "/api/user/assets/upload-token", map[string]any{
+			recorder := postJSON(t, router, "/api/user/files/upload-token", map[string]any{
 				"asset_type": assetType,
 				"mime_type":  "image/jpeg",
 				"file_size":  1024,
@@ -101,6 +102,9 @@ func TestUploadTokenGeneratesServerOwnedObjectKeyForSupportedAssetTypes(t *testi
 			data := responseData(t, recorder)
 			if data["asset_public_id"] == "" {
 				t.Fatalf("expected asset_public_id in response: %#v", data)
+			}
+			if data["file_public_id"] != data["asset_public_id"] {
+				t.Fatalf("expected file_public_id compatibility alias, got %#v", data)
 			}
 			publicID := data["asset_public_id"].(string)
 			expectedKey := "users/12/" + scope + "/" + publicID + ".jpg"
@@ -123,8 +127,86 @@ func TestUploadTokenGeneratesServerOwnedObjectKeyForSupportedAssetTypes(t *testi
 	}
 }
 
+func TestFileRoutesCreateUploadTokenAndConfirmWithRecognizedFields(t *testing.T) {
+	repo := newMemoryRepo()
+	options := defaultServiceOptions()
+	options.UploadConfirmer = UploadConfirmerFunc(func(_ context.Context, userID int64, upload ConfirmedUpload) (UploadConfirmResult, error) {
+		if userID != 12 || upload.FilePublicID != testAssetPublicID || upload.FileType != "wardrobe_item_photo" {
+			t.Fatalf("unexpected confirmed upload context: user=%d upload=%#v", userID, upload)
+		}
+		return UploadConfirmResult{
+			RecognizedFields: map[string]any{
+				"name":     "米白衬衫",
+				"category": "top",
+			},
+		}, nil
+	})
+	router := newAuthenticatedFileRouterWithOptions(t, repo, options)
+
+	tokenRecorder := postJSON(t, router, "/api/user/files/upload-token", map[string]any{
+		"asset_type": "wardrobe_item_photo",
+		"mime_type":  "image/jpeg",
+		"file_size":  2048,
+	})
+	if tokenRecorder.Code != http.StatusOK {
+		t.Fatalf("expected token status 200, got %d body=%s", tokenRecorder.Code, tokenRecorder.Body.String())
+	}
+	tokenData := responseData(t, tokenRecorder)
+	if tokenData["file_public_id"] == "" || tokenData["file_public_id"] != tokenData["asset_public_id"] {
+		t.Fatalf("expected file_public_id in token response: %#v", tokenData)
+	}
+
+	confirmRecorder := postJSON(t, router, "/api/user/files/confirm", map[string]any{
+		"asset_public_id": testAssetPublicID,
+		"bucket":          "private-assets",
+		"object_key":      "users/12/wardrobe/" + testAssetPublicID + ".jpg",
+		"mime_type":       "image/jpeg",
+		"file_size":       2048,
+		"asset_type":      "wardrobe_item_photo",
+	})
+	if confirmRecorder.Code != http.StatusOK {
+		t.Fatalf("expected confirm status 200, got %d body=%s", confirmRecorder.Code, confirmRecorder.Body.String())
+	}
+	confirmData := responseData(t, confirmRecorder)
+	if confirmData["file_public_id"] != testAssetPublicID || confirmData["file_type"] != "wardrobe_item_photo" {
+		t.Fatalf("expected file fields in confirm response: %#v", confirmData)
+	}
+	recognized, ok := confirmData["recognized_fields"].(map[string]any)
+	if !ok || recognized["name"] != "米白衬衫" || recognized["category"] != "top" {
+		t.Fatalf("expected recognized fields in confirm response: %#v", confirmData)
+	}
+}
+
+func TestFileConfirmKeepsUploadWhenPostConfirmRecognitionFails(t *testing.T) {
+	repo := newMemoryRepo()
+	options := defaultServiceOptions()
+	options.UploadConfirmer = UploadConfirmerFunc(func(_ context.Context, _ int64, _ ConfirmedUpload) (UploadConfirmResult, error) {
+		return UploadConfirmResult{}, errors.New("recognition unavailable")
+	})
+	router := newAuthenticatedFileRouterWithOptions(t, repo, options)
+
+	recorder := postJSON(t, router, "/api/user/files/confirm", map[string]any{
+		"asset_public_id": testAssetPublicID,
+		"bucket":          "private-assets",
+		"object_key":      "users/12/wardrobe/" + testAssetPublicID + ".jpg",
+		"mime_type":       "image/jpeg",
+		"file_size":       2048,
+		"asset_type":      "wardrobe_item_photo",
+	})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected confirm status 200 even when recognition fails, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	data := responseData(t, recorder)
+	if data["file_public_id"] != testAssetPublicID {
+		t.Fatalf("expected confirmed file response, got %#v", data)
+	}
+	if _, ok := data["recognized_fields"]; ok {
+		t.Fatalf("expected no recognized_fields when recognition fails, got %#v", data)
+	}
+}
+
 func TestUploadTokenRequiresAuthentication(t *testing.T) {
-	router := newAssetRouterWithoutAuth(t, newMemoryRepo(), ServiceOptions{
+	router := newFileRouterWithoutAuth(t, newMemoryRepo(), ServiceOptions{
 		Bucket:     "private-assets",
 		UploadHost: "https://upload.example.test",
 		UploadSigner: UploadSignerFunc(func(_ context.Context, req UploadSignRequest) (string, error) {
@@ -132,7 +214,7 @@ func TestUploadTokenRequiresAuthentication(t *testing.T) {
 		}),
 	})
 
-	recorder := postJSON(t, router, "/api/user/assets/upload-token", map[string]any{
+	recorder := postJSON(t, router, "/api/user/files/upload-token", map[string]any{
 		"asset_type": "wardrobe_item_photo",
 		"mime_type":  "image/jpeg",
 		"file_size":  1024,
@@ -201,9 +283,9 @@ func TestUploadTokenRejectsInvalidRequests(t *testing.T) {
 			if options.Bucket == "" {
 				options = defaultServiceOptions()
 			}
-			router := newAuthenticatedAssetRouterWithOptions(t, newMemoryRepo(), options)
+			router := newAuthenticatedFileRouterWithOptions(t, newMemoryRepo(), options)
 
-			recorder := postJSON(t, router, "/api/user/assets/upload-token", tt.body)
+			recorder := postJSON(t, router, "/api/user/files/upload-token", tt.body)
 
 			if recorder.Code != tt.statusCode {
 				t.Fatalf("expected status %d, got %d body=%s", tt.statusCode, recorder.Code, recorder.Body.String())
@@ -218,7 +300,7 @@ func TestUploadTokenRejectsInvalidRequests(t *testing.T) {
 
 func TestConfirmCreatesAssetAndIsIdempotent(t *testing.T) {
 	repo := newMemoryRepo()
-	router := newAuthenticatedAssetRouter(t, repo)
+	router := newAuthenticatedFileRouter(t, repo)
 
 	body := map[string]any{
 		"asset_public_id": "ast_abcdefghijklmnopqrstuvwxyz",
@@ -230,7 +312,7 @@ func TestConfirmCreatesAssetAndIsIdempotent(t *testing.T) {
 		"height":          480,
 		"asset_type":      "onboarding_photo",
 	}
-	first := postJSON(t, router, "/api/user/assets/confirm", body)
+	first := postJSON(t, router, "/api/user/files/confirm", body)
 	if first.Code != http.StatusOK {
 		t.Fatalf("expected first confirm status 200, got %d body=%s", first.Code, first.Body.String())
 	}
@@ -246,7 +328,7 @@ func TestConfirmCreatesAssetAndIsIdempotent(t *testing.T) {
 			t.Fatalf("confirm response exposed internal key %s: %#v", internalKey, firstData)
 		}
 	}
-	second := postJSON(t, router, "/api/user/assets/confirm", body)
+	second := postJSON(t, router, "/api/user/files/confirm", body)
 	if second.Code != http.StatusOK {
 		t.Fatalf("expected idempotent confirm status 200, got %d body=%s", second.Code, second.Body.String())
 	}
@@ -356,10 +438,10 @@ func TestConfirmRejectsInvalidRequestFields(t *testing.T) {
 			},
 		},
 	}
-	router := newAuthenticatedAssetRouter(t, newMemoryRepo())
+	router := newAuthenticatedFileRouter(t, newMemoryRepo())
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			recorder := postJSON(t, router, "/api/user/assets/confirm", tt.body)
+			recorder := postJSON(t, router, "/api/user/files/confirm", tt.body)
 
 			if recorder.Code != http.StatusBadRequest {
 				t.Fatalf("expected status 400, got %d body=%s", recorder.Code, recorder.Body.String())
@@ -375,9 +457,9 @@ func TestConfirmRejectsInvalidRequestFields(t *testing.T) {
 func TestConfirmRequiresConfiguredBucket(t *testing.T) {
 	options := defaultServiceOptions()
 	options.Bucket = ""
-	router := newAuthenticatedAssetRouterWithOptions(t, newMemoryRepo(), options)
+	router := newAuthenticatedFileRouterWithOptions(t, newMemoryRepo(), options)
 
-	recorder := postJSON(t, router, "/api/user/assets/confirm", map[string]any{
+	recorder := postJSON(t, router, "/api/user/files/confirm", map[string]any{
 		"asset_public_id": "ast_abcdefghijklmnopqrstuvwxyz",
 		"bucket":          "private-assets",
 		"object_key":      "users/12/onboarding/ast_abcdefghijklmnopqrstuvwxyz.png",
@@ -401,9 +483,9 @@ func TestConfirmNormalizesPrivateDomainScheme(t *testing.T) {
 	options.DownloadSigner = DownloadSignerFunc(func(_ context.Context, req DownloadSignRequest) (string, error) {
 		return req.PrivateDomain + "/" + req.ObjectKey, nil
 	})
-	router := newAuthenticatedAssetRouterWithOptions(t, newMemoryRepo(), options)
+	router := newAuthenticatedFileRouterWithOptions(t, newMemoryRepo(), options)
 
-	recorder := postJSON(t, router, "/api/user/assets/confirm", map[string]any{
+	recorder := postJSON(t, router, "/api/user/files/confirm", map[string]any{
 		"asset_public_id": "ast_abcdefghijklmnopqrstuvwxyz",
 		"bucket":          "private-assets",
 		"object_key":      "users/12/onboarding/ast_abcdefghijklmnopqrstuvwxyz.png",
@@ -456,9 +538,9 @@ func TestConfirmChecksObjectStatWhenCheckerIsConfigured(t *testing.T) {
 			repo := newMemoryRepo()
 			options := defaultServiceOptions()
 			options.ObjectStatChecker = tt.checker
-			router := newAuthenticatedAssetRouterWithOptions(t, repo, options)
+			router := newAuthenticatedFileRouterWithOptions(t, repo, options)
 
-			recorder := postJSON(t, router, "/api/user/assets/confirm", map[string]any{
+			recorder := postJSON(t, router, "/api/user/files/confirm", map[string]any{
 				"asset_public_id": "ast_abcdefghijklmnopqrstuvwxyz",
 				"bucket":          "private-assets",
 				"object_key":      "users/12/onboarding/ast_abcdefghijklmnopqrstuvwxyz.png",
@@ -491,10 +573,10 @@ func TestConfirmTreatsDuplicateCreateAsIdempotent(t *testing.T) {
 	}
 	repo.duplicateOnNextCreate = true
 	repo.missOnNextFind = true
-	router := newAuthenticatedAssetRouterWithOptions(t, repo, defaultServiceOptions())
+	router := newAuthenticatedFileRouterWithOptions(t, repo, defaultServiceOptions())
 	repo.byID[existing.PublicID] = existing
 
-	recorder := postJSON(t, router, "/api/user/assets/confirm", map[string]any{
+	recorder := postJSON(t, router, "/api/user/files/confirm", map[string]any{
 		"asset_public_id": "ast_bcdefghijklmnopqrstuvwxyza",
 		"bucket":          "private-assets",
 		"object_key":      "users/12/onboarding/ast_bcdefghijklmnopqrstuvwxyza.png",
@@ -523,9 +605,9 @@ func TestConfirmRejectsConflictingAssetOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed asset: %v", err)
 	}
-	router := newAuthenticatedAssetRouter(t, repo)
+	router := newAuthenticatedFileRouter(t, repo)
 
-	recorder := postJSON(t, router, "/api/user/assets/confirm", map[string]any{
+	recorder := postJSON(t, router, "/api/user/files/confirm", map[string]any{
 		"asset_public_id": "ast_cdefghijklmnopqrstuvwxyzab",
 		"bucket":          "private-assets",
 		"object_key":      "users/12/onboarding/ast_cdefghijklmnopqrstuvwxyzab.png",
@@ -543,30 +625,30 @@ func TestConfirmRejectsConflictingAssetOwnership(t *testing.T) {
 	}
 }
 
-func newAuthenticatedAssetRouter(t *testing.T, repo Repository) *gin.Engine {
+func newAuthenticatedFileRouter(t *testing.T, repo Repository) *gin.Engine {
 	t.Helper()
-	return newAuthenticatedAssetRouterWithOptions(t, repo, defaultServiceOptions())
+	return newAuthenticatedFileRouterWithOptions(t, repo, defaultServiceOptions())
 }
 
-func newAuthenticatedAssetRouterWithOptions(t *testing.T, repo Repository, options ServiceOptions) *gin.Engine {
+func newAuthenticatedFileRouterWithOptions(t *testing.T, repo Repository, options ServiceOptions) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	group := router.Group("/api/user/assets")
+	group := router.Group("/api/user/files")
 	group.Use(func(c *gin.Context) {
 		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
 		c.Next()
 	})
 	service := NewServiceWithOptions(repo, options)
-	RegisterUserRoutesWithService(group, service, nil)
+	RegisterFileRoutesWithService(group, service, nil)
 	return router
 }
 
-func newAssetRouterWithoutAuth(t *testing.T, repo Repository, options ServiceOptions) *gin.Engine {
+func newFileRouterWithoutAuth(t *testing.T, repo Repository, options ServiceOptions) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	RegisterUserRoutesWithService(router.Group("/api/user/assets"), NewServiceWithOptions(repo, options), nil)
+	RegisterFileRoutesWithService(router.Group("/api/user/files"), NewServiceWithOptions(repo, options), nil)
 	return router
 }
 

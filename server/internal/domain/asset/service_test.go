@@ -114,6 +114,14 @@ func TestNewServiceWithOptionsNormalizesAssetURLsToHTTPS(t *testing.T) {
 	}
 }
 
+func TestNewServiceWithOptionsDefaultsQiniuUploadHost(t *testing.T) {
+	service := NewServiceWithOptions(&captureRepo{}, ServiceOptions{})
+
+	if service.options.UploadHost != "https://upload.qiniup.com" {
+		t.Fatalf("expected default qiniu upload host, got %q", service.options.UploadHost)
+	}
+}
+
 func qboxTestCredentials() *qbox.Mac {
 	return qbox.NewMac("test-ak", "test-sk")
 }

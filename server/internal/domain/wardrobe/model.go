@@ -28,6 +28,18 @@ type Image struct {
 	URL           string `json:"url,omitempty"`
 }
 
+type OptionItem struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+type WardrobeOptions struct {
+	Categories  []OptionItem `json:"categories"`
+	Materials   []OptionItem `json:"materials"`
+	Seasons     []OptionItem `json:"seasons"`
+	Silhouettes []OptionItem `json:"silhouettes"`
+}
+
 type Input struct {
 	Name       string
 	Category   string
@@ -75,4 +87,21 @@ type ListFilter struct {
 type AdviceContextFilter struct {
 	Scene string
 	Limit int
+}
+
+type RecognizeImageInput struct {
+	AssetPublicID string `json:"asset_public_id"`
+	ImageURL      string `json:"image_url,omitempty"`
+}
+
+type RecognizedItemFields struct {
+	Name       string   `json:"name,omitempty"`
+	Category   string   `json:"category,omitempty"`
+	Color      string   `json:"color,omitempty"`
+	Silhouette string   `json:"silhouette,omitempty"`
+	Material   string   `json:"material,omitempty"`
+	Season     string   `json:"season,omitempty"`
+	SceneTags  []string `json:"scene_tags,omitempty"`
+	UserNotes  string   `json:"user_notes,omitempty"`
+	Confidence float64  `json:"confidence,omitempty"`
 }

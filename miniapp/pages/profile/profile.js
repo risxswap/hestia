@@ -233,7 +233,10 @@ const profilePageConfig = {
     preferencesDraft: Object.assign({}, emptyPreferencesDraft)
   },
 
-  onLoad() {
+  onShow() {
+    if (this.data.savingProfile || this.data.savingPreferences) {
+      return Promise.resolve();
+    }
     return this.loadProfile();
   },
 
