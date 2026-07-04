@@ -10,6 +10,13 @@
   gap: 16rpx;
 }
 
+.detail-nav-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12rpx;
+  min-width: 0;
+}
+
 .nav-button {
   min-width: 156rpx;
   padding: 0 24rpx;

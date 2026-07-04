@@ -874,7 +874,7 @@ async function main() {
   assert(wardrobeInstance.data.imageUploading === true, "wardrobe remove guard should start from uploading state");
   wardrobe.config.handleImageRemove.call(wardrobeInstance);
   assert(wardrobeInstance.data.imageUploading === false, "wardrobe image remove should clear uploading state");
-  wardrobeUploads[1].resolve({
+  wardrobeUploads[2].resolve({
     asset_public_id: "ast_removed",
     object_key: "users/u1/assets/ast_removed.jpg"
   });
@@ -1233,6 +1233,7 @@ async function main() {
   assert(detailMarkup.includes("搭配逻辑"), "wardrobe detail should render style logic section");
   assert(detailMarkup.includes("结构化档案"), "wardrobe detail should render structured profile section");
   assert(detailMarkup.includes("最近反馈"), "wardrobe detail should render recent feedback section");
+  assert(detailMarkup.includes("detail-delete-button"), "wardrobe detail should expose delete outside edit mode");
   assert(detailMarkup.includes("<t-upload"), "wardrobe detail editor should render TDesign upload block");
   assert(detailMarkup.includes("mediaType=\"{{imageMediaType}}\""), "wardrobe detail upload should restrict media type to image");
   assert(detailMarkup.includes("gridConfig=\"{{imageGridConfig}}\""), "wardrobe detail upload should pass TDesign gridConfig prop");
