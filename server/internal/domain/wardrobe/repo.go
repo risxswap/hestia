@@ -102,7 +102,7 @@ SELECT `+"`key`, `value`"+`
 FROM system_configs
 WHERE `+"`group`"+` = ?
   AND status = ?
-  AND `+"`key`"+` IN ('categories', 'materials', 'seasons', 'silhouettes')
+  AND `+"`key`"+` IN ('categories', 'colors', 'materials', 'seasons', 'silhouettes')
 `, "wardrobe.item_options", StatusActive); err != nil {
 		return WardrobeOptions{}, err
 	}
@@ -116,6 +116,8 @@ WHERE `+"`group`"+` = ?
 		switch row.Key {
 		case "categories":
 			options.Categories = items
+		case "colors":
+			options.Colors = items
 		case "materials":
 			options.Materials = items
 		case "seasons":
@@ -685,22 +687,18 @@ type systemConfigOptionRow struct {
 	Value []byte `db:"value"`
 }
 
-func parseOptionItems(raw []byte) ([]OptionItem, error) {
-	var items []OptionItem
+func parseOptionItems(raw []byte) ([]string, error) {
+	var items []string
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil, err
 	}
-	result := make([]OptionItem, 0, len(items))
+	result := make([]string, 0, len(items))
 	for _, item := range items {
-		label := strings.TrimSpace(item.Label)
-		value := strings.TrimSpace(item.Value)
-		if label == "" || value == "" {
+		value := strings.TrimSpace(item)
+		if value == "" {
 			continue
 		}
-		result = append(result, OptionItem{
-			Label: label,
-			Value: value,
-		})
+		result = append(result, value)
 	}
 	return result, nil
 }

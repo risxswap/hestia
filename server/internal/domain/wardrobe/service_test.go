@@ -81,7 +81,7 @@ func TestRecognizeItemImageTrimsAndNormalizesFields(t *testing.T) {
 		capturedInput = input
 		return RecognizedItemFields{
 			Name:       " 米白针织开衫 ",
-			Category:   " outerwear ",
+			Category:   " 外套 ",
 			Color:      " 米白 ",
 			Silhouette: " 微宽松 ",
 			Material:   " 针织 ",
@@ -106,7 +106,7 @@ func TestRecognizeItemImageTrimsAndNormalizesFields(t *testing.T) {
 		t.Fatalf("expected signer to receive wardrobe asset object key, got %q", signer.objectKey)
 	}
 	if result.Name != "米白针织开衫" ||
-		result.Category != "outerwear" ||
+		result.Category != "外套" ||
 		result.Color != "米白" ||
 		result.Silhouette != "微宽松" ||
 		result.Material != "针织" ||
@@ -129,7 +129,7 @@ func TestRecognizeAndApplyItemImageUpdatesFieldsAndStatus(t *testing.T) {
 			PublicID:             "wdi_pending",
 			UserID:               12,
 			Name:                 "识别中",
-			Category:             "other",
+			Category:             "其他",
 			RecognitionStatus:    RecognitionStatusPending,
 			RecommendationStatus: RecommendationStatusNormal,
 			Status:               StatusActive,
@@ -145,7 +145,7 @@ func TestRecognizeAndApplyItemImageUpdatesFieldsAndStatus(t *testing.T) {
 	service.SetImageRecognizer(recognizeImageFunc(func(_ context.Context, _ int64, _ RecognizeImageInput) (RecognizedItemFields, error) {
 		return RecognizedItemFields{
 			Name:       "米白针织开衫",
-			Category:   "outerwear",
+			Category:   "外套",
 			Color:      "米白",
 			Silhouette: "微宽松",
 			Material:   "针织",
@@ -160,7 +160,7 @@ func TestRecognizeAndApplyItemImageUpdatesFieldsAndStatus(t *testing.T) {
 		t.Fatalf("recognize and apply: %v", err)
 	}
 
-	if item.Name != "米白针织开衫" || item.Category != "outerwear" || item.RecognitionStatus != RecognitionStatusSucceeded {
+	if item.Name != "米白针织开衫" || item.Category != "外套" || item.RecognitionStatus != RecognitionStatusSucceeded {
 		t.Fatalf("expected recognized item fields applied, got %#v", item)
 	}
 	if repo.lastUpdateInput.Name == nil || *repo.lastUpdateInput.Name != "米白针织开衫" {
@@ -177,7 +177,7 @@ func TestRecognizeAndApplyItemImageMarksFailedOnRecognitionError(t *testing.T) {
 			PublicID:             "wdi_pending",
 			UserID:               12,
 			Name:                 "识别中",
-			Category:             "other",
+			Category:             "其他",
 			RecognitionStatus:    RecognitionStatusPending,
 			RecommendationStatus: RecommendationStatusNormal,
 			Status:               StatusActive,
@@ -240,7 +240,7 @@ func TestLLMImageRecognizerParsesJSONFields(t *testing.T) {
 		if len(input.Messages) > 0 {
 			prompt = input.Messages[0].Content
 		}
-		return llm.Response{Text: "```json\n{\"name\":\"米白衬衫\",\"category\":\"top\",\"scene_tags\":[\"通勤\"],\"confidence\":0.66}\n```"}, nil
+		return llm.Response{Text: "```json\n{\"name\":\"米白衬衫\",\"category\":\"上装\",\"scene_tags\":[\"通勤\"],\"confidence\":0.66}\n```"}, nil
 	}))
 
 	result, err := recognizer.RecognizeWardrobeItemImage(context.Background(), 12, RecognizeImageInput{
@@ -260,7 +260,7 @@ func TestLLMImageRecognizerParsesJSONFields(t *testing.T) {
 	if !strings.Contains(prompt, "ast_primary") || !strings.Contains(prompt, "不要输出身材") {
 		t.Fatalf("expected safe prompt with asset id, got %q", prompt)
 	}
-	if result.Name != "米白衬衫" || result.Category != "top" || len(result.SceneTags) != 1 || result.Confidence != 0.66 {
+	if result.Name != "米白衬衫" || result.Category != "上装" || len(result.SceneTags) != 1 || result.Confidence != 0.66 {
 		t.Fatalf("expected parsed recognized fields, got %#v", result)
 	}
 }
@@ -407,7 +407,7 @@ func TestCreateCoreItemsDefaultsRecommendationStatusNormal(t *testing.T) {
 	repo := &captureWardrobeRepo{}
 	service := NewService(repo)
 
-	_, err := service.CreateCoreItems(context.Background(), 12, []Input{{Name: " 米白衬衫 ", Category: "top"}})
+	_, err := service.CreateCoreItems(context.Background(), 12, []Input{{Name: " 米白衬衫 ", Category: "上装"}})
 	if err != nil {
 		t.Fatalf("create core items: %v", err)
 	}
@@ -426,7 +426,7 @@ func TestCreateItemRejectsInvalidRecommendationStatus(t *testing.T) {
 	service := NewService(&captureWardrobeRepo{})
 	_, err := service.CreateItem(context.Background(), 12, CreateInput{
 		Name:                 "黑色西装",
-		Category:             "outerwear",
+		Category:             "外套",
 		RecommendationStatus: "hidden",
 	})
 	if err == nil {
@@ -451,7 +451,7 @@ func TestCreateItemTrimsAndDefaultsFields(t *testing.T) {
 
 	item, err := service.CreateItem(context.Background(), 12, CreateInput{
 		Name:                 " 黑色西装 ",
-		Category:             " top ",
+		Category:             " 上装 ",
 		Color:                " 黑色 ",
 		SceneTags:            []string{" 通勤 ", "", " 晚宴 "},
 		UserNotes:            " 可配白衬衫 ",
@@ -464,8 +464,8 @@ func TestCreateItemTrimsAndDefaultsFields(t *testing.T) {
 	if item.Name != "黑色西装" {
 		t.Fatalf("expected trimmed name, got %q", item.Name)
 	}
-	if item.Category != "top" {
-		t.Fatalf("expected trimmed category top, got %q", item.Category)
+	if item.Category != "上装" {
+		t.Fatalf("expected trimmed category 上装, got %q", item.Category)
 	}
 	if item.RecommendationStatus != RecommendationStatusNormal {
 		t.Fatalf("expected default recommendation status normal, got %q", item.RecommendationStatus)
@@ -497,7 +497,7 @@ func TestCreateItemSupportsMultipleUploadedAssetsAndStartsRecognitionPending(t *
 		t.Fatalf("create item from assets: %v", err)
 	}
 
-	if item.Name != "识别中" || item.Category != "other" {
+	if item.Name != "识别中" || item.Category != "其他" {
 		t.Fatalf("expected placeholder item while recognizing, got name=%q category=%q", item.Name, item.Category)
 	}
 	if item.RecognitionStatus != RecognitionStatusPending {
@@ -517,48 +517,46 @@ func TestCreateItemSupportsMultipleUploadedAssetsAndStartsRecognitionPending(t *
 	}
 }
 
-func TestCreateItemRejectsInvalidConfiguredOption(t *testing.T) {
+func TestCreateItemAllowsCustomSuggestedFields(t *testing.T) {
 	service := NewService(&captureWardrobeRepo{
 		options: WardrobeOptions{
-			Categories:  []OptionItem{{Label: "上装", Value: "top"}},
-			Materials:   []OptionItem{{Label: "棉", Value: "cotton"}},
-			Seasons:     []OptionItem{{Label: "春秋", Value: "spring_autumn"}},
-			Silhouettes: []OptionItem{{Label: "微宽松", Value: "slightly_relaxed"}},
+			Categories:  []string{"上装"},
+			Materials:   []string{"棉"},
+			Seasons:     []string{"春秋"},
+			Silhouettes: []string{"微宽松"},
 		},
 	})
 
-	_, err := service.CreateItem(context.Background(), 12, CreateInput{
-		Name:     "黑色西装",
-		Category: "outerwear",
+	item, err := service.CreateItem(context.Background(), 12, CreateInput{
+		Name:       "黑色西装",
+		Category:   "定制分类",
+		Color:      "雾霾蓝",
+		Material:   "丝绒",
+		Season:     "梅雨季",
+		Silhouette: "茧型",
 	})
-	if err != ErrInvalidWardrobeOption {
-		t.Fatalf("expected ErrInvalidWardrobeOption for invalid category, got %v", err)
+	if err != nil {
+		t.Fatalf("expected custom suggested fields to pass, got %v", err)
 	}
-
-	_, err = service.CreateItem(context.Background(), 12, CreateInput{
-		Name:     "米白衬衫",
-		Category: "top",
-		Material: "silk",
-	})
-	if err != ErrInvalidWardrobeOption {
-		t.Fatalf("expected ErrInvalidWardrobeOption for invalid material, got %v", err)
+	if item.Category != "定制分类" || item.Material != "丝绒" || item.Season != "梅雨季" || item.Silhouette != "茧型" {
+		t.Fatalf("expected custom fields saved, got %#v", item)
 	}
 }
 
 func TestCreateItemAllowsEmptyOptionalConfiguredOptions(t *testing.T) {
 	repo := &captureWardrobeRepo{
 		options: WardrobeOptions{
-			Categories:  []OptionItem{{Label: "上装", Value: "top"}},
-			Materials:   []OptionItem{{Label: "棉", Value: "cotton"}},
-			Seasons:     []OptionItem{{Label: "春秋", Value: "spring_autumn"}},
-			Silhouettes: []OptionItem{{Label: "微宽松", Value: "slightly_relaxed"}},
+			Categories:  []string{"上装"},
+			Materials:   []string{"棉"},
+			Seasons:     []string{"春秋"},
+			Silhouettes: []string{"微宽松"},
 		},
 	}
 	service := NewService(repo)
 
 	_, err := service.CreateItem(context.Background(), 12, CreateInput{
 		Name:     "米白衬衫",
-		Category: "top",
+		Category: "上装",
 	})
 	if err != nil {
 		t.Fatalf("expected empty optional options to pass, got %v", err)
@@ -656,7 +654,7 @@ func TestWardrobeAssetRowEligibilityRequiresWardrobeUploadScope(t *testing.T) {
 
 func TestCreateItemReturnsUnsupportedWhenRepoDoesNotSupportItems(t *testing.T) {
 	service := NewService(coreOnlyWardrobeRepo{})
-	_, err := service.CreateItem(context.Background(), 12, CreateInput{Name: "黑色西装", Category: "top"})
+	_, err := service.CreateItem(context.Background(), 12, CreateInput{Name: "黑色西装", Category: "上装"})
 	if err != ErrRepositoryUnsupported {
 		t.Fatalf("expected ErrRepositoryUnsupported, got %v", err)
 	}
@@ -664,7 +662,7 @@ func TestCreateItemReturnsUnsupportedWhenRepoDoesNotSupportItems(t *testing.T) {
 
 func TestUpdateItemTrimsNameRecommendationStatusAndSceneTags(t *testing.T) {
 	repo := &captureWardrobeRepo{items: []Item{
-		{PublicID: "wdi_blazer", UserID: 12, Name: "黑色西装", Category: "outerwear", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true},
+		{PublicID: "wdi_blazer", UserID: 12, Name: "黑色西装", Category: "外套", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true},
 	}}
 	service := NewService(repo)
 
@@ -696,7 +694,7 @@ func TestUpdateItemTrimsNameRecommendationStatusAndSceneTags(t *testing.T) {
 
 func TestUpdateItemRejectsEmptyNameWithSentinelError(t *testing.T) {
 	service := NewService(&captureWardrobeRepo{items: []Item{
-		{PublicID: "wdi_blazer", UserID: 12, Name: "黑色西装", Category: "outerwear", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true},
+		{PublicID: "wdi_blazer", UserID: 12, Name: "黑色西装", Category: "外套", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true},
 	}})
 
 	name := "   "
@@ -708,7 +706,7 @@ func TestUpdateItemRejectsEmptyNameWithSentinelError(t *testing.T) {
 
 func TestUpdateItemRejectsWhenRecognitionPending(t *testing.T) {
 	service := NewService(&captureWardrobeRepo{items: []Item{
-		{PublicID: "wdi_pending", UserID: 12, Name: "识别中", Category: "other", RecognitionStatus: RecognitionStatusPending, RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true},
+		{PublicID: "wdi_pending", UserID: 12, Name: "识别中", Category: "其他", RecognitionStatus: RecognitionStatusPending, RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true},
 	}})
 
 	name := "米白衬衫"
@@ -721,11 +719,11 @@ func TestUpdateItemRejectsWhenRecognitionPending(t *testing.T) {
 func TestAdviceContextExcludesPausedAndSortsPreferredFirst(t *testing.T) {
 	now := time.Now()
 	repo := &captureWardrobeRepo{items: []Item{
-		{PublicID: "wdi_normal", UserID: 12, Name: "蓝色牛仔裤", Category: "bottom", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true, UpdatedAt: now.Add(-time.Hour)},
+		{PublicID: "wdi_normal", UserID: 12, Name: "蓝色牛仔裤", Category: "下装", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true, UpdatedAt: now.Add(-time.Hour)},
 		{PublicID: "wdi_paused", UserID: 12, Name: "红色长裙", Category: "dress", RecommendationStatus: RecommendationStatusPaused, Status: StatusActive, IsCore: true, UpdatedAt: now},
-		{PublicID: "wdi_inactive", UserID: 12, Name: "旧外套", Category: "outerwear", RecommendationStatus: RecommendationStatusPreferred, Status: "inactive", IsCore: true, SceneTags: []string{"通勤"}, UpdatedAt: now.Add(2 * time.Hour)},
-		{PublicID: "wdi_deleted", UserID: 12, Name: "灰色短外套", Category: "outerwear", RecommendationStatus: RecommendationStatusPreferred, Status: StatusDeleted, IsCore: true, SceneTags: []string{"通勤"}, UpdatedAt: now.Add(time.Hour)},
-		{PublicID: "wdi_preferred", UserID: 12, Name: "米白衬衫", Category: "top", RecommendationStatus: RecommendationStatusPreferred, Status: StatusActive, IsCore: true, SceneTags: []string{"通勤"}, UpdatedAt: now.Add(-2 * time.Hour)},
+		{PublicID: "wdi_inactive", UserID: 12, Name: "旧外套", Category: "外套", RecommendationStatus: RecommendationStatusPreferred, Status: "inactive", IsCore: true, SceneTags: []string{"通勤"}, UpdatedAt: now.Add(2 * time.Hour)},
+		{PublicID: "wdi_deleted", UserID: 12, Name: "灰色短外套", Category: "外套", RecommendationStatus: RecommendationStatusPreferred, Status: StatusDeleted, IsCore: true, SceneTags: []string{"通勤"}, UpdatedAt: now.Add(time.Hour)},
+		{PublicID: "wdi_preferred", UserID: 12, Name: "米白衬衫", Category: "上装", RecommendationStatus: RecommendationStatusPreferred, Status: StatusActive, IsCore: true, SceneTags: []string{"通勤"}, UpdatedAt: now.Add(-2 * time.Hour)},
 	}}
 	service := NewService(repo)
 
@@ -749,9 +747,9 @@ func TestAdviceContextExcludesPausedAndSortsPreferredFirst(t *testing.T) {
 func TestAdviceContextAppliesLimitAndSortsCoreBeforeScene(t *testing.T) {
 	now := time.Now()
 	repo := &captureWardrobeRepo{items: []Item{
-		{PublicID: "wdi_noncore_scene", UserID: 12, Name: "浅色围巾", Category: "accessory", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: false, SceneTags: []string{"通勤"}, UpdatedAt: now.Add(2 * time.Hour)},
-		{PublicID: "wdi_core_no_scene", UserID: 12, Name: "直筒牛仔裤", Category: "bottom", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true, UpdatedAt: now},
-		{PublicID: "wdi_other", UserID: 12, Name: "黑色乐福鞋", Category: "shoes", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: false, UpdatedAt: now.Add(time.Hour)},
+		{PublicID: "wdi_noncore_scene", UserID: 12, Name: "浅色围巾", Category: "配饰", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: false, SceneTags: []string{"通勤"}, UpdatedAt: now.Add(2 * time.Hour)},
+		{PublicID: "wdi_core_no_scene", UserID: 12, Name: "直筒牛仔裤", Category: "下装", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true, UpdatedAt: now},
+		{PublicID: "wdi_other", UserID: 12, Name: "黑色乐福鞋", Category: "鞋", RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: false, UpdatedAt: now.Add(time.Hour)},
 	}}
 	service := NewService(repo)
 

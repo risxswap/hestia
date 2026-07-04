@@ -127,11 +127,11 @@ func buildWardrobeGaps(items []WardrobeItemInput) []WardrobeGap {
 	hasOuterwear := false
 	hasShoe := false
 	for _, item := range items {
-		category := strings.ToLower(strings.TrimSpace(item.Category))
-		if category == "outerwear" || strings.Contains(item.Name, "外套") || strings.Contains(item.Name, "西装") {
+		category := strings.TrimSpace(item.Category)
+		if category == "外套" || strings.Contains(item.Name, "外套") || strings.Contains(item.Name, "西装") {
 			hasOuterwear = true
 		}
-		if category == "shoes" || strings.Contains(item.Name, "鞋") {
+		if category == "鞋" || strings.Contains(item.Name, "鞋") {
 			hasShoe = true
 		}
 	}

@@ -13,8 +13,8 @@ func TestRuleReportGeneratorBuildsActionableInitialReport(t *testing.T) {
 		Avoidances: []string{"过度甜美", "显拖沓"},
 		Scenarios:  []string{"工作日通勤", "周末约会"},
 		WardrobeItems: []WardrobeItemInput{
-			{Name: "米白衬衫", Category: "top", Color: "米白", Silhouette: "微宽松"},
-			{Name: "直筒牛仔裤", Category: "bottom", Color: "蓝色", Silhouette: "直筒"},
+			{Name: "米白衬衫", Category: "上装", Color: "米白", Silhouette: "微宽松"},
+			{Name: "直筒牛仔裤", Category: "下装", Color: "蓝色", Silhouette: "直筒"},
 		},
 		ReferenceStyles: []string{"刘诗诗"},
 	})

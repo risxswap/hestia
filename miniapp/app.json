@@ -4,6 +4,7 @@
     "pages/advisor/advisor",
     "pages/wardrobe/wardrobe",
     "pages/wardrobe-detail/wardrobe-detail",
+    "pages/wardrobe-edit/wardrobe-edit",
     "pages/profile/profile",
     "pages/report/report",
     "pages/onboarding/onboarding"

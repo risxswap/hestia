@@ -31,16 +31,12 @@ type Image struct {
 	OriginalURL   string `json:"original_url,omitempty"`
 }
 
-type OptionItem struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
-}
-
 type WardrobeOptions struct {
-	Categories  []OptionItem `json:"categories"`
-	Materials   []OptionItem `json:"materials"`
-	Seasons     []OptionItem `json:"seasons"`
-	Silhouettes []OptionItem `json:"silhouettes"`
+	Categories  []string `json:"categories"`
+	Colors      []string `json:"colors"`
+	Materials   []string `json:"materials"`
+	Seasons     []string `json:"seasons"`
+	Silhouettes []string `json:"silhouettes"`
 }
 
 type Input struct {

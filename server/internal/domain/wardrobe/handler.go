@@ -161,8 +161,6 @@ func (h *Handler) writeError(c *gin.Context, err error, logMessage string, userI
 		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_item", "单品名称不能为空")
 	case errors.Is(err, ErrInvalidPrimaryAsset):
 		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_primary_asset", "主图资产不可用于衣橱")
-	case errors.Is(err, ErrInvalidWardrobeOption):
-		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_option", "衣服字段选项不支持")
 	case errors.Is(err, ErrImageRecognizerUnavailable):
 		response.Error(c, http.StatusInternalServerError, "wardrobe.image_recognizer_unavailable", "图片识别暂不可用")
 	case errors.Is(err, ErrItemNotFound):

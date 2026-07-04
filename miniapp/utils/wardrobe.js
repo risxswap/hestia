@@ -1,14 +1,14 @@
 const categoryOptions = [
   { label: "全部", value: "all" },
-  { label: "上装", value: "top" },
-  { label: "下装", value: "bottom" },
-  { label: "外套", value: "outerwear" },
-  { label: "鞋", value: "shoes" },
-  { label: "包", value: "bag" },
-  { label: "配饰", value: "accessory" },
-  { label: "运动", value: "sport" },
-  { label: "家居", value: "home" },
-  { label: "其他", value: "other" }
+  { label: "上装", value: "上装" },
+  { label: "下装", value: "下装" },
+  { label: "外套", value: "外套" },
+  { label: "鞋", value: "鞋" },
+  { label: "包", value: "包" },
+  { label: "配饰", value: "配饰" },
+  { label: "运动", value: "运动" },
+  { label: "家居", value: "家居" },
+  { label: "其他", value: "其他" }
 ];
 
 const categoryLabels = categoryOptions.reduce((result, option) => {
@@ -17,39 +17,11 @@ const categoryLabels = categoryOptions.reduce((result, option) => {
 }, {});
 
 const defaultWardrobeOptions = {
-  categories: categoryOptions.filter((option) => option.value !== "all"),
-  materials: [
-    { label: "棉", value: "cotton" },
-    { label: "亚麻", value: "linen" },
-    { label: "羊毛", value: "wool" },
-    { label: "针织", value: "knit" },
-    { label: "牛仔", value: "denim" },
-    { label: "真丝", value: "silk" },
-    { label: "皮革", value: "leather" },
-    { label: "聚酯纤维", value: "polyester" },
-    { label: "混纺", value: "blend" },
-    { label: "其他", value: "other" }
-  ],
-  seasons: [
-    { label: "春夏", value: "spring_summer" },
-    { label: "春秋", value: "spring_autumn" },
-    { label: "秋冬", value: "autumn_winter" },
-    { label: "夏季", value: "summer" },
-    { label: "冬季", value: "winter" },
-    { label: "四季", value: "all_season" }
-  ],
-  silhouettes: [
-    { label: "修身", value: "fitted" },
-    { label: "合身", value: "regular" },
-    { label: "微宽松", value: "slightly_relaxed" },
-    { label: "宽松", value: "relaxed" },
-    { label: "直筒", value: "straight" },
-    { label: "A 字", value: "a_line" },
-    { label: "短款", value: "cropped" },
-    { label: "长款", value: "longline" },
-    { label: "高腰", value: "high_waist" },
-    { label: "其他", value: "other" }
-  ]
+  categories: ["上装", "下装", "外套", "鞋", "包", "配饰", "运动", "家居", "其他"],
+  colors: ["黑色", "白色", "米白", "灰色", "深蓝", "浅蓝", "棕色", "卡其", "红色", "绿色", "其他"],
+  materials: ["棉", "亚麻", "羊毛", "针织", "牛仔", "真丝", "皮革", "聚酯纤维", "混纺", "其他"],
+  seasons: ["春夏", "春秋", "秋冬", "夏季", "冬季", "四季"],
+  silhouettes: ["修身", "合身", "微宽松", "宽松", "直筒", "A 字", "短款", "长款", "高腰", "其他"]
 };
 
 const recommendationLabels = {
@@ -60,7 +32,7 @@ const recommendationLabels = {
 
 const emptyDraft = {
   name: "",
-  category: "top",
+  category: "上装",
   color: "",
   silhouette: "",
   material: "",
@@ -111,10 +83,10 @@ function hasDraftValue(value) {
 function normalizeOptionList(value, fallback) {
   const source = Array.isArray(value) && value.length ? value : fallback || [];
   return source
-    .map((item) => ({
-      label: String(item && item.label ? item.label : item && item.value ? item.value : "").trim(),
-      value: String(item && item.value ? item.value : "").trim()
-    }))
+    .map((item) => {
+      const value = String(typeof item === "string" ? item : item && item.value ? item.value : "").trim();
+      return { label: value, value };
+    })
     .filter((item) => item.label && item.value);
 }
 
@@ -122,6 +94,7 @@ function normalizeWardrobeOptions(options) {
   const source = options || {};
   return {
     categories: normalizeOptionList(source.categories, defaultWardrobeOptions.categories),
+    colors: normalizeOptionList(source.colors, defaultWardrobeOptions.colors),
     materials: normalizeOptionList(source.materials, defaultWardrobeOptions.materials),
     seasons: normalizeOptionList(source.seasons, defaultWardrobeOptions.seasons),
     silhouettes: normalizeOptionList(source.silhouettes, defaultWardrobeOptions.silhouettes)
@@ -156,8 +129,7 @@ function matchOptionValue(options, value) {
   if (byValue) {
     return byValue.value;
   }
-  const byLabel = (options || []).find((item) => item.label === target);
-  return byLabel ? byLabel.value : "";
+  return "";
 }
 
 function mergeRecognizedFieldsIntoDraft(draft, recognized, wardrobeOptions) {
@@ -431,7 +403,7 @@ function itemToDraft(item) {
   const decorated = decorateWardrobeItem(item);
   return cloneDraft({
     name: decorated.name,
-    category: decorated.category || "top",
+    category: decorated.category || "上装",
     color: decorated.color,
     silhouette: decorated.silhouette,
     material: decorated.material,

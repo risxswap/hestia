@@ -179,7 +179,7 @@ function confirmRecognizeOverwrite() {
   });
 }
 
-const wardrobeDetailPageConfig = {
+const wardrobeEditPageConfig = {
   data: {
     loading: false,
     saving: false,
@@ -259,6 +259,14 @@ const wardrobeDetailPageConfig = {
       this.setData(Object.assign({}, optionState, {
         loading: false,
         item,
+        editingPublicID: item.public_id,
+        draft: decorateDraftForOptions(itemToDraft(item), optionState),
+        imageFiles: imageFilesFromItem(item),
+        imageUploading: false,
+        imageUploadError: "",
+        imageRecognizing: false,
+        imageRecognizeError: "",
+        canRecognizeImage: Boolean(item.primary_image && item.primary_image.asset_public_id),
         errorMessage: ""
       }));
       return item;
@@ -273,9 +281,9 @@ const wardrobeDetailPageConfig = {
   },
 
   handleBack() {
-    if (typeof wx !== "undefined" && wx.switchTab) {
-      wx.switchTab({
-        url: "/pages/wardrobe/wardrobe"
+    if (typeof wx !== "undefined" && wx.navigateBack) {
+      wx.navigateBack({
+        delta: 1
       });
     }
   },
@@ -317,11 +325,6 @@ const wardrobeDetailPageConfig = {
       canRecognizeImage: Boolean(this.data.item.primary_image && this.data.item.primary_image.asset_public_id),
       errorMessage: ""
     }, activeSuggestionState(this.data, "")));
-    if (typeof wx !== "undefined" && wx.navigateTo) {
-      wx.navigateTo({
-        url: `/pages/wardrobe-edit/wardrobe-edit?public_id=${this.data.item.public_id}`
-      });
-    }
   },
 
   handleCloseEditor() {
@@ -581,7 +584,6 @@ const wardrobeDetailPageConfig = {
       const item = decorateWardrobeItem(saved);
       this.setData(Object.assign({
         saving: false,
-        editorVisible: false,
         editingPublicID: "",
         draft: cloneDraft(),
         imageFiles: [],
@@ -595,6 +597,7 @@ const wardrobeDetailPageConfig = {
       }, activeSuggestionState(this.data, "")));
       this.markWardrobeDirty();
       showToast("已保存", "success");
+      this.handleBack();
     } catch (error) {
       this.setData({
         saving: false,
@@ -636,11 +639,11 @@ const wardrobeDetailPageConfig = {
 };
 
 if (typeof Page === "function") {
-  Page(wardrobeDetailPageConfig);
+  Page(wardrobeEditPageConfig);
 }
 
 if (typeof module !== "undefined") {
   module.exports = {
-    wardrobeDetailPageConfig
+    wardrobeEditPageConfig
   };
 }

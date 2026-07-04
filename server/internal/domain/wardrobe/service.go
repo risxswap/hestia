@@ -26,7 +26,6 @@ var (
 	ErrInvalidRecommendationStatus = errors.New("invalid recommendation status")
 	ErrInvalidItemName             = errors.New("invalid wardrobe item name")
 	ErrInvalidPrimaryAsset         = errors.New("invalid wardrobe primary asset")
-	ErrInvalidWardrobeOption       = errors.New("invalid wardrobe configured option")
 	ErrItemNotFound                = errors.New("wardrobe item not found")
 	ErrRepositoryUnsupported       = errors.New("wardrobe repository unsupported")
 	ErrRecognitionPending          = errors.New("wardrobe item recognition pending")
@@ -133,7 +132,7 @@ func (s *Service) CreateCoreItems(ctx context.Context, userID int64, inputs []In
 		}
 		category := strings.TrimSpace(input.Category)
 		if category == "" {
-			category = "unknown"
+			category = "其他"
 		}
 		items = append(items, Item{
 			PublicID:             id.NewPublicID("wdi"),
@@ -189,7 +188,7 @@ func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInpu
 	}
 	category := strings.TrimSpace(input.Category)
 	if category == "" {
-		category = "other"
+		category = "其他"
 	}
 	recommendationStatus := strings.TrimSpace(input.RecommendationStatus)
 	if recommendationStatus == "" {
@@ -201,9 +200,6 @@ func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInpu
 	material := strings.TrimSpace(input.Material)
 	silhouette := strings.TrimSpace(input.Silhouette)
 	season := strings.TrimSpace(input.Season)
-	if err := s.validateConfiguredOptions(ctx, category, material, season, silhouette); err != nil {
-		return Item{}, err
-	}
 	repo, err := s.itemRepo()
 	if err != nil {
 		return Item{}, err
@@ -288,9 +284,6 @@ func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string,
 	trimStringPtr(input.Season)
 	trimStringPtr(input.UserNotes)
 	trimStringPtr(input.PrimaryAssetPublicID)
-	if err := s.validateUpdateConfiguredOptions(ctx, input); err != nil {
-		return Item{}, err
-	}
 	repo, err := s.itemRepo()
 	if err != nil {
 		return Item{}, err
@@ -461,7 +454,7 @@ func updateInputFromRecognizedFields(fields RecognizedItemFields, overwrite bool
 	if fields.Category != "" || overwrite {
 		value := fields.Category
 		if value == "" {
-			value = "other"
+			value = "其他"
 		}
 		input.Category = &value
 	}
@@ -510,40 +503,6 @@ func (s *Service) wardrobeOptions(ctx context.Context) WardrobeOptions {
 		return DefaultWardrobeOptions()
 	}
 	return mergeWithDefaultWardrobeOptions(options)
-}
-
-func (s *Service) validateConfiguredOptions(ctx context.Context, category string, material string, season string, silhouette string) error {
-	options := s.wardrobeOptions(ctx)
-	if !optionValueExists(options.Categories, category) {
-		return ErrInvalidWardrobeOption
-	}
-	if material != "" && !optionValueExists(options.Materials, material) {
-		return ErrInvalidWardrobeOption
-	}
-	if season != "" && !optionValueExists(options.Seasons, season) {
-		return ErrInvalidWardrobeOption
-	}
-	if silhouette != "" && !optionValueExists(options.Silhouettes, silhouette) {
-		return ErrInvalidWardrobeOption
-	}
-	return nil
-}
-
-func (s *Service) validateUpdateConfiguredOptions(ctx context.Context, input UpdateInput) error {
-	options := s.wardrobeOptions(ctx)
-	if input.Category != nil && !optionValueExists(options.Categories, *input.Category) {
-		return ErrInvalidWardrobeOption
-	}
-	if input.Material != nil && *input.Material != "" && !optionValueExists(options.Materials, *input.Material) {
-		return ErrInvalidWardrobeOption
-	}
-	if input.Season != nil && *input.Season != "" && !optionValueExists(options.Seasons, *input.Season) {
-		return ErrInvalidWardrobeOption
-	}
-	if input.Silhouette != nil && *input.Silhouette != "" && !optionValueExists(options.Silhouettes, *input.Silhouette) {
-		return ErrInvalidWardrobeOption
-	}
-	return nil
 }
 
 func (s *Service) enrichPrimaryImageURLs(ctx context.Context, items []Item) {
@@ -696,49 +655,11 @@ func normalizeRecognizedItemFields(value RecognizedItemFields) RecognizedItemFie
 
 func DefaultWardrobeOptions() WardrobeOptions {
 	return WardrobeOptions{
-		Categories: []OptionItem{
-			{Label: "上装", Value: "top"},
-			{Label: "下装", Value: "bottom"},
-			{Label: "外套", Value: "outerwear"},
-			{Label: "鞋", Value: "shoes"},
-			{Label: "包", Value: "bag"},
-			{Label: "配饰", Value: "accessory"},
-			{Label: "运动", Value: "sport"},
-			{Label: "家居", Value: "home"},
-			{Label: "其他", Value: "other"},
-		},
-		Materials: []OptionItem{
-			{Label: "棉", Value: "cotton"},
-			{Label: "亚麻", Value: "linen"},
-			{Label: "羊毛", Value: "wool"},
-			{Label: "针织", Value: "knit"},
-			{Label: "牛仔", Value: "denim"},
-			{Label: "真丝", Value: "silk"},
-			{Label: "皮革", Value: "leather"},
-			{Label: "聚酯纤维", Value: "polyester"},
-			{Label: "混纺", Value: "blend"},
-			{Label: "其他", Value: "other"},
-		},
-		Seasons: []OptionItem{
-			{Label: "春夏", Value: "spring_summer"},
-			{Label: "春秋", Value: "spring_autumn"},
-			{Label: "秋冬", Value: "autumn_winter"},
-			{Label: "夏季", Value: "summer"},
-			{Label: "冬季", Value: "winter"},
-			{Label: "四季", Value: "all_season"},
-		},
-		Silhouettes: []OptionItem{
-			{Label: "修身", Value: "fitted"},
-			{Label: "合身", Value: "regular"},
-			{Label: "微宽松", Value: "slightly_relaxed"},
-			{Label: "宽松", Value: "relaxed"},
-			{Label: "直筒", Value: "straight"},
-			{Label: "A 字", Value: "a_line"},
-			{Label: "短款", Value: "cropped"},
-			{Label: "长款", Value: "longline"},
-			{Label: "高腰", Value: "high_waist"},
-			{Label: "其他", Value: "other"},
-		},
+		Categories:  []string{"上装", "下装", "外套", "鞋", "包", "配饰", "运动", "家居", "其他"},
+		Colors:      []string{"黑色", "白色", "米白", "灰色", "深蓝", "浅蓝", "棕色", "卡其", "红色", "绿色", "其他"},
+		Materials:   []string{"棉", "亚麻", "羊毛", "针织", "牛仔", "真丝", "皮革", "聚酯纤维", "混纺", "其他"},
+		Seasons:     []string{"春夏", "春秋", "秋冬", "夏季", "冬季", "四季"},
+		Silhouettes: []string{"修身", "合身", "微宽松", "宽松", "直筒", "A 字", "短款", "长款", "高腰", "其他"},
 	}
 }
 
@@ -746,6 +667,9 @@ func mergeWithDefaultWardrobeOptions(options WardrobeOptions) WardrobeOptions {
 	defaults := DefaultWardrobeOptions()
 	if len(options.Categories) == 0 {
 		options.Categories = defaults.Categories
+	}
+	if len(options.Colors) == 0 {
+		options.Colors = defaults.Colors
 	}
 	if len(options.Materials) == 0 {
 		options.Materials = defaults.Materials
@@ -757,17 +681,4 @@ func mergeWithDefaultWardrobeOptions(options WardrobeOptions) WardrobeOptions {
 		options.Silhouettes = defaults.Silhouettes
 	}
 	return options
-}
-
-func optionValueExists(options []OptionItem, value string) bool {
-	target := strings.TrimSpace(value)
-	if target == "" {
-		return false
-	}
-	for _, option := range options {
-		if strings.TrimSpace(option.Value) == target {
-			return true
-		}
-	}
-	return false
 }

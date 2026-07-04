@@ -166,10 +166,10 @@ async function main() {
       }
     }
   }, async () => {
-    const createPayload = { name: "米白衬衫", category: "top" };
+    const createPayload = { name: "米白衬衫", category: "上装" };
     const updatePayload = { color: "米白" };
     await api.getWardrobeItems();
-    await api.getWardrobeItems({ category: "top" });
+    await api.getWardrobeItems({ category: "上装" });
     await api.getWardrobeOptions();
     await api.createWardrobeItem(createPayload);
     await api.updateWardrobeItem("wdi_test", updatePayload);
@@ -181,13 +181,13 @@ async function main() {
   assert(wardrobeCalls[0].method === "GET", "getWardrobeItems should use GET");
   assert(wardrobePaths[0] === "/api/user/wardrobe/items", `wardrobe list path mismatch: ${wardrobePaths[0]}`);
   assert(wardrobeCalls[1].method === "GET", "filtered getWardrobeItems should use GET");
-  assert(wardrobePaths[1] === "/api/user/wardrobe/items?category=top", `wardrobe filtered path mismatch: ${wardrobePaths[1]}`);
+  assert(wardrobePaths[1] === `/api/user/wardrobe/items?category=${encodeURIComponent("上装")}`, `wardrobe filtered path mismatch: ${wardrobePaths[1]}`);
   assert(wardrobeCalls[2].method === "GET", "getWardrobeOptions should use GET");
   assert(wardrobePaths[2] === "/api/user/wardrobe/options", `wardrobe options path mismatch: ${wardrobePaths[2]}`);
   assert(wardrobeCalls[3].method === "POST", "createWardrobeItem should use POST");
   assert(wardrobePaths[3] === "/api/user/wardrobe/items", `wardrobe create path mismatch: ${wardrobePaths[3]}`);
   assert(wardrobeCalls[3].data.name === "米白衬衫", "createWardrobeItem should pass create payload name");
-  assert(wardrobeCalls[3].data.category === "top", "createWardrobeItem should pass create payload category");
+  assert(wardrobeCalls[3].data.category === "上装", "createWardrobeItem should pass create payload category");
   assert(wardrobeCalls[4].method === "PATCH", "updateWardrobeItem should use PATCH");
   assert(wardrobePaths[4] === "/api/user/wardrobe/items/wdi_test", `wardrobe update path mismatch: ${wardrobePaths[4]}`);
   assert(wardrobeCalls[4].data.color === "米白", "updateWardrobeItem should pass update payload");

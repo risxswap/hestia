@@ -21,8 +21,8 @@ import (
 func TestListItemsReturnsOnlyCurrentUserItems(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
-	repo.add(wardrobe.Item{PublicID: "wdi_owned", UserID: 12, Name: "米白衬衫", Category: "top", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
-	repo.add(wardrobe.Item{PublicID: "wdi_other", UserID: 99, Name: "黑色西装", Category: "outerwear", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
+	repo.add(wardrobe.Item{PublicID: "wdi_owned", UserID: 12, Name: "米白衬衫", Category: "上装", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
+	repo.add(wardrobe.Item{PublicID: "wdi_other", UserID: 99, Name: "黑色西装", Category: "外套", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
 	router := newWardrobeRouteTestRouter(repo)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/user/wardrobe/items", nil)
@@ -62,7 +62,7 @@ func TestListItemsInjectsPrimaryImagePreviewAndOriginalURLsInBatch(t *testing.T)
 		PublicID:             "wdi_owned",
 		UserID:               12,
 		Name:                 "米白衬衫",
-		Category:             "top",
+		Category:             "上装",
 		RecommendationStatus: wardrobe.RecommendationStatusNormal,
 		Status:               wardrobe.StatusActive,
 		IsCore:               true,
@@ -76,7 +76,7 @@ func TestListItemsInjectsPrimaryImagePreviewAndOriginalURLsInBatch(t *testing.T)
 		PublicID:             "wdi_owned_two",
 		UserID:               12,
 		Name:                 "黑色西装",
-		Category:             "outerwear",
+		Category:             "外套",
 		RecommendationStatus: wardrobe.RecommendationStatusNormal,
 		Status:               wardrobe.StatusActive,
 		IsCore:               true,
@@ -150,10 +150,11 @@ func TestGetWardrobeOptionsRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
 	repo.options = wardrobe.WardrobeOptions{
-		Categories:  []wardrobe.OptionItem{{Label: "上装", Value: "top"}},
-		Materials:   []wardrobe.OptionItem{{Label: "棉", Value: "cotton"}},
-		Seasons:     []wardrobe.OptionItem{{Label: "春秋", Value: "spring_autumn"}},
-		Silhouettes: []wardrobe.OptionItem{{Label: "微宽松", Value: "slightly_relaxed"}},
+		Categories:  []string{"上装"},
+		Colors:      []string{"雾霾蓝"},
+		Materials:   []string{"棉"},
+		Seasons:     []string{"春秋"},
+		Silhouettes: []string{"微宽松"},
 	}
 	router := newWardrobeRouteTestRouter(repo)
 
@@ -172,23 +173,36 @@ func TestGetWardrobeOptionsRoute(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Code != "ok" || body.Data.Categories[0].Value != "top" || body.Data.Materials[0].Value != "cotton" {
+	if body.Code != "ok" || body.Data.Categories[0] != "上装" || body.Data.Colors[0] != "雾霾蓝" || body.Data.Materials[0] != "棉" {
 		t.Fatalf("expected options response, got %#v", body)
 	}
 }
 
-func TestCreateItemRejectsInvalidOptionRoute(t *testing.T) {
+func TestCreateItemAllowsCustomSuggestedFieldsRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
 	repo.options = wardrobe.WardrobeOptions{
-		Categories: []wardrobe.OptionItem{{Label: "上装", Value: "top"}},
+		Categories: []string{"上装"},
 	}
 	router := newWardrobeRouteTestRouter(repo)
 
-	body := routeWardrobeErrorResponse(t, router, http.MethodPost, "/api/user/wardrobe/items", `{"name":"黑色西装","category":"outerwear"}`, http.StatusBadRequest)
+	request := httptest.NewRequest(http.MethodPost, "/api/user/wardrobe/items", bytes.NewBufferString(`{"name":"黑色西装","category":"定制分类","color":"雾霾蓝","material":"丝绒","season":"梅雨季","silhouette":"茧型"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
 
-	if body.Code != "wardrobe.invalid_option" {
-		t.Fatalf("expected invalid option code, got %q", body.Code)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Data wardrobe.Item `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.Category != "定制分类" || body.Data.Material != "丝绒" || body.Data.Season != "梅雨季" || body.Data.Silhouette != "茧型" {
+		t.Fatalf("expected custom suggested fields saved, got %#v", body.Data)
 	}
 }
 
@@ -196,7 +210,7 @@ func TestCreateItemRejectsInvalidRecommendationStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newWardrobeRouteTestRouter(newRouteMemoryWardrobeRepo())
 
-	body := routeWardrobeErrorResponse(t, router, http.MethodPost, "/api/user/wardrobe/items", `{"name":"黑色西装","category":"outerwear","recommendation_status":"hidden"}`, http.StatusBadRequest)
+	body := routeWardrobeErrorResponse(t, router, http.MethodPost, "/api/user/wardrobe/items", `{"name":"黑色西装","category":"外套","recommendation_status":"hidden"}`, http.StatusBadRequest)
 
 	if body.Code != "wardrobe.invalid_recommendation_status" {
 		t.Fatalf("expected invalid recommendation status code, got %q", body.Code)
@@ -207,7 +221,7 @@ func TestCreateItemRejectsEmptyName(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newWardrobeRouteTestRouter(newRouteMemoryWardrobeRepo())
 
-	body := routeWardrobeErrorResponse(t, router, http.MethodPost, "/api/user/wardrobe/items", `{"name":"   ","category":"top"}`, http.StatusBadRequest)
+	body := routeWardrobeErrorResponse(t, router, http.MethodPost, "/api/user/wardrobe/items", `{"name":"   ","category":"上装"}`, http.StatusBadRequest)
 
 	if body.Code != "wardrobe.invalid_item" {
 		t.Fatalf("expected invalid item code, got %q", body.Code)
@@ -221,7 +235,7 @@ func TestCreateItemInjectsPrimaryImagePreviewAndOriginalURLs(t *testing.T) {
 	service.SetImageURLSigner(&routeBatchImageURLSigner{})
 	router := newWardrobeRouteTestRouterWithService(service)
 
-	request := httptest.NewRequest(http.MethodPost, "/api/user/wardrobe/items", bytes.NewBufferString(`{"name":"米白衬衫","category":"top","primary_asset_public_id":"ast_created"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/user/wardrobe/items", bytes.NewBufferString(`{"name":"米白衬衫","category":"上装","primary_asset_public_id":"ast_created"}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -255,7 +269,7 @@ func TestCreateItemWithMultipleAssetsUsesFirstAsPrimary(t *testing.T) {
 	service.SetImageURLSigner(&routeBatchImageURLSigner{})
 	router := newWardrobeRouteTestRouterWithService(service)
 
-	request := httptest.NewRequest(http.MethodPost, "/api/user/wardrobe/items", bytes.NewBufferString(`{"asset_public_ids":["ast_first","ast_second"],"name":"识别中","category":"other"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/user/wardrobe/items", bytes.NewBufferString(`{"asset_public_ids":["ast_first","ast_second"],"name":"识别中","category":"其他"}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -282,7 +296,7 @@ func TestCreateItemWithMultipleAssetsUsesFirstAsPrimary(t *testing.T) {
 func TestPatchItemUpdatesRecommendationStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
-	repo.add(wardrobe.Item{PublicID: "wdi_owned", UserID: 12, Name: "米白衬衫", Category: "top", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
+	repo.add(wardrobe.Item{PublicID: "wdi_owned", UserID: 12, Name: "米白衬衫", Category: "上装", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
 	router := newWardrobeRouteTestRouter(repo)
 
 	request := httptest.NewRequest(http.MethodPatch, "/api/user/wardrobe/items/wdi_owned", bytes.NewBufferString(`{"recommendation_status":"paused"}`))
@@ -316,7 +330,7 @@ func TestPatchItemRejectsRecognitionPendingItem(t *testing.T) {
 		PublicID:             "wdi_pending",
 		UserID:               12,
 		Name:                 "识别中",
-		Category:             "other",
+		Category:             "其他",
 		RecognitionStatus:    wardrobe.RecognitionStatusPending,
 		RecommendationStatus: wardrobe.RecommendationStatusNormal,
 		Status:               wardrobe.StatusActive,
@@ -334,7 +348,7 @@ func TestPatchItemRejectsRecognitionPendingItem(t *testing.T) {
 func TestPatchItemInjectsPrimaryImagePreviewAndOriginalURLs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
-	repo.add(wardrobe.Item{PublicID: "wdi_owned", UserID: 12, Name: "米白衬衫", Category: "top", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
+	repo.add(wardrobe.Item{PublicID: "wdi_owned", UserID: 12, Name: "米白衬衫", Category: "上装", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
 	service := wardrobe.NewService(repo)
 	service.SetImageURLSigner(&routeBatchImageURLSigner{})
 	router := newWardrobeRouteTestRouterWithService(service)
@@ -373,7 +387,7 @@ func TestListItemsKeepsResponseWhenPrimaryImageSigningFails(t *testing.T) {
 		PublicID:             "wdi_owned",
 		UserID:               12,
 		Name:                 "米白衬衫",
-		Category:             "top",
+		Category:             "上装",
 		RecommendationStatus: wardrobe.RecommendationStatusNormal,
 		Status:               wardrobe.StatusActive,
 		IsCore:               true,
@@ -425,7 +439,7 @@ func TestListItemsKeepsResponseWhenPrimaryImageSigningFails(t *testing.T) {
 func TestDeleteItemSoftDeletesCurrentUserItem(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
-	repo.add(wardrobe.Item{PublicID: "wdi_owned", UserID: 12, Name: "米白衬衫", Category: "top", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
+	repo.add(wardrobe.Item{PublicID: "wdi_owned", UserID: 12, Name: "米白衬衫", Category: "上装", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
 	router := newWardrobeRouteTestRouter(repo)
 
 	request := httptest.NewRequest(http.MethodDelete, "/api/user/wardrobe/items/wdi_owned", nil)
@@ -459,7 +473,7 @@ func TestDeleteItemSoftDeletesCurrentUserItem(t *testing.T) {
 func TestDeleteItemReturnsNotFoundForOtherUserItem(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
-	repo.add(wardrobe.Item{PublicID: "wdi_other", UserID: 99, Name: "黑色西装", Category: "outerwear", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
+	repo.add(wardrobe.Item{PublicID: "wdi_other", UserID: 99, Name: "黑色西装", Category: "外套", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
 	router := newWardrobeRouteTestRouter(repo)
 
 	body := routeWardrobeErrorResponse(t, router, http.MethodDelete, "/api/user/wardrobe/items/wdi_other", "", http.StatusNotFound)
@@ -479,7 +493,7 @@ func TestRecognizeItemImageRouteReturnsRecognizedFields(t *testing.T) {
 		}
 		return wardrobe.RecognizedItemFields{
 			Name:       "米白针织开衫",
-			Category:   "outerwear",
+			Category:   "外套",
 			Color:      "米白",
 			Silhouette: "微宽松",
 			Material:   "针织",
@@ -510,7 +524,7 @@ func TestRecognizeItemImageRouteReturnsRecognizedFields(t *testing.T) {
 	if body.Code != "ok" {
 		t.Fatalf("expected code ok, got %q", body.Code)
 	}
-	if body.Data.Name != "米白针织开衫" || body.Data.Category != "outerwear" || len(body.Data.SceneTags) != 2 {
+	if body.Data.Name != "米白针织开衫" || body.Data.Category != "外套" || len(body.Data.SceneTags) != 2 {
 		t.Fatalf("expected recognized fields response, got %#v", body.Data)
 	}
 }

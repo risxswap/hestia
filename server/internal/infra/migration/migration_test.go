@@ -115,7 +115,7 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	if statementIndex(exec.queries, "INSERT INTO `llm_models`") < statementIndex(exec.queries, "DROP COLUMN `provider_id`") {
 		t.Fatalf("expected llm model examples to run after provider_code schema migration")
 	}
-	for _, key := range []string{"categories", "materials", "seasons", "silhouettes"} {
+	for _, key := range []string{"categories", "colors", "materials", "seasons", "silhouettes"} {
 		if !containsStatement(exec.queries, "`key`, `value`, `value_type`, `description`, `status`)") || !containsStatement(exec.queries, key) {
 			t.Fatalf("expected wardrobe item option config key %s", key)
 		}

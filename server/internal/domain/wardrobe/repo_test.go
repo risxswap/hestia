@@ -61,10 +61,11 @@ func TestMySQLRepositoryListWardrobeOptionsReadsSystemConfigs(t *testing.T) {
 	defer db.Close()
 	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
 	rows := sqlmock.NewRows([]string{"key", "value"}).
-		AddRow("categories", `[{"label":"上装","value":"top"}]`).
-		AddRow("materials", `[{"label":"棉","value":"cotton"}]`).
-		AddRow("seasons", `[{"label":"春秋","value":"spring_autumn"}]`).
-		AddRow("silhouettes", `[{"label":"微宽松","value":"slightly_relaxed"}]`)
+		AddRow("categories", `["上装"]`).
+		AddRow("colors", `["雾霾蓝"]`).
+		AddRow("materials", `["棉"]`).
+		AddRow("seasons", `["春秋"]`).
+		AddRow("silhouettes", `["微宽松"]`)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT `key`, `value`")).
 		WillReturnRows(rows)
 
@@ -73,10 +74,11 @@ func TestMySQLRepositoryListWardrobeOptionsReadsSystemConfigs(t *testing.T) {
 		t.Fatalf("list wardrobe options: %v", err)
 	}
 
-	if options.Categories[0].Value != "top" ||
-		options.Materials[0].Value != "cotton" ||
-		options.Seasons[0].Value != "spring_autumn" ||
-		options.Silhouettes[0].Value != "slightly_relaxed" {
+	if options.Categories[0] != "上装" ||
+		options.Colors[0] != "雾霾蓝" ||
+		options.Materials[0] != "棉" ||
+		options.Seasons[0] != "春秋" ||
+		options.Silhouettes[0] != "微宽松" {
 		t.Fatalf("expected options from system configs, got %#v", options)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -104,7 +106,7 @@ func routeBaseWardrobeItemRow(publicID string, assetPublicID string, relationID 
 		PublicID:             publicID,
 		UserID:               12,
 		Name:                 "米白衬衫",
-		Category:             "top",
+		Category:             "上装",
 		SceneTags:            []byte(`["通勤"]`),
 		IsCore:               true,
 		RecommendationStatus: RecommendationStatusNormal,

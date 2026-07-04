@@ -5,12 +5,12 @@ const GOAL_OPTIONS = ["通勤更有质感", "日常更显精神", "约会自然�
 const SCENARIO_OPTIONS = ["工作日通勤", "见客户或面试", "朋友聚会", "约会", "周末出行", "快速出门"];
 const AVOIDANCE_OPTIONS = ["过度甜美", "太紧身", "显成熟或显老", "不好打理", "大面积高饱和色", "依赖高跟鞋"];
 const WARDROBE_CATEGORY_OPTIONS = [
-  { value: "top", label: "上装" },
-  { value: "bottom", label: "下装" },
-  { value: "outerwear", label: "外套" },
-  { value: "dress", label: "连衣裙" },
-  { value: "shoes", label: "鞋" },
-  { value: "accessory", label: "配饰" }
+  { value: "上装", label: "上装" },
+  { value: "下装", label: "下装" },
+  { value: "外套", label: "外套" },
+  { value: "连衣裙", label: "连衣裙" },
+  { value: "鞋", label: "鞋" },
+  { value: "配饰", label: "配饰" }
 ];
 
 const baseInitialData = {
@@ -35,7 +35,7 @@ const baseInitialData = {
   wardrobeItems: [],
   wardrobeDraft: {
     name: "",
-    category: "top",
+    category: "上装",
     color: ""
   },
   styleGoal: {
@@ -273,7 +273,7 @@ function draftToPageData(draftData) {
     wardrobeItems,
     wardrobeDraft: {
       name: "",
-      category: "top",
+      category: "上装",
       color: ""
     },
     styleGoal: {
@@ -483,7 +483,7 @@ const onboardingPageConfig = {
       wardrobeText: wardrobeItemsToText(nextItems),
       wardrobeDraft: {
         name: "",
-        category: "top",
+        category: "上装",
         color: ""
       }
     }));

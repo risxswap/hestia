@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "编辑衣服",
+  "usingComponents": {
+    "t-upload": "/miniprogram_npm/tdesign-miniprogram/upload/upload"
+  }
+}

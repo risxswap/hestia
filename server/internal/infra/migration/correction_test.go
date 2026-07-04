@@ -112,6 +112,26 @@ func TestApplyDataCorrectionsStopsAndDoesNotRecordFailedCorrection(t *testing.T)
 	}
 }
 
+func TestDefaultDataCorrectionsNormalizeWardrobeItemOptions(t *testing.T) {
+	exec := newFakeCorrectionExecutor()
+
+	err := ApplyDataCorrections(context.Background(), exec, defaultDataCorrections)
+	if err != nil {
+		t.Fatalf("apply default data corrections: %v", err)
+	}
+
+	if !containsStatement(exec.queries, "UPDATE system_configs") ||
+		!containsStatement(exec.queries, `["上装","下装"`) ||
+		!containsStatement(exec.queries, `["棉","亚麻"`) ||
+		containsStatement(exec.queries, `"value"`) ||
+		containsStatement(exec.queries, `"label"`) {
+		t.Fatalf("expected wardrobe option configs to be rewritten as string-array json, queries=%#v", exec.queries)
+	}
+	if !exec.executed["wardrobe_item_options_string_array_20260704"] {
+		t.Fatalf("expected wardrobe item options correction to be recorded, executed=%#v", exec.executed)
+	}
+}
+
 type fakeCorrectionExecutor struct {
 	queries  []string
 	executed map[string]bool

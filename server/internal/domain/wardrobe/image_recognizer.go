@@ -58,7 +58,7 @@ func wardrobeImageRecognizePrompt(userID int64, assetPublicID string) string {
 仅返回 JSON 对象，字段限定为：
 {
   "name": "简短单品名称",
-  "category": "top|bottom|outerwear|shoes|bag|accessory|sport|home|other",
+  "category": "上装|下装|外套|鞋|包|配饰|运动|家居|其他",
   "color": "主要颜色",
   "silhouette": "廓形",
   "material": "可见或可合理推断的材质",

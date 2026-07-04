@@ -678,7 +678,7 @@ const wardrobePageConfig = {
       ? Object.assign({}, this.data.draft)
       : Object.assign({}, this.data.draft, {
         name: "识别中",
-        category: "other",
+        category: "其他",
         recognition_status: "pending"
       });
     const payload = buildPayload(draft);
