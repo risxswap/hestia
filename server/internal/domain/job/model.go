@@ -3,12 +3,13 @@ package job
 import "time"
 
 const (
-	TypeInitialReportGeneration = "initial_report_generation"
-	StatusPending               = "pending"
-	StatusRunning               = "running"
-	StatusSucceeded             = "succeeded"
-	StatusFailed                = "failed"
-	QueueInline                 = "inline"
+	TypeInitialReportGeneration      = "initial_report_generation"
+	TypeWardrobeItemImageRecognition = "wardrobe_item_image_recognition"
+	StatusPending                    = "pending"
+	StatusRunning                    = "running"
+	StatusSucceeded                  = "succeeded"
+	StatusFailed                     = "failed"
+	QueueInline                      = "inline"
 )
 
 type Job struct {

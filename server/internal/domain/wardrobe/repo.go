@@ -42,10 +42,10 @@ func (r *MySQLRepository) CreateCoreItems(ctx context.Context, items []Item) ([]
 		}
 		result, err := r.ext.ExecContext(ctx, `
 INSERT INTO wardrobe_items
-  (public_id, user_id, name, category, color, silhouette, material, season, user_notes, is_core, recommendation_status, status)
+  (public_id, user_id, name, category, color, silhouette, material, season, user_notes, is_core, recommendation_status, recognition_status, status)
 VALUES
-  (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)
-`, items[i].PublicID, items[i].UserID, items[i].Name, items[i].Category, items[i].Color, items[i].Silhouette, items[i].Material, items[i].Season, items[i].UserNotes, items[i].IsCore, items[i].RecommendationStatus, items[i].Status)
+  (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?)
+`, items[i].PublicID, items[i].UserID, items[i].Name, items[i].Category, items[i].Color, items[i].Silhouette, items[i].Material, items[i].Season, items[i].UserNotes, items[i].IsCore, items[i].RecommendationStatus, recognitionStatusOrDefault(items[i].RecognitionStatus), items[i].Status)
 		if err != nil {
 			return nil, err
 		}
@@ -149,6 +149,45 @@ func (r *MySQLRepository) CreateItem(ctx context.Context, item Item, primaryAsse
 	return r.createItem(ctx, item, primaryAssetPublicID)
 }
 
+func (r *MySQLRepository) CreateItemWithAssets(ctx context.Context, item Item, assetPublicIDs []string) (Item, error) {
+	if r == nil || r.ext == nil {
+		return Item{}, errors.New("wardrobe repository database is nil")
+	}
+	if starter, ok := r.ext.(txStarter); ok {
+		tx, err := starter.BeginTxx(ctx, nil)
+		if err != nil {
+			return Item{}, err
+		}
+		created, err := (&MySQLRepository{ext: tx}).createItemWithAssets(ctx, item, assetPublicIDs)
+		if err != nil {
+			_ = tx.Rollback()
+			return Item{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return Item{}, err
+		}
+		return created, nil
+	}
+	return r.createItemWithAssets(ctx, item, assetPublicIDs)
+}
+
+func (r *MySQLRepository) createItemWithAssets(ctx context.Context, item Item, assetPublicIDs []string) (Item, error) {
+	created, err := r.createItem(ctx, item, "")
+	if err != nil {
+		return Item{}, err
+	}
+	for index, assetPublicID := range trimStringSlice(assetPublicIDs) {
+		image, err := r.addItemAsset(ctx, created.UserID, created.ID, assetPublicID, index == 0, index)
+		if err != nil {
+			return Item{}, err
+		}
+		if index == 0 {
+			created.PrimaryImage = &image
+		}
+	}
+	return created, nil
+}
+
 func (r *MySQLRepository) createItem(ctx context.Context, item Item, primaryAssetPublicID string) (Item, error) {
 	sceneTags, err := jsonText(item.SceneTags)
 	if err != nil {
@@ -160,12 +199,15 @@ func (r *MySQLRepository) createItem(ctx context.Context, item Item, primaryAsse
 	if item.RecommendationStatus == "" {
 		item.RecommendationStatus = RecommendationStatusNormal
 	}
+	if item.RecognitionStatus == "" {
+		item.RecognitionStatus = RecognitionStatusSucceeded
+	}
 	result, err := r.ext.ExecContext(ctx, `
 INSERT INTO wardrobe_items
-  (public_id, user_id, name, category, color, silhouette, material, season, scene_tags, user_notes, is_core, recommendation_status, status)
+  (public_id, user_id, name, category, color, silhouette, material, season, scene_tags, user_notes, is_core, recommendation_status, recognition_status, status)
 VALUES
-  (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CAST(? AS JSON), NULLIF(?, ''), ?, ?, ?)
-`, item.PublicID, item.UserID, item.Name, item.Category, item.Color, item.Silhouette, item.Material, item.Season, sceneTags, item.UserNotes, item.IsCore, item.RecommendationStatus, item.Status)
+  (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CAST(? AS JSON), NULLIF(?, ''), ?, ?, ?, ?)
+`, item.PublicID, item.UserID, item.Name, item.Category, item.Color, item.Silhouette, item.Material, item.Season, sceneTags, item.UserNotes, item.IsCore, item.RecommendationStatus, item.RecognitionStatus, item.Status)
 	if err != nil {
 		return Item{}, err
 	}
@@ -204,6 +246,13 @@ func (r *MySQLRepository) UpdateItem(ctx context.Context, userID int64, publicID
 		return updated, nil
 	}
 	return r.updateItem(ctx, userID, publicID, input)
+}
+
+func (r *MySQLRepository) FindItemForUser(ctx context.Context, userID int64, publicID string) (Item, error) {
+	if r == nil || r.ext == nil {
+		return Item{}, errors.New("wardrobe repository database is nil")
+	}
+	return r.findItemByPublicIDForUser(ctx, userID, strings.TrimSpace(publicID))
 }
 
 func (r *MySQLRepository) updateItem(ctx context.Context, userID int64, publicID string, input UpdateInput) (Item, error) {
@@ -251,6 +300,9 @@ func (r *MySQLRepository) updateItem(ctx context.Context, userID int64, publicID
 	}
 	if input.RecommendationStatus != nil {
 		addSet("recommendation_status", *input.RecommendationStatus)
+	}
+	if input.RecognitionStatus != nil {
+		addSet("recognition_status", *input.RecognitionStatus)
 	}
 	if len(sets) > 0 {
 		args = append(args, current.ID, userID)
@@ -319,6 +371,20 @@ WHERE id = ?
 	return dbutil.RequireRowsAffected(result, "wardrobe item soft delete")
 }
 
+func (r *MySQLRepository) FindRecognizableAsset(ctx context.Context, userID int64, assetPublicID string) (Image, error) {
+	if r == nil || r.ext == nil {
+		return Image{}, errors.New("wardrobe repository database is nil")
+	}
+	asset, err := r.findAssetForUser(ctx, userID, strings.TrimSpace(assetPublicID))
+	if err != nil {
+		return Image{}, err
+	}
+	return Image{
+		AssetPublicID: asset.PublicID,
+		ObjectKey:     asset.ObjectKey,
+	}, nil
+}
+
 func (r *MySQLRepository) findItemByPublicIDForUser(ctx context.Context, userID int64, publicID string) (Item, error) {
 	var rows []wardrobeItemRow
 	err := sqlx.SelectContext(ctx, r.ext, &rows, wardrobeItemSelectSQL(`
@@ -352,6 +418,35 @@ VALUES
 		return Image{}, err
 	}
 	if err := dbutil.RequireRowsAffected(result, "wardrobe item primary asset create"); err != nil {
+		return Image{}, err
+	}
+	return Image{AssetPublicID: asset.PublicID, ObjectKey: asset.ObjectKey}, nil
+}
+
+func (r *MySQLRepository) addItemAsset(ctx context.Context, userID int64, wardrobeItemID int64, assetPublicID string, isPrimary bool, sortOrder int) (Image, error) {
+	asset, err := r.findAssetForUser(ctx, userID, assetPublicID)
+	if err != nil {
+		return Image{}, err
+	}
+	if isPrimary {
+		if err := r.clearPrimaryAssets(ctx, wardrobeItemID); err != nil {
+			return Image{}, err
+		}
+	}
+	primary := 0
+	if isPrimary {
+		primary = 1
+	}
+	result, err := r.ext.ExecContext(ctx, `
+INSERT INTO wardrobe_item_assets
+  (wardrobe_item_id, asset_id, is_primary, sort_order)
+VALUES
+  (?, ?, ?, ?)
+`, wardrobeItemID, asset.ID, primary, sortOrder)
+	if err != nil {
+		return Image{}, err
+	}
+	if err := dbutil.RequireRowsAffected(result, "wardrobe item asset create"); err != nil {
 		return Image{}, err
 	}
 	return Image{AssetPublicID: asset.PublicID, ObjectKey: asset.ObjectKey}, nil
@@ -405,6 +500,7 @@ SELECT
   wi.user_notes,
   wi.is_core,
   wi.recommendation_status,
+  wi.recognition_status,
   wi.status,
   wi.created_at,
   wi.updated_at,
@@ -459,6 +555,7 @@ type wardrobeItemRow struct {
 	UserNotes              sql.NullString  `db:"user_notes"`
 	IsCore                 bool            `db:"is_core"`
 	RecommendationStatus   string          `db:"recommendation_status"`
+	RecognitionStatus      string          `db:"recognition_status"`
 	Status                 string          `db:"status"`
 	PrimaryAssetRelationID sql.NullInt64   `db:"primary_asset_relation_id"`
 	PrimaryAssetSortOrder  sql.NullInt64   `db:"primary_asset_sort_order"`
@@ -487,6 +584,7 @@ func (r wardrobeItemRow) toItem() (Item, error) {
 		UserNotes:            nullStringValue(r.UserNotes),
 		IsCore:               r.IsCore,
 		RecommendationStatus: r.RecommendationStatus,
+		RecognitionStatus:    recognitionStatusOrDefault(r.RecognitionStatus),
 		Status:               r.Status,
 		CreatedAt:            r.CreatedAt,
 		UpdatedAt:            r.UpdatedAt,
@@ -653,6 +751,14 @@ func nullStringValue(value sql.NullString) string {
 		return ""
 	}
 	return value.String
+}
+
+func recognitionStatusOrDefault(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return RecognitionStatusSucceeded
+	}
+	return value
 }
 
 func nullIfEmpty(value string) any {

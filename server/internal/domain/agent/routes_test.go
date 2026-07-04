@@ -94,6 +94,15 @@ func (r *routeWardrobeRepo) ListItems(_ context.Context, userID int64, _ wardrob
 	return result, nil
 }
 
+func (r *routeWardrobeRepo) FindItemForUser(_ context.Context, userID int64, publicID string) (wardrobe.Item, error) {
+	for _, item := range r.items {
+		if item.UserID == userID && item.PublicID == publicID && item.Status != wardrobe.StatusDeleted {
+			return item, nil
+		}
+	}
+	return wardrobe.Item{}, wardrobe.ErrItemNotFound
+}
+
 func (r *routeWardrobeRepo) CreateItem(_ context.Context, item wardrobe.Item, _ string) (wardrobe.Item, error) {
 	return item, nil
 }

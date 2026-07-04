@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -127,20 +126,9 @@ func TestUploadTokenGeneratesServerOwnedObjectKeyForSupportedAssetTypes(t *testi
 	}
 }
 
-func TestFileRoutesCreateUploadTokenAndConfirmWithRecognizedFields(t *testing.T) {
+func TestFileRoutesCreateUploadTokenAndConfirmWithoutRecognition(t *testing.T) {
 	repo := newMemoryRepo()
 	options := defaultServiceOptions()
-	options.UploadConfirmer = UploadConfirmerFunc(func(_ context.Context, userID int64, upload ConfirmedUpload) (UploadConfirmResult, error) {
-		if userID != 12 || upload.FilePublicID != testAssetPublicID || upload.FileType != "wardrobe_item_photo" {
-			t.Fatalf("unexpected confirmed upload context: user=%d upload=%#v", userID, upload)
-		}
-		return UploadConfirmResult{
-			RecognizedFields: map[string]any{
-				"name":     "米白衬衫",
-				"category": "top",
-			},
-		}, nil
-	})
 	router := newAuthenticatedFileRouterWithOptions(t, repo, options)
 
 	tokenRecorder := postJSON(t, router, "/api/user/files/upload-token", map[string]any{
@@ -174,37 +162,8 @@ func TestFileRoutesCreateUploadTokenAndConfirmWithRecognizedFields(t *testing.T)
 	if _, ok := confirmData["url"]; ok {
 		t.Fatalf("confirm response must not expose expiring url: %#v", confirmData)
 	}
-	recognized, ok := confirmData["recognized_fields"].(map[string]any)
-	if !ok || recognized["name"] != "米白衬衫" || recognized["category"] != "top" {
-		t.Fatalf("expected recognized fields in confirm response: %#v", confirmData)
-	}
-}
-
-func TestFileConfirmKeepsUploadWhenPostConfirmRecognitionFails(t *testing.T) {
-	repo := newMemoryRepo()
-	options := defaultServiceOptions()
-	options.UploadConfirmer = UploadConfirmerFunc(func(_ context.Context, _ int64, _ ConfirmedUpload) (UploadConfirmResult, error) {
-		return UploadConfirmResult{}, errors.New("recognition unavailable")
-	})
-	router := newAuthenticatedFileRouterWithOptions(t, repo, options)
-
-	recorder := postJSON(t, router, "/api/user/files/confirm", map[string]any{
-		"asset_public_id": testAssetPublicID,
-		"bucket":          "private-assets",
-		"object_key":      "users/12/wardrobe/" + testAssetPublicID + ".jpg",
-		"mime_type":       "image/jpeg",
-		"file_size":       2048,
-		"asset_type":      "wardrobe_item_photo",
-	})
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected confirm status 200 even when recognition fails, got %d body=%s", recorder.Code, recorder.Body.String())
-	}
-	data := responseData(t, recorder)
-	if data["file_public_id"] != testAssetPublicID {
-		t.Fatalf("expected confirmed file response, got %#v", data)
-	}
-	if _, ok := data["recognized_fields"]; ok {
-		t.Fatalf("expected no recognized_fields when recognition fails, got %#v", data)
+	if _, ok := confirmData["recognized_fields"]; ok {
+		t.Fatalf("confirm response must not include recognized fields: %#v", confirmData)
 	}
 }
 

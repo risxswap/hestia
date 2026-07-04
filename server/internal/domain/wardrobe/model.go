@@ -3,23 +3,25 @@ package wardrobe
 import "time"
 
 type Item struct {
-	ID                   int64     `json:"-"`
-	PublicID             string    `json:"public_id"`
-	UserID               int64     `json:"-"`
-	Name                 string    `json:"name"`
-	Category             string    `json:"category"`
-	Color                string    `json:"color,omitempty"`
-	Silhouette           string    `json:"silhouette,omitempty"`
-	Material             string    `json:"material,omitempty"`
-	Season               string    `json:"season,omitempty"`
-	SceneTags            []string  `json:"scene_tags,omitempty"`
-	UserNotes            string    `json:"user_notes,omitempty"`
-	IsCore               bool      `json:"is_core"`
-	RecommendationStatus string    `json:"recommendation_status"`
-	Status               string    `json:"status"`
-	PrimaryImage         *Image    `json:"primary_image,omitempty"`
-	CreatedAt            time.Time `json:"created_at,omitempty"`
-	UpdatedAt            time.Time `json:"updated_at,omitempty"`
+	ID                     int64     `json:"-"`
+	PublicID               string    `json:"public_id"`
+	UserID                 int64     `json:"-"`
+	Name                   string    `json:"name"`
+	Category               string    `json:"category"`
+	Color                  string    `json:"color,omitempty"`
+	Silhouette             string    `json:"silhouette,omitempty"`
+	Material               string    `json:"material,omitempty"`
+	Season                 string    `json:"season,omitempty"`
+	SceneTags              []string  `json:"scene_tags,omitempty"`
+	UserNotes              string    `json:"user_notes,omitempty"`
+	IsCore                 bool      `json:"is_core"`
+	RecommendationStatus   string    `json:"recommendation_status"`
+	RecognitionStatus      string    `json:"recognition_status"`
+	RecognitionJobPublicID string    `json:"recognition_job_public_id,omitempty"`
+	Status                 string    `json:"status"`
+	PrimaryImage           *Image    `json:"primary_image,omitempty"`
+	CreatedAt              time.Time `json:"created_at,omitempty"`
+	UpdatedAt              time.Time `json:"updated_at,omitempty"`
 }
 
 type Image struct {
@@ -62,7 +64,9 @@ type CreateInput struct {
 	UserNotes            string   `json:"user_notes"`
 	IsCore               *bool    `json:"is_core"`
 	RecommendationStatus string   `json:"recommendation_status"`
+	RecognitionStatus    string   `json:"recognition_status"`
 	PrimaryAssetPublicID string   `json:"primary_asset_public_id"`
+	AssetPublicIDs       []string `json:"asset_public_ids"`
 }
 
 type UpdateInput struct {
@@ -77,6 +81,7 @@ type UpdateInput struct {
 	IsCore               *bool     `json:"is_core"`
 	RecommendationStatus *string   `json:"recommendation_status"`
 	PrimaryAssetPublicID *string   `json:"primary_asset_public_id"`
+	RecognitionStatus    *string   `json:"recognition_status"`
 }
 
 type ListFilter struct {
@@ -93,6 +98,8 @@ type AdviceContextFilter struct {
 type RecognizeImageInput struct {
 	AssetPublicID string `json:"asset_public_id"`
 	ImageURL      string `json:"image_url,omitempty"`
+	ItemPublicID  string `json:"item_public_id,omitempty"`
+	Overwrite     bool   `json:"overwrite,omitempty"`
 }
 
 type RecognizedItemFields struct {

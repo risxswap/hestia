@@ -43,6 +43,25 @@ func (s *Service) CreateInitialReportJob(ctx context.Context, userID int64, inpu
 	return s.repo.Create(ctx, item)
 }
 
+func (s *Service) CreateWardrobeRecognitionJob(ctx context.Context, userID int64, wardrobeItemID int64, wardrobeItemPublicID string, assetPublicIDs []string, overwrite bool) (Job, error) {
+	relatedID := wardrobeItemID
+	item := Job{
+		PublicID:    id.NewPublicID("job"),
+		JobType:     TypeWardrobeItemImageRecognition,
+		Status:      StatusPending,
+		QueueName:   QueueInline,
+		RelatedType: "wardrobe_item",
+		RelatedID:   &relatedID,
+		UserID:      userID,
+		InputSummary: map[string]any{
+			"wardrobe_item_public_id": wardrobeItemPublicID,
+			"asset_public_ids":        assetPublicIDs,
+			"overwrite":               overwrite,
+		},
+	}
+	return s.repo.Create(ctx, item)
+}
+
 func (s *Service) MarkSucceeded(ctx context.Context, item Job, output map[string]any) error {
 	return s.repo.UpdateStatus(ctx, item.ID, StatusSucceeded, output, "")
 }

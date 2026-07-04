@@ -71,18 +71,18 @@
     <view class="modal-sheet">
       <view class="editor-header modal-header">
         <view>
-          <text class="section-title">{{editingPublicID ? '编辑单品' : '新增单品'}}</text>
-          <text class="muted">只记录会影响建议的关键信息，不需要完整盘点衣橱。</text>
+          <text class="section-title">新增衣服</text>
+          <text class="muted">上传一张清晰照片即可，系统会自动识别并记录。</text>
         </view>
         <button class="secondary-button modal-close" bind:tap="handleCloseEditor">取消</button>
       </view>
 
       <scroll-view class="modal-scroll" scroll-y="true">
         <view class="field-group upload-field">
-          <text class="field-label">主图</text>
+          <text class="field-label">上传图片</text>
           <t-upload
             files="{{imageFiles}}"
-            max="{{1}}"
+            max="{{6}}"
             mediaType="{{imageMediaType}}"
             gridConfig="{{imageGridConfig}}"
             sizeLimit="{{imageSizeLimit}}"
@@ -94,72 +94,9 @@
           <text wx:if="{{imageUploadError}}" class="upload-error">{{imageUploadError}}</text>
           <text wx:if="{{imageRecognizeError}}" class="upload-error">{{imageRecognizeError}}</text>
         </view>
-
-        <view class="form-grid">
-          <label class="field-group">
-            <text class="field-label">名称</text>
-            <input class="field" placeholder="例如：米白衬衫" value="{{draft.name}}" data-field="name" bindinput="handleDraftInput" />
-          </label>
-          <label class="field-group">
-            <text class="field-label">分类</text>
-            <picker range="{{editorCategoryOptions}}" range-key="label" value="{{draft.categoryIndex}}" data-field="category" data-option-key="editorCategoryOptions" bindchange="handleOptionChange">
-              <view class="field picker-field">{{draft.categoryLabel}}</view>
-            </picker>
-          </label>
-          <label class="field-group">
-            <text class="field-label">颜色</text>
-            <input class="field" placeholder="例如：米白、深蓝" value="{{draft.color}}" data-field="color" bindinput="handleDraftInput" />
-          </label>
-          <label class="field-group">
-            <text class="field-label">廓形</text>
-            <picker range="{{silhouetteOptions}}" range-key="label" value="{{draft.silhouetteIndex}}" data-field="silhouette" data-option-key="silhouetteOptions" bindchange="handleOptionChange">
-              <view class="field picker-field">{{draft.silhouetteLabel}}</view>
-            </picker>
-          </label>
-          <label class="field-group">
-            <text class="field-label">材质</text>
-            <picker range="{{materialOptions}}" range-key="label" value="{{draft.materialIndex}}" data-field="material" data-option-key="materialOptions" bindchange="handleOptionChange">
-              <view class="field picker-field">{{draft.materialLabel}}</view>
-            </picker>
-          </label>
-          <label class="field-group">
-            <text class="field-label">季节</text>
-            <picker range="{{seasonOptions}}" range-key="label" value="{{draft.seasonIndex}}" data-field="season" data-option-key="seasonOptions" bindchange="handleOptionChange">
-              <view class="field picker-field">{{draft.seasonLabel}}</view>
-            </picker>
-          </label>
-        </view>
-
-        <label class="field-group">
-          <text class="field-label">适用场景</text>
-          <textarea class="textarea" maxlength="160" placeholder="例如：通勤，约会，周末" value="{{draft.sceneText}}" bindinput="handleSceneInput" />
-        </label>
-
-        <label class="field-group">
-          <text class="field-label">备注</text>
-          <textarea class="textarea" maxlength="220" placeholder="例如：肩线合适，但下摆需要扎进去" value="{{draft.user_notes}}" data-field="user_notes" bindinput="handleDraftInput" />
-        </label>
-
-        <view class="status-group">
-          <text class="field-label">推荐状态</text>
-          <view class="status-actions">
-            <button class="status-button {{draft.recommendation_status === 'preferred' ? 'status-button--active' : ''}}" data-status="preferred" bind:tap="handleRecommendationStatus">优先推荐</button>
-            <button class="status-button {{draft.recommendation_status === 'normal' ? 'status-button--active' : ''}}" data-status="normal" bind:tap="handleRecommendationStatus">正常推荐</button>
-            <button class="status-button {{draft.recommendation_status === 'paused' ? 'status-button--active status-button--paused' : ''}}" data-status="paused" bind:tap="handleRecommendationStatus">暂不推荐</button>
-          </view>
-        </view>
-
-        <view class="core-row">
-          <view class="core-copy">
-            <text class="field-label">核心单品</text>
-            <text class="muted">开启后会更常进入每日建议。</text>
-          </view>
-          <switch checked="{{draft.is_core}}" bindchange="handleCoreToggle" color="#27231f" />
-        </view>
       </scroll-view>
 
-      <view class="editor-actions modal-actions {{editingPublicID ? '' : 'editor-actions--single'}}">
-        <button wx:if="{{editingPublicID}}" class="danger-button" data-public-id="{{editingPublicID}}" bind:tap="handleDeleteItem">删除</button>
+      <view class="editor-actions modal-actions editor-actions--single">
         <button class="primary-button save-button" loading="{{saving}}" bind:tap="handleSaveItem">保存</button>
       </view>
     </view>

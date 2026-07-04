@@ -199,12 +199,15 @@ function deleteWardrobeItem(publicID) {
   });
 }
 
-function recognizeWardrobeItemImage(assetPublicID) {
+function recognizeWardrobeItemImage(assetPublicID, options) {
+  const config = options || {};
   return authorizedRequest({
     path: "/api/user/wardrobe/items/recognize",
     method: "POST",
     data: {
-      asset_public_id: assetPublicID
+      asset_public_id: assetPublicID,
+      item_public_id: config.itemPublicID || config.item_public_id || "",
+      overwrite: config.overwrite === true
     }
   });
 }

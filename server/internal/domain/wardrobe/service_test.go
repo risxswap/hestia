@@ -26,14 +26,54 @@ type captureWardrobeRepo struct {
 	created                  []Item
 	items                    []Item
 	options                  WardrobeOptions
+	recognitionAsset         Image
 	primaryAssetPublicID     string
+	assetPublicIDs           []string
 	lastUpdatePublicID       string
 	lastUpdateRecommendation *string
 	lastUpdateInput          UpdateInput
 }
 
+type captureRecognitionJobCreator struct {
+	userID               int64
+	wardrobeItemID       int64
+	wardrobeItemPublicID string
+	assetPublicIDs       []string
+	overwrite            bool
+}
+
+func (c *captureRecognitionJobCreator) CreateWardrobeRecognitionJob(_ context.Context, userID int64, wardrobeItemID int64, wardrobeItemPublicID string, assetPublicIDs []string, overwrite bool) (string, error) {
+	c.userID = userID
+	c.wardrobeItemID = wardrobeItemID
+	c.wardrobeItemPublicID = wardrobeItemPublicID
+	c.assetPublicIDs = append([]string{}, assetPublicIDs...)
+	c.overwrite = overwrite
+	return "job_recognition", nil
+}
+
+type captureImageURLSigner struct {
+	objectKey string
+	url       string
+}
+
+func (s *captureImageURLSigner) PrivateDownloadURL(_ context.Context, objectKey string) (string, error) {
+	s.objectKey = objectKey
+	if s.url != "" {
+		return s.url, nil
+	}
+	return "https://download.example.test/" + objectKey, nil
+}
+
 func TestRecognizeItemImageTrimsAndNormalizesFields(t *testing.T) {
-	service := NewService(&captureWardrobeRepo{})
+	repo := &captureWardrobeRepo{
+		recognitionAsset: Image{
+			AssetPublicID: "ast_primary",
+			ObjectKey:     "users/12/wardrobe/ast_primary.jpg",
+		},
+	}
+	signer := &captureImageURLSigner{url: "https://download.example.test/private.jpg"}
+	service := NewService(repo)
+	service.SetImageURLSigner(signer)
 	var capturedUserID int64
 	var capturedInput RecognizeImageInput
 	service.SetImageRecognizer(recognizeImageFunc(func(_ context.Context, userID int64, input RecognizeImageInput) (RecognizedItemFields, error) {
@@ -59,8 +99,11 @@ func TestRecognizeItemImageTrimsAndNormalizesFields(t *testing.T) {
 		t.Fatalf("recognize item image: %v", err)
 	}
 
-	if capturedUserID != 12 || capturedInput.AssetPublicID != "ast_primary" {
+	if capturedUserID != 12 || capturedInput.AssetPublicID != "ast_primary" || capturedInput.ImageURL != "https://download.example.test/private.jpg" {
 		t.Fatalf("expected recognizer to receive trimmed input, user=%d input=%#v", capturedUserID, capturedInput)
+	}
+	if signer.objectKey != "users/12/wardrobe/ast_primary.jpg" {
+		t.Fatalf("expected signer to receive wardrobe asset object key, got %q", signer.objectKey)
 	}
 	if result.Name != "米白针织开衫" ||
 		result.Category != "outerwear" ||
@@ -79,11 +122,109 @@ func TestRecognizeItemImageTrimsAndNormalizesFields(t *testing.T) {
 	}
 }
 
+func TestRecognizeAndApplyItemImageUpdatesFieldsAndStatus(t *testing.T) {
+	repo := &captureWardrobeRepo{
+		items: []Item{{
+			ID:                   34,
+			PublicID:             "wdi_pending",
+			UserID:               12,
+			Name:                 "识别中",
+			Category:             "other",
+			RecognitionStatus:    RecognitionStatusPending,
+			RecommendationStatus: RecommendationStatusNormal,
+			Status:               StatusActive,
+			IsCore:               true,
+		}},
+		recognitionAsset: Image{
+			AssetPublicID: "ast_primary",
+			ObjectKey:     "users/12/wardrobe/ast_primary.jpg",
+		},
+	}
+	service := NewService(repo)
+	service.SetImageURLSigner(&captureImageURLSigner{url: "https://download.example.test/private.jpg"})
+	service.SetImageRecognizer(recognizeImageFunc(func(_ context.Context, _ int64, _ RecognizeImageInput) (RecognizedItemFields, error) {
+		return RecognizedItemFields{
+			Name:       "米白针织开衫",
+			Category:   "outerwear",
+			Color:      "米白",
+			Silhouette: "微宽松",
+			Material:   "针织",
+			Season:     "春秋",
+			SceneTags:  []string{"通勤"},
+			UserNotes:  "建议内搭简洁上衣",
+		}, nil
+	}))
+
+	item, err := service.RecognizeAndApplyItemImage(context.Background(), 12, "wdi_pending", []string{"ast_primary"}, false)
+	if err != nil {
+		t.Fatalf("recognize and apply: %v", err)
+	}
+
+	if item.Name != "米白针织开衫" || item.Category != "outerwear" || item.RecognitionStatus != RecognitionStatusSucceeded {
+		t.Fatalf("expected recognized item fields applied, got %#v", item)
+	}
+	if repo.lastUpdateInput.Name == nil || *repo.lastUpdateInput.Name != "米白针织开衫" {
+		t.Fatalf("expected update input with recognized name, got %#v", repo.lastUpdateInput)
+	}
+	if repo.lastUpdateInput.RecognitionStatus == nil || *repo.lastUpdateInput.RecognitionStatus != RecognitionStatusSucceeded {
+		t.Fatalf("expected recognition status succeeded update, got %#v", repo.lastUpdateInput)
+	}
+}
+
+func TestRecognizeAndApplyItemImageMarksFailedOnRecognitionError(t *testing.T) {
+	repo := &captureWardrobeRepo{
+		items: []Item{{
+			PublicID:             "wdi_pending",
+			UserID:               12,
+			Name:                 "识别中",
+			Category:             "other",
+			RecognitionStatus:    RecognitionStatusPending,
+			RecommendationStatus: RecommendationStatusNormal,
+			Status:               StatusActive,
+			IsCore:               true,
+		}},
+		recognitionAsset: Image{
+			AssetPublicID: "ast_primary",
+			ObjectKey:     "users/12/wardrobe/ast_primary.jpg",
+		},
+	}
+	service := NewService(repo)
+	service.SetImageURLSigner(&captureImageURLSigner{url: "https://download.example.test/private.jpg"})
+	service.SetImageRecognizer(recognizeImageFunc(func(context.Context, int64, RecognizeImageInput) (RecognizedItemFields, error) {
+		return RecognizedItemFields{}, errors.New("llm failed")
+	}))
+
+	_, err := service.RecognizeAndApplyItemImage(context.Background(), 12, "wdi_pending", []string{"ast_primary"}, false)
+	if err == nil {
+		t.Fatal("expected recognition error")
+	}
+	if repo.lastUpdateInput.RecognitionStatus == nil || *repo.lastUpdateInput.RecognitionStatus != RecognitionStatusFailed {
+		t.Fatalf("expected recognition status failed update, got %#v", repo.lastUpdateInput)
+	}
+}
+
 func TestRecognizeItemImageRejectsMissingAssetPublicID(t *testing.T) {
 	service := NewService(&captureWardrobeRepo{})
 
 	_, err := service.RecognizeItemImage(context.Background(), 12, RecognizeImageInput{
 		AssetPublicID: "   ",
+	})
+
+	if err != ErrInvalidPrimaryAsset {
+		t.Fatalf("expected ErrInvalidPrimaryAsset, got %v", err)
+	}
+}
+
+func TestRecognizeItemImageRejectsUnownedOrInvalidWardrobeAsset(t *testing.T) {
+	service := NewService(&captureWardrobeRepo{})
+	service.SetImageURLSigner(&captureImageURLSigner{})
+	service.SetImageRecognizer(recognizeImageFunc(func(_ context.Context, _ int64, _ RecognizeImageInput) (RecognizedItemFields, error) {
+		t.Fatal("recognizer should not be called for invalid asset")
+		return RecognizedItemFields{}, nil
+	}))
+
+	_, err := service.RecognizeItemImage(context.Background(), 12, RecognizeImageInput{
+		AssetPublicID: "ast_missing",
 	})
 
 	if err != ErrInvalidPrimaryAsset {
@@ -164,6 +305,15 @@ func (r *captureWardrobeRepo) ListItems(_ context.Context, userID int64, filter 
 	return result, nil
 }
 
+func (r *captureWardrobeRepo) FindItemForUser(_ context.Context, userID int64, publicID string) (Item, error) {
+	for _, item := range r.items {
+		if item.UserID == userID && item.PublicID == publicID && item.Status != StatusDeleted {
+			return item, nil
+		}
+	}
+	return Item{}, ErrItemNotFound
+}
+
 func (r *captureWardrobeRepo) ListWardrobeOptions(context.Context) (WardrobeOptions, error) {
 	if len(r.options.Categories) == 0 &&
 		len(r.options.Materials) == 0 &&
@@ -174,9 +324,31 @@ func (r *captureWardrobeRepo) ListWardrobeOptions(context.Context) (WardrobeOpti
 	return r.options, nil
 }
 
+func (r *captureWardrobeRepo) FindRecognizableAsset(_ context.Context, userID int64, assetPublicID string) (Image, error) {
+	if r.recognitionAsset.AssetPublicID == assetPublicID &&
+		strings.HasPrefix(r.recognitionAsset.ObjectKey, "users/") &&
+		strings.Contains(r.recognitionAsset.ObjectKey, "/wardrobe/") &&
+		userID == 12 {
+		return r.recognitionAsset, nil
+	}
+	return Image{}, ErrInvalidPrimaryAsset
+}
+
 func (r *captureWardrobeRepo) CreateItem(_ context.Context, item Item, primaryAssetPublicID string) (Item, error) {
+	item.ID = int64(len(r.created) + 1)
 	r.created = append(r.created, item)
 	r.primaryAssetPublicID = primaryAssetPublicID
+	return item, nil
+}
+
+func (r *captureWardrobeRepo) CreateItemWithAssets(_ context.Context, item Item, assetPublicIDs []string) (Item, error) {
+	item.ID = int64(len(r.created) + 1)
+	r.created = append(r.created, item)
+	r.assetPublicIDs = append([]string{}, assetPublicIDs...)
+	if len(assetPublicIDs) > 0 {
+		r.primaryAssetPublicID = assetPublicIDs[0]
+		item.PrimaryImage = &Image{AssetPublicID: assetPublicIDs[0]}
+	}
 	return item, nil
 }
 
@@ -188,6 +360,33 @@ func (r *captureWardrobeRepo) UpdateItem(_ context.Context, userID int64, public
 			if input.RecommendationStatus != nil {
 				item.RecommendationStatus = *input.RecommendationStatus
 				r.lastUpdateRecommendation = input.RecommendationStatus
+			}
+			if input.Name != nil {
+				item.Name = *input.Name
+			}
+			if input.Category != nil {
+				item.Category = *input.Category
+			}
+			if input.Color != nil {
+				item.Color = *input.Color
+			}
+			if input.Silhouette != nil {
+				item.Silhouette = *input.Silhouette
+			}
+			if input.Material != nil {
+				item.Material = *input.Material
+			}
+			if input.Season != nil {
+				item.Season = *input.Season
+			}
+			if input.SceneTags != nil {
+				item.SceneTags = *input.SceneTags
+			}
+			if input.UserNotes != nil {
+				item.UserNotes = *input.UserNotes
+			}
+			if input.RecognitionStatus != nil {
+				item.RecognitionStatus = *input.RecognitionStatus
 			}
 			return item, nil
 		}
@@ -282,6 +481,39 @@ func TestCreateItemTrimsAndDefaultsFields(t *testing.T) {
 	}
 	if repo.primaryAssetPublicID != "ast_primary" {
 		t.Fatalf("expected trimmed primary asset public id, got %q", repo.primaryAssetPublicID)
+	}
+}
+
+func TestCreateItemSupportsMultipleUploadedAssetsAndStartsRecognitionPending(t *testing.T) {
+	repo := &captureWardrobeRepo{}
+	service := NewService(repo)
+	jobCreator := &captureRecognitionJobCreator{}
+	service.SetRecognitionJobCreator(jobCreator)
+
+	item, err := service.CreateItem(context.Background(), 12, CreateInput{
+		AssetPublicIDs: []string{" ast_primary ", "ast_side", "", " ast_detail "},
+	})
+	if err != nil {
+		t.Fatalf("create item from assets: %v", err)
+	}
+
+	if item.Name != "识别中" || item.Category != "other" {
+		t.Fatalf("expected placeholder item while recognizing, got name=%q category=%q", item.Name, item.Category)
+	}
+	if item.RecognitionStatus != RecognitionStatusPending {
+		t.Fatalf("expected pending recognition status, got %q", item.RecognitionStatus)
+	}
+	if len(repo.assetPublicIDs) != 3 || repo.assetPublicIDs[0] != "ast_primary" || repo.assetPublicIDs[1] != "ast_side" || repo.assetPublicIDs[2] != "ast_detail" {
+		t.Fatalf("expected trimmed uploaded assets preserved, got %#v", repo.assetPublicIDs)
+	}
+	if repo.primaryAssetPublicID != "ast_primary" {
+		t.Fatalf("expected first uploaded asset as primary, got %q", repo.primaryAssetPublicID)
+	}
+	if item.RecognitionJobPublicID != "job_recognition" {
+		t.Fatalf("expected recognition job public id, got %q", item.RecognitionJobPublicID)
+	}
+	if jobCreator.userID != 12 || jobCreator.wardrobeItemID != item.ID || jobCreator.overwrite {
+		t.Fatalf("unexpected job creator context: %#v", jobCreator)
 	}
 }
 
@@ -471,6 +703,18 @@ func TestUpdateItemRejectsEmptyNameWithSentinelError(t *testing.T) {
 	_, err := service.UpdateItem(context.Background(), 12, "wdi_blazer", UpdateInput{Name: &name})
 	if err != ErrInvalidItemName {
 		t.Fatalf("expected ErrInvalidItemName, got %v", err)
+	}
+}
+
+func TestUpdateItemRejectsWhenRecognitionPending(t *testing.T) {
+	service := NewService(&captureWardrobeRepo{items: []Item{
+		{PublicID: "wdi_pending", UserID: 12, Name: "识别中", Category: "other", RecognitionStatus: RecognitionStatusPending, RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true},
+	}})
+
+	name := "米白衬衫"
+	_, err := service.UpdateItem(context.Background(), 12, "wdi_pending", UpdateInput{Name: &name})
+	if err != ErrRecognitionPending {
+		t.Fatalf("expected ErrRecognitionPending, got %v", err)
 	}
 }
 

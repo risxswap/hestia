@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 )
 
@@ -30,7 +29,7 @@ type Provider struct {
 
 type Model struct {
 	ID              int64    `db:"id"`
-	ProviderID      int64    `db:"provider_id"`
+	ProviderCode    string   `db:"provider_code"`
 	ModelCode       string   `db:"model_code"`
 	Name            string   `db:"name"`
 	Caps            []string `db:"-"`
@@ -56,7 +55,7 @@ type ResolvedUsage struct {
 type ConfigRepository interface {
 	FindUsage(ctx context.Context, key string) (Usage, error)
 	FindProviderByCode(ctx context.Context, code string) (Provider, error)
-	FindModel(ctx context.Context, providerID int64, modelCode string) (Model, error)
+	FindModel(ctx context.Context, providerCode string, modelCode string) (Model, error)
 }
 
 type ConfigResolver struct {
@@ -83,7 +82,7 @@ func (r *ConfigResolver) ResolveUsage(ctx context.Context, key string, requiredC
 	if err != nil {
 		return ResolvedUsage{}, err
 	}
-	model, err := r.repo.FindModel(ctx, provider.ID, usage.ModelCode)
+	model, err := r.repo.FindModel(ctx, provider.Code, usage.ModelCode)
 	if err != nil {
 		return ResolvedUsage{}, err
 	}
@@ -117,10 +116,6 @@ func hasRequiredCaps(caps []string, required []string) bool {
 	return true
 }
 
-func modelKey(providerID int64, modelCode string) string {
-	return strings.TrimSpace(modelCode) + "#" + strconvFormatInt(providerID)
-}
-
-func strconvFormatInt(value int64) string {
-	return strconv.FormatInt(value, 10)
+func modelKey(providerCode string, modelCode string) string {
+	return strings.TrimSpace(providerCode) + "#" + strings.TrimSpace(modelCode)
 }

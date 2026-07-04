@@ -1,4 +1,4 @@
-INSERT INTO `system_configs`
+INSERT IGNORE INTO `system_configs`
   (`group`, `key`, `value`, `value_type`, `description`, `status`)
 VALUES
   (
@@ -72,8 +72,3 @@ VALUES
     '衣橱单品廓形枚举',
     'active'
   )
-ON DUPLICATE KEY UPDATE
-  `value` = VALUES(`value`),
-  `value_type` = VALUES(`value_type`),
-  `description` = VALUES(`description`),
-  `status` = VALUES(`status`);

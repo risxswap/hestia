@@ -67,6 +67,12 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	if !containsStatement(exec.queries, "wardrobe.item_options") {
 		t.Fatalf("expected wardrobe item options system config migration statement")
 	}
+	if !containsStatement(exec.queries, "INSERT IGNORE INTO `system_configs`") {
+		t.Fatalf("expected system config initialization to preserve existing rows")
+	}
+	if containsStatement(exec.queries, "ON DUPLICATE KEY UPDATE\n  `value` = VALUES(`value`)") {
+		t.Fatalf("system config migrations must not overwrite initialized config rows")
+	}
 	if !containsStatement(exec.queries, "INSERT IGNORE INTO `files`") {
 		t.Fatalf("expected assets-to-files data copy migration statement")
 	}
@@ -79,11 +85,35 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	if !containsStatement(exec.queries, "CREATE TABLE IF NOT EXISTS `llm_models`") {
 		t.Fatalf("expected llm models table migration statement")
 	}
-	if !containsStatement(exec.queries, "llm.usages") {
-		t.Fatalf("expected llm usages system config migration statement")
+	if !containsStatement(exec.queries, "CREATE TABLE IF NOT EXISTS `data_corrections`") {
+		t.Fatalf("expected data corrections table migration statement")
 	}
 	if !containsStatement(exec.queries, "caps_json") {
 		t.Fatalf("expected llm model caps_json field")
+	}
+	if !containsStatement(exec.queries, "`provider_code` varchar(64) NOT NULL") {
+		t.Fatalf("expected llm models to use provider_code field")
+	}
+	if !containsStatement(exec.queries, "DROP COLUMN `provider_id`") {
+		t.Fatalf("expected llm provider_id to provider_code migration statement")
+	}
+	if !containsStatement(exec.queries, "INSERT INTO `llm_providers`") || !containsStatement(exec.queries, "'qwen'") {
+		t.Fatalf("expected llm provider example config migration statement")
+	}
+	if !containsStatement(exec.queries, "INSERT INTO `llm_models`") ||
+		!containsStatement(exec.queries, "'qwen-plus'") ||
+		!containsStatement(exec.queries, "'qwen-vl-plus'") {
+		t.Fatalf("expected llm model example config migration statement")
+	}
+	if containsStatement(exec.queries, "INSERT INTO `system_configs`\n  (`group`, `key`, `value`, `value_type`, `description`, `status`)\nVALUES\n  ('llm.usages'") {
+		t.Fatalf("llm usage config must be read from database, not seeded with defaults")
+	}
+	if containsStatement(exec.queries, "`api_base_url` = VALUES(`api_base_url`)") ||
+		containsStatement(exec.queries, "`token` = VALUES(`token`)") {
+		t.Fatalf("llm provider seed must not overwrite configured endpoint or api key")
+	}
+	if statementIndex(exec.queries, "INSERT INTO `llm_models`") < statementIndex(exec.queries, "DROP COLUMN `provider_id`") {
+		t.Fatalf("expected llm model examples to run after provider_code schema migration")
 	}
 	for _, key := range []string{"categories", "materials", "seasons", "silhouettes"} {
 		if !containsStatement(exec.queries, "`key`, `value`, `value_type`, `description`, `status`)") || !containsStatement(exec.queries, key) {
@@ -163,6 +193,7 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 		"system_configs",
 		"llm_providers",
 		"llm_models",
+		"data_corrections",
 		"jobs",
 	}
 	for _, table := range expectedTables {
@@ -195,6 +226,9 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 		if !strings.Contains(sql, token) {
 			t.Fatalf("schema missing required token: %s", token)
 		}
+	}
+	if strings.Contains(sql, "`provider_id` bigint unsigned NOT NULL") {
+		t.Fatal("llm_models should use provider_code instead of provider_id")
 	}
 
 	for _, token := range []string{
@@ -255,6 +289,11 @@ func (f *fakeSQLExecutor) ExecContext(_ context.Context, query string, _ ...any)
 	return nil, nil
 }
 
+func (f *fakeSQLExecutor) GetContext(_ context.Context, _ any, query string, _ ...any) error {
+	f.queries = append(f.queries, query)
+	return sql.ErrNoRows
+}
+
 type duplicateColumnSQLExecutor struct {
 	sawRecommendationStatusMigration bool
 }
@@ -267,6 +306,10 @@ func (f *duplicateColumnSQLExecutor) ExecContext(_ context.Context, query string
 	return nil, nil
 }
 
+func (f *duplicateColumnSQLExecutor) GetContext(_ context.Context, _ any, _ string, _ ...any) error {
+	return sql.ErrNoRows
+}
+
 func containsStatement(queries []string, token string) bool {
 	for _, query := range queries {
 		if strings.Contains(query, token) {
@@ -274,4 +317,13 @@ func containsStatement(queries []string, token string) bool {
 		}
 	}
 	return false
+}
+
+func statementIndex(queries []string, token string) int {
+	for i, query := range queries {
+		if strings.Contains(query, token) {
+			return i
+		}
+	}
+	return -1
 }

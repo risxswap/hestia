@@ -56,7 +56,7 @@ function pendingImageFiles(file) {
   return [
     {
       url,
-      name: file.name || "衣服主图",
+      name: file.name || "衣服图片",
       type: "image",
       status: "loading"
     }
@@ -106,6 +106,26 @@ function confirmDelete() {
   });
 }
 
+function confirmRecognizeOverwrite() {
+  if (typeof wx === "undefined" || !wx.showModal) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise((resolve) => {
+    wx.showModal({
+      title: "重新识别图片",
+      content: "重新识别会覆盖当前名称、分类、颜色、廓形、材质、季节、场景和备注，是否继续？",
+      confirmText: "覆盖",
+      success(result) {
+        resolve(Boolean(result && result.confirm));
+      },
+      fail() {
+        resolve(false);
+      }
+    });
+  });
+}
+
 const wardrobeDetailPageConfig = {
   data: {
     loading: false,
@@ -120,6 +140,9 @@ const wardrobeDetailPageConfig = {
     imageFiles: [],
     imageUploading: false,
     imageUploadError: "",
+    imageRecognizing: false,
+    imageRecognizeError: "",
+    canRecognizeImage: false,
     imageGridConfig: {
       column: 4,
       width: 160,
@@ -209,6 +232,12 @@ const wardrobeDetailPageConfig = {
       });
       return;
     }
+    if (this.data.item.isRecognizing) {
+      this.setData({
+        errorMessage: "图片识别完成前不能编辑"
+      });
+      return;
+    }
 
     this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
     this.setData({
@@ -218,6 +247,9 @@ const wardrobeDetailPageConfig = {
       imageFiles: imageFilesFromItem(this.data.item),
       imageUploading: false,
       imageUploadError: "",
+      imageRecognizing: false,
+      imageRecognizeError: "",
+      canRecognizeImage: Boolean(this.data.item.primary_image && this.data.item.primary_image.asset_public_id),
       errorMessage: ""
     });
   },
@@ -231,6 +263,9 @@ const wardrobeDetailPageConfig = {
       imageFiles: [],
       imageUploading: false,
       imageUploadError: "",
+      imageRecognizing: false,
+      imageRecognizeError: "",
+      canRecognizeImage: false,
       errorMessage: ""
     });
     this._imageUploadPromise = null;
@@ -268,7 +303,9 @@ const wardrobeDetailPageConfig = {
           draft,
           imageFiles: confirmedLocalImageFiles(file, uploaded),
           imageUploading: false,
-          imageUploadError: ""
+          imageUploadError: "",
+          imageRecognizeError: "",
+          canRecognizeImage: Boolean(uploaded && uploaded.asset_public_id)
         });
         this._imageUploadPromise = null;
         return uploaded;
@@ -281,7 +318,8 @@ const wardrobeDetailPageConfig = {
         this.setData({
           imageFiles: failedImageFiles(file, message),
           imageUploading: false,
-          imageUploadError: message
+          imageUploadError: message,
+          canRecognizeImage: Boolean(this.data.draft.primary_asset_public_id)
         });
         this._imageUploadPromise = null;
         return null;
@@ -297,10 +335,68 @@ const wardrobeDetailPageConfig = {
       imageFiles: [],
       imageUploading: false,
       imageUploadError: "",
+      imageRecognizing: false,
+      imageRecognizeError: "",
+      canRecognizeImage: false,
       draft: Object.assign({}, this.data.draft, {
         primary_asset_public_id: ""
       })
     });
+  },
+
+  async handleRecognizeImageOverwrite() {
+    if (this.data.imageUploading) {
+      this.setData({
+        imageRecognizeError: "图片还在上传，请稍后再识别"
+      });
+      return null;
+    }
+
+    const assetPublicID = this.data.draft && this.data.draft.primary_asset_public_id
+      ? this.data.draft.primary_asset_public_id
+      : "";
+    if (!assetPublicID) {
+      this.setData({
+        imageRecognizeError: "请先上传图片"
+      });
+      return null;
+    }
+
+    const confirmed = await confirmRecognizeOverwrite();
+    if (!confirmed) {
+      return null;
+    }
+
+    const recognizeRunID = this._imageUploadRunID || 0;
+    this.setData({
+      imageRecognizing: true,
+      imageRecognizeError: ""
+    });
+
+    try {
+      const recognized = await api.recognizeWardrobeItemImage(assetPublicID, {
+        itemPublicID: this.data.editingPublicID || this.data.itemPublicID,
+        overwrite: true
+      });
+      if (this._imageUploadRunID !== recognizeRunID) {
+        return recognized;
+      }
+      this.setData({
+        imageRecognizing: false,
+        imageRecognizeError: ""
+      });
+      showToast("已提交识别", "success");
+      return recognized;
+    } catch (error) {
+      if (this._imageUploadRunID !== recognizeRunID) {
+        return null;
+      }
+      this.setData({
+        imageRecognizing: false,
+        imageRecognizeError: error && error.message ? error.message : "图片识别失败，请稍后重试"
+      });
+      return null;
+    }
   },
 
   handleDraftInput(event) {
@@ -400,6 +496,9 @@ const wardrobeDetailPageConfig = {
         imageFiles: [],
         imageUploading: false,
         imageUploadError: "",
+        imageRecognizing: false,
+        imageRecognizeError: "",
+        canRecognizeImage: false,
         item,
         itemPublicID: item.public_id
       });

@@ -16,6 +16,10 @@ const (
 	RecommendationStatusPreferred = "preferred"
 	RecommendationStatusNormal    = "normal"
 	RecommendationStatusPaused    = "paused"
+
+	RecognitionStatusPending   = "pending"
+	RecognitionStatusSucceeded = "succeeded"
+	RecognitionStatusFailed    = "failed"
 )
 
 var (
@@ -25,6 +29,7 @@ var (
 	ErrInvalidWardrobeOption       = errors.New("invalid wardrobe configured option")
 	ErrItemNotFound                = errors.New("wardrobe item not found")
 	ErrRepositoryUnsupported       = errors.New("wardrobe repository unsupported")
+	ErrRecognitionPending          = errors.New("wardrobe item recognition pending")
 )
 
 type Repository interface {
@@ -33,9 +38,19 @@ type Repository interface {
 
 type itemRepository interface {
 	ListItems(ctx context.Context, userID int64, filter ListFilter) ([]Item, error)
+	FindItemForUser(ctx context.Context, userID int64, publicID string) (Item, error)
 	CreateItem(ctx context.Context, item Item, primaryAssetPublicID string) (Item, error)
 	UpdateItem(ctx context.Context, userID int64, publicID string, input UpdateInput) (Item, error)
 	SoftDeleteItem(ctx context.Context, userID int64, publicID string) error
+}
+
+type multiAssetItemRepository interface {
+	itemRepository
+	CreateItemWithAssets(ctx context.Context, item Item, assetPublicIDs []string) (Item, error)
+}
+
+type recognizerAssetRepository interface {
+	FindRecognizableAsset(ctx context.Context, userID int64, assetPublicID string) (Image, error)
 }
 
 type optionsRepository interface {
@@ -60,6 +75,10 @@ type ImageRecognizer interface {
 	RecognizeWardrobeItemImage(ctx context.Context, userID int64, input RecognizeImageInput) (RecognizedItemFields, error)
 }
 
+type RecognitionJobCreator interface {
+	CreateWardrobeRecognitionJob(ctx context.Context, userID int64, wardrobeItemID int64, wardrobeItemPublicID string, assetPublicIDs []string, overwrite bool) (string, error)
+}
+
 type ImageURLSignErrorHandler func(ctx context.Context, objectKey string, err error)
 
 type Service struct {
@@ -67,6 +86,7 @@ type Service struct {
 	imageURLSigner           ImageURLSigner
 	imageURLSignErrorHandler ImageURLSignErrorHandler
 	imageRecognizer          ImageRecognizer
+	recognitionJobCreator    RecognitionJobCreator
 }
 
 func NewService(repo Repository) *Service {
@@ -92,6 +112,13 @@ func (s *Service) SetImageRecognizer(recognizer ImageRecognizer) {
 		return
 	}
 	s.imageRecognizer = recognizer
+}
+
+func (s *Service) SetRecognitionJobCreator(creator RecognitionJobCreator) {
+	if s == nil {
+		return
+	}
+	s.recognitionJobCreator = creator
 }
 
 func (s *Service) CreateCoreItems(ctx context.Context, userID int64, inputs []Input) ([]Item, error) {
@@ -148,13 +175,21 @@ func (s *Service) ListItems(ctx context.Context, userID int64, filter ListFilter
 }
 
 func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInput) (Item, error) {
+	assetPublicIDs := trimStringSlice(input.AssetPublicIDs)
+	primaryAssetPublicID := strings.TrimSpace(input.PrimaryAssetPublicID)
+	if len(assetPublicIDs) == 0 && primaryAssetPublicID != "" {
+		assetPublicIDs = []string{primaryAssetPublicID}
+	}
 	name := strings.TrimSpace(input.Name)
-	if name == "" {
+	if name == "" && len(assetPublicIDs) == 0 {
 		return Item{}, ErrInvalidItemName
+	}
+	if name == "" {
+		name = "识别中"
 	}
 	category := strings.TrimSpace(input.Category)
 	if category == "" {
-		category = "unknown"
+		category = "other"
 	}
 	recommendationStatus := strings.TrimSpace(input.RecommendationStatus)
 	if recommendationStatus == "" {
@@ -190,13 +225,41 @@ func (s *Service) CreateItem(ctx context.Context, userID int64, input CreateInpu
 		UserNotes:            strings.TrimSpace(input.UserNotes),
 		IsCore:               isCore,
 		RecommendationStatus: recommendationStatus,
+		RecognitionStatus:    recognitionStatusForCreate(input, assetPublicIDs),
 		Status:               StatusActive,
 	}
-	created, err := repo.CreateItem(ctx, item, strings.TrimSpace(input.PrimaryAssetPublicID))
+	var created Item
+	if len(assetPublicIDs) > 0 {
+		if multiRepo, ok := repo.(multiAssetItemRepository); ok {
+			created, err = multiRepo.CreateItemWithAssets(ctx, item, assetPublicIDs)
+		} else {
+			created, err = repo.CreateItem(ctx, item, assetPublicIDs[0])
+		}
+	} else {
+		created, err = repo.CreateItem(ctx, item, primaryAssetPublicID)
+	}
 	if err != nil {
 		return Item{}, err
 	}
+	if len(assetPublicIDs) > 0 && s.recognitionJobCreator != nil {
+		jobPublicID, err := s.recognitionJobCreator.CreateWardrobeRecognitionJob(ctx, userID, created.ID, created.PublicID, assetPublicIDs, false)
+		if err != nil {
+			return Item{}, err
+		}
+		created.RecognitionJobPublicID = jobPublicID
+	}
 	return s.enrichPrimaryImageURL(ctx, created), nil
+}
+
+func recognitionStatusForCreate(input CreateInput, assetPublicIDs []string) string {
+	status := strings.TrimSpace(input.RecognitionStatus)
+	if status != "" {
+		return status
+	}
+	if len(assetPublicIDs) > 0 {
+		return RecognitionStatusPending
+	}
+	return RecognitionStatusSucceeded
 }
 
 func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string, input UpdateInput) (Item, error) {
@@ -232,7 +295,15 @@ func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string,
 	if err != nil {
 		return Item{}, err
 	}
-	item, err := repo.UpdateItem(ctx, userID, strings.TrimSpace(publicID), input)
+	publicID = strings.TrimSpace(publicID)
+	current, err := repo.FindItemForUser(ctx, userID, publicID)
+	if err != nil {
+		return Item{}, err
+	}
+	if current.RecognitionStatus == RecognitionStatusPending {
+		return Item{}, ErrRecognitionPending
+	}
+	item, err := repo.UpdateItem(ctx, userID, publicID, input)
 	if err != nil {
 		return Item{}, err
 	}
@@ -291,11 +362,134 @@ func (s *Service) RecognizeItemImage(ctx context.Context, userID int64, input Re
 	if s == nil || s.imageRecognizer == nil {
 		return RecognizedItemFields{}, ErrImageRecognizerUnavailable
 	}
+	if input.ImageURL == "" {
+		if s.imageURLSigner == nil {
+			return RecognizedItemFields{}, ErrImageRecognizerUnavailable
+		}
+		repo, ok := s.repo.(recognizerAssetRepository)
+		if !ok {
+			return RecognizedItemFields{}, ErrRepositoryUnsupported
+		}
+		image, err := repo.FindRecognizableAsset(ctx, userID, input.AssetPublicID)
+		if err != nil {
+			if errors.Is(err, ErrItemNotFound) {
+				return RecognizedItemFields{}, ErrInvalidPrimaryAsset
+			}
+			return RecognizedItemFields{}, err
+		}
+		imageURL, err := s.imageURLSigner.PrivateDownloadURL(ctx, image.ObjectKey)
+		if err != nil {
+			return RecognizedItemFields{}, err
+		}
+		input.ImageURL = strings.TrimSpace(imageURL)
+		if input.ImageURL == "" {
+			return RecognizedItemFields{}, ErrImageRecognizerUnavailable
+		}
+	}
 	result, err := s.imageRecognizer.RecognizeWardrobeItemImage(ctx, userID, input)
 	if err != nil {
 		return RecognizedItemFields{}, err
 	}
 	return normalizeRecognizedItemFields(result), nil
+}
+
+func (s *Service) ScheduleItemImageRecognition(ctx context.Context, userID int64, input RecognizeImageInput) (map[string]any, error) {
+	input.AssetPublicID = strings.TrimSpace(input.AssetPublicID)
+	input.ItemPublicID = strings.TrimSpace(input.ItemPublicID)
+	if input.AssetPublicID == "" || input.ItemPublicID == "" {
+		return nil, ErrInvalidPrimaryAsset
+	}
+	if s == nil || s.recognitionJobCreator == nil {
+		return nil, ErrImageRecognizerUnavailable
+	}
+	repo, err := s.itemRepo()
+	if err != nil {
+		return nil, err
+	}
+	item, err := repo.FindItemForUser(ctx, userID, input.ItemPublicID)
+	if err != nil {
+		return nil, err
+	}
+	pending := RecognitionStatusPending
+	if _, err := repo.UpdateItem(ctx, userID, item.PublicID, UpdateInput{RecognitionStatus: &pending}); err != nil {
+		return nil, err
+	}
+	jobPublicID, err := s.recognitionJobCreator.CreateWardrobeRecognitionJob(ctx, userID, item.ID, item.PublicID, []string{input.AssetPublicID}, input.Overwrite)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"job_public_id":      jobPublicID,
+		"recognition_status": RecognitionStatusPending,
+	}, nil
+}
+
+func (s *Service) RecognizeAndApplyItemImage(ctx context.Context, userID int64, publicID string, assetPublicIDs []string, overwrite bool) (Item, error) {
+	assetPublicIDs = trimStringSlice(assetPublicIDs)
+	if len(assetPublicIDs) == 0 {
+		return Item{}, ErrInvalidPrimaryAsset
+	}
+	repo, err := s.itemRepo()
+	if err != nil {
+		return Item{}, err
+	}
+	fields, err := s.RecognizeItemImage(ctx, userID, RecognizeImageInput{AssetPublicID: assetPublicIDs[0]})
+	if err != nil {
+		failed := RecognitionStatusFailed
+		_, _ = repo.UpdateItem(ctx, userID, strings.TrimSpace(publicID), UpdateInput{RecognitionStatus: &failed})
+		return Item{}, err
+	}
+	input := updateInputFromRecognizedFields(fields, overwrite)
+	succeeded := RecognitionStatusSucceeded
+	input.RecognitionStatus = &succeeded
+	item, err := repo.UpdateItem(ctx, userID, strings.TrimSpace(publicID), input)
+	if err != nil {
+		return Item{}, err
+	}
+	return s.enrichPrimaryImageURL(ctx, item), nil
+}
+
+func updateInputFromRecognizedFields(fields RecognizedItemFields, overwrite bool) UpdateInput {
+	input := UpdateInput{}
+	if fields.Name != "" || overwrite {
+		value := fields.Name
+		if value == "" {
+			value = "识别中"
+		}
+		input.Name = &value
+	}
+	if fields.Category != "" || overwrite {
+		value := fields.Category
+		if value == "" {
+			value = "other"
+		}
+		input.Category = &value
+	}
+	if fields.Color != "" || overwrite {
+		value := fields.Color
+		input.Color = &value
+	}
+	if fields.Silhouette != "" || overwrite {
+		value := fields.Silhouette
+		input.Silhouette = &value
+	}
+	if fields.Material != "" || overwrite {
+		value := fields.Material
+		input.Material = &value
+	}
+	if fields.Season != "" || overwrite {
+		value := fields.Season
+		input.Season = &value
+	}
+	if len(fields.SceneTags) > 0 || overwrite {
+		value := trimStringSlice(fields.SceneTags)
+		input.SceneTags = &value
+	}
+	if fields.UserNotes != "" || overwrite {
+		value := fields.UserNotes
+		input.UserNotes = &value
+	}
+	return input
 }
 
 func (s *Service) itemRepo() (itemRepository, error) {

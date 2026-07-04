@@ -60,7 +60,6 @@ type ServiceOptions struct {
 	UploadSigner      UploadSigner
 	DownloadSigner    DownloadSigner
 	ObjectStatChecker ObjectStatChecker
-	UploadConfirmer   UploadConfirmer
 }
 
 type UploadSignRequest struct {
@@ -116,27 +115,6 @@ type ObjectStatCheckerFunc func(ctx context.Context, bucket string, objectKey st
 
 func (f ObjectStatCheckerFunc) StatObject(ctx context.Context, bucket string, objectKey string) (ObjectStat, error) {
 	return f(ctx, bucket, objectKey)
-}
-
-type ConfirmedUpload struct {
-	FilePublicID string
-	FileType     string
-	ObjectKey    string
-	URL          string
-}
-
-type UploadConfirmResult struct {
-	RecognizedFields map[string]any
-}
-
-type UploadConfirmer interface {
-	AfterConfirmUpload(ctx context.Context, userID int64, upload ConfirmedUpload) (UploadConfirmResult, error)
-}
-
-type UploadConfirmerFunc func(ctx context.Context, userID int64, upload ConfirmedUpload) (UploadConfirmResult, error)
-
-func (f UploadConfirmerFunc) AfterConfirmUpload(ctx context.Context, userID int64, upload ConfirmedUpload) (UploadConfirmResult, error) {
-	return f(ctx, userID, upload)
 }
 
 type Service struct {
@@ -528,27 +506,12 @@ func (s *Service) verifyObject(ctx context.Context, bucket string, objectKey str
 }
 
 func (s *Service) confirmResult(ctx context.Context, item Asset) (ConfirmResult, error) {
-	url, err := s.PrivateDownloadURL(ctx, item.ObjectKey)
-	if err != nil {
-		return ConfirmResult{}, err
-	}
 	result := ConfirmResult{
 		AssetPublicID: item.PublicID,
 		FilePublicID:  item.PublicID,
 		ObjectKey:     item.ObjectKey,
 		AssetType:     item.AssetType,
 		FileType:      item.AssetType,
-	}
-	if s != nil && s.options.UploadConfirmer != nil {
-		after, err := s.options.UploadConfirmer.AfterConfirmUpload(ctx, item.OwnerUserID, ConfirmedUpload{
-			FilePublicID: item.PublicID,
-			FileType:     item.AssetType,
-			ObjectKey:    item.ObjectKey,
-			URL:          url,
-		})
-		if err == nil && len(after.RecognizedFields) > 0 {
-			result.RecognizedFields = after.RecognizedFields
-		}
 	}
 	return result, nil
 }

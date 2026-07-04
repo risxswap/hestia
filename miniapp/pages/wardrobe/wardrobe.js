@@ -20,6 +20,7 @@ const {
   styleLogicForItem,
   mergeRecognizedFieldsIntoDraft,
   normalizeWardrobeOptions,
+  overwriteDraftWithRecognizedFields,
   withEmptyOption,
   optionLabel,
   optionIndex
@@ -69,7 +70,7 @@ function pendingImageFiles(file) {
   return [
     {
       url,
-      name: file.name || "衣服主图",
+      name: file.name || "衣服图片",
       type: "image",
       status: "loading"
     }
@@ -377,42 +378,48 @@ const wardrobePageConfig = {
   },
 
   handleImageUpload(event) {
-    if (this.data.imageUploading) {
-      return this._imageUploadPromise || Promise.resolve([]);
-    }
-
     const file = getUploadFile(event);
     if (!file) {
       return Promise.resolve([]);
     }
 
+    const pendingFiles = this.data.imageFiles.concat(pendingImageFiles(file));
     this.setData({
-      imageFiles: pendingImageFiles(file),
+      imageFiles: pendingFiles,
       imageUploading: true,
       imageUploadError: ""
     });
 
-    const uploadRunID = (this._imageUploadRunID || 0) + 1;
-    this._imageUploadRunID = uploadRunID;
-    this._imageUploadPromise = api.uploadFileToQiniu(file, {
+    const uploadRunID = this._imageUploadRunID || 0;
+    this._activeImageUploads = (this._activeImageUploads || 0) + 1;
+    const uploadPromise = api.uploadFileToQiniu(file, {
       assetType: "wardrobe_item_photo"
     })
       .then((uploaded) => {
         if (this._imageUploadRunID !== uploadRunID) {
           return uploaded;
         }
+        const assetPublicID = uploaded && uploaded.asset_public_id ? uploaded.asset_public_id : "";
+        const assetPublicIDs = (this.data.draft.asset_public_ids || []).slice();
+        if (assetPublicID && !assetPublicIDs.includes(assetPublicID)) {
+          assetPublicIDs.push(assetPublicID);
+        }
         const draft = decorateDraftForOptions(Object.assign({}, this.data.draft, {
-          primary_asset_public_id: uploaded && uploaded.asset_public_id ? uploaded.asset_public_id : ""
+          primary_asset_public_id: this.data.draft.primary_asset_public_id || assetPublicID,
+          asset_public_ids: assetPublicIDs
         }), this.data);
+        const previewURL = filePreviewUrl(file);
+        const nextFiles = this.data.imageFiles.map((item) => (
+          item.url === previewURL ? Object.assign({}, item, confirmedLocalImageFiles(file, uploaded)[0]) : item
+        ));
+        this._activeImageUploads = Math.max(0, (this._activeImageUploads || 1) - 1);
         this.setData({
           draft,
-          imageFiles: confirmedLocalImageFiles(file, uploaded),
-          imageUploading: false,
+          imageFiles: nextFiles,
+          imageUploading: this._activeImageUploads > 0,
           imageUploadError: "",
           imageRecognizeError: ""
         });
-        this._imageUploadPromise = null;
-        this.applyUploadedWardrobeRecognition(uploaded, uploadRunID);
         return uploaded;
       })
       .catch((error) => {
@@ -420,22 +427,26 @@ const wardrobePageConfig = {
           return null;
         }
         const message = error && error.message ? error.message : "图片上传失败";
+        this._activeImageUploads = Math.max(0, (this._activeImageUploads || 1) - 1);
+        const previewURL = filePreviewUrl(file);
         this.setData({
-          imageFiles: failedImageFiles(file, message),
-          imageUploading: false,
+          imageFiles: this.data.imageFiles.map((item) => (
+            item.url === previewURL ? Object.assign({}, item, failedImageFiles(file, message)[0]) : item
+          )),
+          imageUploading: this._activeImageUploads > 0,
           imageUploadError: message,
           imageRecognizing: false
         });
-        this._imageUploadPromise = null;
         return null;
       });
 
-    return this._imageUploadPromise;
+    return uploadPromise;
   },
 
   handleImageRemove() {
     this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
     this._imageUploadPromise = null;
+    this._activeImageUploads = 0;
     this.setData({
       imageFiles: [],
       imageUploading: false,
@@ -443,7 +454,8 @@ const wardrobePageConfig = {
       imageRecognizing: false,
       imageRecognizeError: "",
       draft: decorateDraftForOptions(Object.assign({}, this.data.draft, {
-        primary_asset_public_id: ""
+        primary_asset_public_id: "",
+        asset_public_ids: []
       }), this.data)
     });
   },
@@ -492,6 +504,80 @@ const wardrobePageConfig = {
       this.setData({
         imageRecognizing: false,
         imageRecognizeError: error && error.message ? error.message : "图片已上传，识别失败，可手动填写"
+      });
+      return null;
+    }
+  },
+
+  async createItemFromUploadedImage(uploaded, uploadRunID) {
+    const assetPublicID = uploaded && uploaded.asset_public_id ? uploaded.asset_public_id : "";
+    if (!assetPublicID) {
+      this.setData({
+        imageRecognizing: false,
+        imageRecognizeError: "图片上传失败，请重新上传"
+      });
+      return null;
+    }
+
+    const recognizeRunID = uploadRunID || this._imageUploadRunID || 0;
+    this.setData({
+      imageRecognizing: true,
+      imageRecognizeError: "",
+      saving: true,
+      errorMessage: ""
+    });
+
+    try {
+      const recognized = uploaded && uploaded.recognized_fields
+        ? uploaded.recognized_fields
+        : typeof api.recognizeWardrobeItemImage === "function"
+          ? await api.recognizeWardrobeItemImage(assetPublicID)
+          : null;
+      if (this._imageUploadRunID !== recognizeRunID) {
+        return recognized;
+      }
+      const draft = overwriteDraftWithRecognizedFields(Object.assign({}, cloneDraft({
+        category: "",
+        primary_asset_public_id: assetPublicID
+      })), recognized || {}, this.data.wardrobeOptions);
+      const payload = buildPayload(draft);
+      if (!payload.name || !payload.category) {
+        this.setData({
+          saving: false,
+          imageRecognizing: false,
+          imageRecognizeError: "图片已上传，但没有识别出可保存的信息，请重新上传更清晰的图片"
+        });
+        return null;
+      }
+
+      const saved = await api.createWardrobeItem(payload);
+      if (this._imageUploadRunID !== recognizeRunID) {
+        return saved;
+      }
+      const normalizedSaved = decorateWardrobeItem(saved);
+      const nextItems = this.data.items.concat(normalizedSaved);
+      this.setData(Object.assign({
+        saving: false,
+        editorVisible: false,
+        editingPublicID: "",
+        draft: decorateDraftForOptions(cloneDraft(), this.data),
+        imageFiles: [],
+        imageUploading: false,
+        imageUploadError: "",
+        imageRecognizing: false,
+        imageRecognizeError: "",
+        errorMessage: ""
+      }, nextWardrobeState(nextItems, this.data.activeCategory)));
+      showToast("已添加", "success");
+      return saved;
+    } catch (error) {
+      if (this._imageUploadRunID !== recognizeRunID) {
+        return null;
+      }
+      this.setData({
+        saving: false,
+        imageRecognizing: false,
+        imageRecognizeError: error && error.message ? error.message : "图片识别失败，请重新上传"
       });
       return null;
     }
@@ -574,10 +660,23 @@ const wardrobePageConfig = {
       return;
     }
 
-    const payload = buildPayload(this.data.draft);
+    const draft = this.data.editingPublicID
+      ? Object.assign({}, this.data.draft)
+      : Object.assign({}, this.data.draft, {
+        name: "识别中",
+        category: "other",
+        recognition_status: "pending"
+      });
+    const payload = buildPayload(draft);
     if (!payload.name || !payload.category) {
       this.setData({
         errorMessage: "请填写单品名称和分类"
+      });
+      return;
+    }
+    if (!this.data.editingPublicID && (!payload.asset_public_ids || !payload.asset_public_ids.length)) {
+      this.setData({
+        errorMessage: "请先上传图片"
       });
       return;
     }
@@ -678,6 +777,7 @@ if (typeof module !== "undefined") {
     styleLogicForItem,
     normalizeWardrobeOptions,
     mergeRecognizedFieldsIntoDraft,
+    overwriteDraftWithRecognizedFields,
     nextWardrobeState,
     wardrobePageConfig
   };

@@ -27,6 +27,9 @@ func TestNewDepsIncludesDBWhenDatabaseDSNIsConfigured(t *testing.T) {
 	if deps.Redis == nil {
 		t.Fatalf("expected redis dependency")
 	}
+	if deps.LLM == nil {
+		t.Fatalf("expected llm dependency")
+	}
 }
 
 func TestNewDepsAllowsEmptyDatabaseDSN(t *testing.T) {
@@ -40,6 +43,9 @@ func TestNewDepsAllowsEmptyDatabaseDSN(t *testing.T) {
 	}
 	if deps.DB != nil {
 		t.Fatalf("expected nil db, got %#v", deps.DB)
+	}
+	if deps.LLM != nil {
+		t.Fatalf("expected nil llm without database, got %#v", deps.LLM)
 	}
 }
 

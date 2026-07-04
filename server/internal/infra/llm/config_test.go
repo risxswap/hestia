@@ -27,10 +27,10 @@ func TestMySQLConfigRepositoryFindsUsageProviderAndModel(t *testing.T) {
 		WithArgs("qwen", StatusActive).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "code", "name", "api_base_url", "token", "auth_type", "status"}).
 			AddRow(7, "qwen", "通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", "token", "bearer", StatusActive))
-	mock.ExpectQuery("SELECT id, provider_id, model_code, name, caps_json, max_input_tokens, max_output_tokens, status").
-		WithArgs(int64(7), "qwen-vl-plus", StatusActive).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_id", "model_code", "name", "caps_json", "max_input_tokens", "max_output_tokens", "status"}).
-			AddRow(9, 7, "qwen-vl-plus", "Qwen VL Plus", []byte(`["text","vision","json"]`), 32000, 2000, StatusActive))
+	mock.ExpectQuery("SELECT id, provider_code, model_code, name, caps_json, max_input_tokens, max_output_tokens, status").
+		WithArgs("qwen", "qwen-vl-plus", StatusActive).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_code", "model_code", "name", "caps_json", "max_input_tokens", "max_output_tokens", "status"}).
+			AddRow(9, "qwen", "qwen-vl-plus", "Qwen VL Plus", []byte(`["text","vision","json"]`), 32000, 2000, StatusActive))
 
 	usage, err := repo.FindUsage(context.Background(), " wardrobe_image_recognition ")
 	if err != nil {
@@ -40,7 +40,7 @@ func TestMySQLConfigRepositoryFindsUsageProviderAndModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find provider: %v", err)
 	}
-	model, err := repo.FindModel(context.Background(), provider.ID, usage.ModelCode)
+	model, err := repo.FindModel(context.Background(), provider.Code, usage.ModelCode)
 	if err != nil {
 		t.Fatalf("find model: %v", err)
 	}
@@ -78,8 +78,8 @@ func (r memoryConfigRepo) FindProviderByCode(_ context.Context, code string) (Pr
 	return provider, nil
 }
 
-func (r memoryConfigRepo) FindModel(_ context.Context, providerID int64, modelCode string) (Model, error) {
-	model, ok := r.models[modelKey(providerID, modelCode)]
+func (r memoryConfigRepo) FindModel(_ context.Context, providerCode string, modelCode string) (Model, error) {
+	model, ok := r.models[modelKey(providerCode, modelCode)]
 	if !ok {
 		return Model{}, ErrModelNotFound
 	}
@@ -112,13 +112,13 @@ func TestConfigResolverResolvesActiveUsageProviderAndModel(t *testing.T) {
 			},
 		},
 		models: map[string]Model{
-			modelKey(7, "qwen-vl-plus"): {
-				ID:         9,
-				ProviderID: 7,
-				ModelCode:  "qwen-vl-plus",
-				Name:       "Qwen VL Plus",
-				Caps:       []string{"text", "vision", "json"},
-				Status:     StatusActive,
+			modelKey("qwen", "qwen-vl-plus"): {
+				ID:           9,
+				ProviderCode: "qwen",
+				ModelCode:    "qwen-vl-plus",
+				Name:         "Qwen VL Plus",
+				Caps:         []string{"text", "vision", "json"},
+				Status:       StatusActive,
 			},
 		},
 	})
@@ -145,7 +145,7 @@ func TestConfigResolverRejectsMissingRequiredCapability(t *testing.T) {
 			"qwen": {ID: 7, Code: "qwen", Status: StatusActive},
 		},
 		models: map[string]Model{
-			modelKey(7, "qwen-plus"): {ID: 9, ProviderID: 7, ModelCode: "qwen-plus", Caps: []string{"text"}, Status: StatusActive},
+			modelKey("qwen", "qwen-plus"): {ID: 9, ProviderCode: "qwen", ModelCode: "qwen-plus", Caps: []string{"text"}, Status: StatusActive},
 		},
 	})
 

@@ -66,20 +66,20 @@ LIMIT 1
 	return provider, nil
 }
 
-func (r *MySQLConfigRepository) FindModel(ctx context.Context, providerID int64, modelCode string) (Model, error) {
+func (r *MySQLConfigRepository) FindModel(ctx context.Context, providerCode string, modelCode string) (Model, error) {
 	if r == nil || r.ext == nil {
 		return Model{}, ErrModelNotFound
 	}
 	var row llmModelRow
 	err := sqlx.GetContext(ctx, r.ext, &row, `
-SELECT id, provider_id, model_code, name, caps_json, max_input_tokens, max_output_tokens, status
+SELECT id, provider_code, model_code, name, caps_json, max_input_tokens, max_output_tokens, status
 FROM llm_models
-WHERE provider_id = ?
+WHERE provider_code = ?
   AND model_code = ?
   AND status = ?
   AND deleted_at IS NULL
 LIMIT 1
-`, providerID, strings.TrimSpace(modelCode), StatusActive)
+`, strings.TrimSpace(providerCode), strings.TrimSpace(modelCode), StatusActive)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Model{}, ErrModelNotFound
 	}
@@ -118,7 +118,7 @@ func (r llmUsageRow) usage() (Usage, error) {
 
 type llmModelRow struct {
 	ID              int64           `db:"id"`
-	ProviderID      int64           `db:"provider_id"`
+	ProviderCode    string          `db:"provider_code"`
 	ModelCode       string          `db:"model_code"`
 	Name            string          `db:"name"`
 	CapsJSON        json.RawMessage `db:"caps_json"`
@@ -133,12 +133,12 @@ func (r llmModelRow) model() (Model, error) {
 		return Model{}, err
 	}
 	model := Model{
-		ID:         r.ID,
-		ProviderID: r.ProviderID,
-		ModelCode:  strings.TrimSpace(r.ModelCode),
-		Name:       strings.TrimSpace(r.Name),
-		Caps:       trimStrings(caps),
-		Status:     strings.TrimSpace(r.Status),
+		ID:           r.ID,
+		ProviderCode: strings.TrimSpace(r.ProviderCode),
+		ModelCode:    strings.TrimSpace(r.ModelCode),
+		Name:         strings.TrimSpace(r.Name),
+		Caps:         trimStrings(caps),
+		Status:       strings.TrimSpace(r.Status),
 	}
 	if r.MaxInputTokens.Valid {
 		value := int(r.MaxInputTokens.Int64)

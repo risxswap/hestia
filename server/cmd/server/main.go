@@ -8,6 +8,7 @@ import (
 	baseapp "hestia/server/internal/app"
 	userapp "hestia/server/internal/app/user"
 	"hestia/server/internal/infra/config"
+	"hestia/server/internal/infra/llm"
 	"hestia/server/internal/infra/logger"
 	"hestia/server/internal/infra/migration"
 	mysqlinfra "hestia/server/internal/infra/mysql"
@@ -64,5 +65,9 @@ func newDeps(cfg *config.Config, log *slog.Logger) (*baseapp.Deps, func(), error
 			_ = db.Close()
 		}
 	}
-	return &baseapp.Deps{Config: cfg, DB: db, Redis: redisClient, Logger: log}, cleanup, nil
+	var llmClient llm.Client
+	if db != nil {
+		llmClient = llm.NewEinoClient()
+	}
+	return &baseapp.Deps{Config: cfg, DB: db, Redis: redisClient, LLM: llmClient, Logger: log}, cleanup, nil
 }

@@ -6,6 +6,7 @@ import (
 
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/domain/asset"
+	"hestia/server/internal/domain/job"
 	"hestia/server/internal/infra/llm"
 
 	"github.com/gin-gonic/gin"
@@ -20,9 +21,12 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 		logger = deps.Logger
 		service = NewService(repo)
 		service.SetImageURLSigner(asset.NewServiceFromConfig(asset.NewMySQLRepository(deps.DB), deps.Config))
+		service.SetRecognitionJobCreator(NewAsyncJobRecognitionCreator(job.NewService(job.NewMySQLRepository(deps.DB)), service))
 		if deps.LLM != nil {
 			llmRepo := llm.NewMySQLConfigRepository(deps.DB)
-			service.SetImageRecognizer(NewLLMImageRecognizer(llm.NewService(llm.NewConfigResolver(llmRepo), deps.LLM)))
+			llmService := llm.NewService(llm.NewConfigResolver(llmRepo), deps.LLM)
+			llmService.SetLogger(deps.Logger)
+			service.SetImageRecognizer(NewLLMImageRecognizer(llmService))
 		}
 		if logger != nil {
 			service.SetImageURLSignErrorHandler(func(_ context.Context, objectKey string, err error) {

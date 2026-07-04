@@ -26,6 +26,10 @@ type SQLExecutor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+type SQLGetter interface {
+	GetContext(ctx context.Context, dest any, query string, args ...any) error
+}
+
 type NoopRunner struct{}
 
 func (NoopRunner) Up(context.Context, *config.Config) error {
@@ -83,7 +87,7 @@ func ApplyMySQLSchema(ctx context.Context, exec SQLExecutor) error {
 		}
 	}
 
-	return nil
+	return ApplyDataCorrections(ctx, exec, defaultDataCorrections)
 }
 
 func isIgnorableDuplicateAddColumn(statement string, err error) bool {
@@ -92,7 +96,8 @@ func isIgnorableDuplicateAddColumn(statement string, err error) bool {
 		return false
 	}
 	normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-	return strings.HasPrefix(normalized, "alter table wardrobe_items add column recommendation_status ")
+	return strings.HasPrefix(normalized, "alter table wardrobe_items add column recommendation_status ") ||
+		strings.HasPrefix(normalized, "alter table wardrobe_items add column recognition_status ")
 }
 
 func splitSQLStatements(sqlText string) []string {

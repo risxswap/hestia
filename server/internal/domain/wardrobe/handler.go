@@ -121,6 +121,15 @@ func (h *Handler) RecognizeItemImage(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "wardrobe.invalid_request", "请求参数不正确")
 		return
 	}
+	if strings.TrimSpace(input.ItemPublicID) != "" {
+		result, err := h.service.ScheduleItemImageRecognition(c.Request.Context(), user.UserID, input)
+		if err != nil {
+			h.writeError(c, err, "schedule wardrobe item image recognition failed", user.UserID, input.ItemPublicID)
+			return
+		}
+		response.OK(c, result)
+		return
+	}
 	result, err := h.service.RecognizeItemImage(c.Request.Context(), user.UserID, input)
 	if err != nil {
 		h.writeError(c, err, "recognize wardrobe item image failed", user.UserID, "")
@@ -158,6 +167,8 @@ func (h *Handler) writeError(c *gin.Context, err error, logMessage string, userI
 		response.Error(c, http.StatusInternalServerError, "wardrobe.image_recognizer_unavailable", "图片识别暂不可用")
 	case errors.Is(err, ErrItemNotFound):
 		response.Error(c, http.StatusNotFound, "wardrobe.item_not_found", "单品不存在")
+	case errors.Is(err, ErrRecognitionPending):
+		response.Error(c, http.StatusConflict, "wardrobe.recognition_pending", "图片识别完成前不能编辑")
 	case errors.Is(err, ErrRepositoryUnsupported):
 		h.logger.Error(logMessage, "error", err, "user_id", userID, "item_public_id", publicID)
 		response.Error(c, http.StatusInternalServerError, "wardrobe.request_failed", "衣橱请求失败")

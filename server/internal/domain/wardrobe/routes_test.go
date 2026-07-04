@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 	"time"
 
@@ -55,6 +56,8 @@ func TestListItemsReturnsOnlyCurrentUserItems(t *testing.T) {
 func TestListItemsInjectsPrimaryImagePreviewAndOriginalURLsInBatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
+	newerUpdatedAt := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	olderUpdatedAt := newerUpdatedAt.Add(-time.Minute)
 	repo.add(wardrobe.Item{
 		PublicID:             "wdi_owned",
 		UserID:               12,
@@ -63,6 +66,7 @@ func TestListItemsInjectsPrimaryImagePreviewAndOriginalURLsInBatch(t *testing.T)
 		RecommendationStatus: wardrobe.RecommendationStatusNormal,
 		Status:               wardrobe.StatusActive,
 		IsCore:               true,
+		UpdatedAt:            newerUpdatedAt,
 		PrimaryImage: &wardrobe.Image{
 			AssetPublicID: "ast_owned",
 			ObjectKey:     "users/12/wardrobe/ast_owned.jpg",
@@ -76,6 +80,7 @@ func TestListItemsInjectsPrimaryImagePreviewAndOriginalURLsInBatch(t *testing.T)
 		RecommendationStatus: wardrobe.RecommendationStatusNormal,
 		Status:               wardrobe.StatusActive,
 		IsCore:               true,
+		UpdatedAt:            olderUpdatedAt,
 		PrimaryImage: &wardrobe.Image{
 			AssetPublicID: "ast_owned_two",
 			ObjectKey:     "users/12/wardrobe/ast_owned_two.jpg",
@@ -243,6 +248,37 @@ func TestCreateItemInjectsPrimaryImagePreviewAndOriginalURLs(t *testing.T) {
 	}
 }
 
+func TestCreateItemWithMultipleAssetsUsesFirstAsPrimary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newRouteMemoryWardrobeRepo()
+	service := wardrobe.NewService(repo)
+	service.SetImageURLSigner(&routeBatchImageURLSigner{})
+	router := newWardrobeRouteTestRouterWithService(service)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/user/wardrobe/items", bytes.NewBufferString(`{"asset_public_ids":["ast_first","ast_second"],"name":"识别中","category":"other"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code string        `json:"code"`
+		Data wardrobe.Item `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.PrimaryImage == nil || body.Data.PrimaryImage.AssetPublicID != "ast_first" {
+		t.Fatalf("expected first uploaded asset as primary, got %#v", body.Data.PrimaryImage)
+	}
+	if body.Data.RecognitionStatus != wardrobe.RecognitionStatusPending {
+		t.Fatalf("expected pending recognition status, got %#v", body.Data)
+	}
+}
+
 func TestPatchItemUpdatesRecommendationStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
@@ -270,6 +306,28 @@ func TestPatchItemUpdatesRecommendationStatus(t *testing.T) {
 	}
 	if body.Data.RecommendationStatus != wardrobe.RecommendationStatusPaused {
 		t.Fatalf("expected paused recommendation status, got %#v", body.Data)
+	}
+}
+
+func TestPatchItemRejectsRecognitionPendingItem(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newRouteMemoryWardrobeRepo()
+	repo.add(wardrobe.Item{
+		PublicID:             "wdi_pending",
+		UserID:               12,
+		Name:                 "识别中",
+		Category:             "other",
+		RecognitionStatus:    wardrobe.RecognitionStatusPending,
+		RecommendationStatus: wardrobe.RecommendationStatusNormal,
+		Status:               wardrobe.StatusActive,
+		IsCore:               true,
+	})
+	router := newWardrobeRouteTestRouter(repo)
+
+	body := routeWardrobeErrorResponse(t, router, http.MethodPatch, "/api/user/wardrobe/items/wdi_pending", `{"name":"米白衬衫"}`, http.StatusConflict)
+
+	if body.Code != "wardrobe.recognition_pending" {
+		t.Fatalf("expected recognition pending code, got %q", body.Code)
 	}
 }
 
@@ -414,8 +472,9 @@ func TestDeleteItemReturnsNotFoundForOtherUserItem(t *testing.T) {
 func TestRecognizeItemImageRouteReturnsRecognizedFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service := wardrobe.NewService(newRouteMemoryWardrobeRepo())
+	service.SetImageURLSigner(&routeBatchImageURLSigner{})
 	service.SetImageRecognizer(routeImageRecognizerFunc(func(_ context.Context, userID int64, input wardrobe.RecognizeImageInput) (wardrobe.RecognizedItemFields, error) {
-		if userID != 12 || input.AssetPublicID != "ast_primary" {
+		if userID != 12 || input.AssetPublicID != "ast_primary" || input.ImageURL == "" {
 			t.Fatalf("expected current user and asset id, user=%d input=%#v", userID, input)
 		}
 		return wardrobe.RecognizedItemFields{
@@ -608,7 +667,21 @@ func (r *routeMemoryWardrobeRepo) ListItems(_ context.Context, userID int64, fil
 		}
 		result = append(result, item)
 	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if !result[i].UpdatedAt.Equal(result[j].UpdatedAt) {
+			return result[i].UpdatedAt.After(result[j].UpdatedAt)
+		}
+		return result[i].PublicID < result[j].PublicID
+	})
 	return result, nil
+}
+
+func (r *routeMemoryWardrobeRepo) FindItemForUser(_ context.Context, userID int64, publicID string) (wardrobe.Item, error) {
+	item, ok := r.items[publicID]
+	if !ok || item.UserID != userID || item.Status == wardrobe.StatusDeleted {
+		return wardrobe.Item{}, wardrobe.ErrItemNotFound
+	}
+	return item, nil
 }
 
 func (r *routeMemoryWardrobeRepo) ListWardrobeOptions(context.Context) (wardrobe.WardrobeOptions, error) {
@@ -624,6 +697,14 @@ func (r *routeMemoryWardrobeRepo) ListWardrobeOptions(context.Context) (wardrobe
 func (r *routeMemoryWardrobeRepo) CreateItem(_ context.Context, item wardrobe.Item, primaryAssetPublicID string) (wardrobe.Item, error) {
 	if primaryAssetPublicID != "" {
 		item.PrimaryImage = routePrimaryImage(primaryAssetPublicID)
+	}
+	r.add(item)
+	return item, nil
+}
+
+func (r *routeMemoryWardrobeRepo) CreateItemWithAssets(_ context.Context, item wardrobe.Item, assetPublicIDs []string) (wardrobe.Item, error) {
+	if len(assetPublicIDs) > 0 {
+		item.PrimaryImage = routePrimaryImage(assetPublicIDs[0])
 	}
 	r.add(item)
 	return item, nil
@@ -664,6 +745,9 @@ func (r *routeMemoryWardrobeRepo) UpdateItem(_ context.Context, userID int64, pu
 	if input.RecommendationStatus != nil {
 		item.RecommendationStatus = *input.RecommendationStatus
 	}
+	if input.RecognitionStatus != nil {
+		item.RecognitionStatus = *input.RecognitionStatus
+	}
 	if input.PrimaryAssetPublicID != nil {
 		if *input.PrimaryAssetPublicID == "" {
 			item.PrimaryImage = nil
@@ -674,6 +758,13 @@ func (r *routeMemoryWardrobeRepo) UpdateItem(_ context.Context, userID int64, pu
 	item.UpdatedAt = time.Now().UTC()
 	r.items[publicID] = item
 	return item, nil
+}
+
+func (r *routeMemoryWardrobeRepo) FindRecognizableAsset(_ context.Context, userID int64, assetPublicID string) (wardrobe.Image, error) {
+	if userID != 12 || assetPublicID == "" {
+		return wardrobe.Image{}, wardrobe.ErrInvalidPrimaryAsset
+	}
+	return *routePrimaryImage(assetPublicID), nil
 }
 
 func routePrimaryImage(assetPublicID string) *wardrobe.Image {

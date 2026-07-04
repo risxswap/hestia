@@ -3,8 +3,14 @@ package llm
 import (
 	"context"
 	"fmt"
-	"sort"
+	"log/slog"
 	"strings"
+	"time"
+
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
+	"github.com/cloudwego/eino-ext/components/model/qwen"
+	"github.com/cloudwego/eino-ext/libs/acl/openai"
+	"github.com/cloudwego/eino/schema"
 )
 
 type Message struct {
@@ -32,10 +38,22 @@ type Generator interface {
 type Service struct {
 	resolver *ConfigResolver
 	client   Client
+	logger   *slog.Logger
 }
 
 func NewService(resolver *ConfigResolver, client Client) *Service {
-	return &Service{resolver: resolver, client: client}
+	return &Service{resolver: resolver, client: client, logger: slog.Default()}
+}
+
+func (s *Service) SetLogger(logger *slog.Logger) {
+	if s == nil {
+		return
+	}
+	if logger == nil {
+		s.logger = slog.Default()
+		return
+	}
+	s.logger = logger
 }
 
 func (s *Service) Generate(ctx context.Context, request Request) (Response, error) {
@@ -46,58 +64,174 @@ func (s *Service) Generate(ctx context.Context, request Request) (Response, erro
 	if err != nil {
 		return Response{}, err
 	}
-	input := renderCompletionInput(resolved, request)
-	text, err := s.client.Complete(ctx, input)
+	startedAt := time.Now()
+	attrs := s.generateLogAttrs(request, resolved)
+	if s.logger != nil {
+		s.logger.InfoContext(ctx, "llm generate started", attrs...)
+	}
+	chatModel, err := s.newChatModel(ctx, resolved, request)
 	if err != nil {
+		s.logGenerateError(ctx, startedAt, attrs, err)
 		return Response{}, err
+	}
+	message, err := chatModel.Generate(ctx, einoMessages(request))
+	if err != nil {
+		s.logGenerateError(ctx, startedAt, attrs, err)
+		return Response{}, err
+	}
+	text := ""
+	if message != nil {
+		text = message.Content
+	}
+	if s.logger != nil {
+		successAttrs := append([]any{}, attrs...)
+		successAttrs = append(successAttrs, "duration_ms", time.Since(startedAt).Milliseconds(), "response_chars", len([]rune(text)))
+		s.logger.InfoContext(ctx, "llm generate completed", successAttrs...)
 	}
 	return Response{Text: text, Usage: resolved}, nil
 }
 
-func renderCompletionInput(resolved ResolvedUsage, request Request) string {
-	var builder strings.Builder
-	builder.WriteString("usage=")
-	builder.WriteString(resolved.Usage.Key)
-	builder.WriteByte('\n')
-	builder.WriteString("provider=")
-	builder.WriteString(resolved.Provider.Code)
-	builder.WriteByte('\n')
-	builder.WriteString("model=")
-	builder.WriteString(resolved.Model.ModelCode)
-	builder.WriteByte('\n')
-	if resolved.Usage.PromptVersion != "" {
-		builder.WriteString("prompt_version=")
-		builder.WriteString(resolved.Usage.PromptVersion)
-		builder.WriteByte('\n')
+func (s *Service) generateLogAttrs(request Request, resolved ResolvedUsage) []any {
+	return []any{
+		"usage_key", request.UsageKey,
+		"provider_code", resolved.Provider.Code,
+		"model_code", resolved.Model.ModelCode,
+		"required_caps", strings.Join(trimStringValues(request.RequiredCaps), ","),
+		"message_count", len(request.Messages),
+		"image_count", len(trimStringValues(request.ImageURLs)),
 	}
+}
+
+func (s *Service) logGenerateError(ctx context.Context, startedAt time.Time, attrs []any, err error) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	errorAttrs := append([]any{}, attrs...)
+	errorAttrs = append(errorAttrs, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)
+	s.logger.ErrorContext(ctx, "llm generate failed", errorAttrs...)
+}
+
+func (s *Service) newChatModel(ctx context.Context, resolved ResolvedUsage, request Request) (EinoChatModel, error) {
+	switch strings.ToLower(strings.TrimSpace(resolved.Provider.Code)) {
+	case "qwen":
+		return s.client.NewQwenChatModel(ctx, qwenChatModelConfig(resolved, request))
+	case "siliconflow", "openai":
+		return s.client.NewOpenAIChatModel(ctx, openAIChatModelConfig(resolved, request))
+	default:
+		return nil, fmt.Errorf("unsupported llm provider %q", resolved.Provider.Code)
+	}
+}
+
+func qwenChatModelConfig(resolved ResolvedUsage, request Request) *qwen.ChatModelConfig {
 	params := mergedParams(resolved.Usage.Params, request.Params)
-	for _, key := range sortedParamKeys(params) {
-		builder.WriteString(key)
-		builder.WriteByte('=')
-		builder.WriteString(fmt.Sprint(params[key]))
-		builder.WriteByte('\n')
+	config := &qwen.ChatModelConfig{
+		BaseURL: strings.TrimSpace(resolved.Provider.APIBaseURL),
+		APIKey:  strings.TrimSpace(resolved.Provider.Token),
+		Model:   strings.TrimSpace(resolved.Model.ModelCode),
+		Timeout: 60 * time.Second,
 	}
-	for _, imageURL := range request.ImageURLs {
-		imageURL = strings.TrimSpace(imageURL)
-		if imageURL == "" {
+	if maxTokens, ok := intParam(params, "max_tokens"); ok {
+		config.MaxTokens = &maxTokens
+	}
+	if temperature, ok := float32Param(params, "temperature"); ok {
+		config.Temperature = &temperature
+	}
+	if topP, ok := float32Param(params, "top_p"); ok {
+		config.TopP = &topP
+	}
+	if responseFormat := strings.TrimSpace(fmt.Sprint(params["response_format"])); responseFormat != "" && responseFormat != "<nil>" {
+		config.ResponseFormat = &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatType(responseFormat),
+		}
+	}
+	return config
+}
+
+func openAIChatModelConfig(resolved ResolvedUsage, request Request) *einoopenai.ChatModelConfig {
+	params := mergedParams(resolved.Usage.Params, request.Params)
+	config := &einoopenai.ChatModelConfig{
+		BaseURL: strings.TrimSpace(resolved.Provider.APIBaseURL),
+		APIKey:  strings.TrimSpace(resolved.Provider.Token),
+		Model:   strings.TrimSpace(resolved.Model.ModelCode),
+		Timeout: 60 * time.Second,
+	}
+	if maxTokens, ok := intParam(params, "max_tokens"); ok {
+		config.MaxTokens = &maxTokens
+	}
+	if temperature, ok := float32Param(params, "temperature"); ok {
+		config.Temperature = &temperature
+	}
+	if topP, ok := float32Param(params, "top_p"); ok {
+		config.TopP = &topP
+	}
+	if responseFormat := strings.TrimSpace(fmt.Sprint(params["response_format"])); responseFormat != "" && responseFormat != "<nil>" {
+		config.ResponseFormat = &einoopenai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatType(responseFormat),
+		}
+	}
+	return config
+}
+
+func einoMessages(request Request) []*schema.Message {
+	messages := make([]*schema.Message, 0, len(request.Messages))
+	imageURLs := trimStringValues(request.ImageURLs)
+	imageAttached := false
+	for _, message := range request.Messages {
+		role := einoRole(message.Role)
+		content := strings.TrimSpace(message.Content)
+		if role == schema.User && len(imageURLs) > 0 && !imageAttached {
+			messages = append(messages, userMultiContentMessage(content, imageURLs))
+			imageAttached = true
 			continue
 		}
-		builder.WriteString("image_url=")
-		builder.WriteString(imageURL)
-		builder.WriteByte('\n')
+		messages = append(messages, &schema.Message{
+			Role:    role,
+			Content: content,
+		})
 	}
-	for _, message := range request.Messages {
-		role := strings.TrimSpace(message.Role)
-		if role == "" {
-			role = "user"
-		}
-		builder.WriteString("\n[")
-		builder.WriteString(role)
-		builder.WriteString("]\n")
-		builder.WriteString(strings.TrimSpace(message.Content))
-		builder.WriteByte('\n')
+	if len(messages) == 0 && len(imageURLs) > 0 {
+		messages = append(messages, userMultiContentMessage("", imageURLs))
 	}
-	return strings.TrimSpace(builder.String())
+	return messages
+}
+
+func userMultiContentMessage(content string, imageURLs []string) *schema.Message {
+	parts := make([]schema.MessageInputPart, 0, 1+len(imageURLs))
+	if content != "" {
+		parts = append(parts, schema.MessageInputPart{
+			Type: schema.ChatMessagePartTypeText,
+			Text: content,
+		})
+	}
+	for _, imageURL := range imageURLs {
+		url := imageURL
+		parts = append(parts, schema.MessageInputPart{
+			Type: schema.ChatMessagePartTypeImageURL,
+			Image: &schema.MessageInputImage{
+				MessagePartCommon: schema.MessagePartCommon{
+					URL: &url,
+				},
+				Detail: schema.ImageURLDetailAuto,
+			},
+		})
+	}
+	return &schema.Message{
+		Role:                  schema.User,
+		UserInputMultiContent: parts,
+	}
+}
+
+func einoRole(role string) schema.RoleType {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "system":
+		return schema.System
+	case "assistant":
+		return schema.Assistant
+	case "tool":
+		return schema.Tool
+	default:
+		return schema.User
+	}
 }
 
 func mergedParams(base map[string]any, override map[string]any) map[string]any {
@@ -117,11 +251,51 @@ func mergedParams(base map[string]any, override map[string]any) map[string]any {
 	return result
 }
 
-func sortedParamKeys(params map[string]any) []string {
-	keys := make([]string, 0, len(params))
-	for key := range params {
-		keys = append(keys, key)
+func trimStringValues(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			result = append(result, value)
+		}
 	}
-	sort.Strings(keys)
-	return keys
+	return result
+}
+
+func intParam(params map[string]any, key string) (int, bool) {
+	value, ok := params[key]
+	if !ok {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case float32:
+		return int(typed), true
+	default:
+		return 0, false
+	}
+}
+
+func float32Param(params map[string]any, key string) (float32, bool) {
+	value, ok := params[key]
+	if !ok {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case float32:
+		return typed, true
+	case float64:
+		return float32(typed), true
+	case int:
+		return float32(typed), true
+	case int64:
+		return float32(typed), true
+	default:
+		return 0, false
+	}
 }

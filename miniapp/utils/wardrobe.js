@@ -70,7 +70,8 @@ const emptyDraft = {
   user_notes: "",
   is_core: true,
   recommendation_status: "normal",
-  primary_asset_public_id: ""
+  primary_asset_public_id: "",
+  asset_public_ids: []
 };
 
 function normalizeTextList(value) {
@@ -193,6 +194,40 @@ function mergeRecognizedFieldsIntoDraft(draft, recognized, wardrobeOptions) {
   return result;
 }
 
+function overwriteDraftWithRecognizedFields(draft, recognized, wardrobeOptions) {
+  const result = cloneDraft(draft || {});
+  const source = recognized || {};
+  const options = normalizeWardrobeOptions(wardrobeOptions);
+  [
+    "name",
+    "color",
+    "user_notes"
+  ].forEach((field) => {
+    if (hasDraftValue(source[field])) {
+      result[field] = String(source[field]).trim();
+    }
+  });
+  [
+    ["category", options.categories],
+    ["silhouette", options.silhouettes],
+    ["material", options.materials],
+    ["season", options.seasons]
+  ].forEach(([field, optionList]) => {
+    const matched = matchOptionValue(optionList, source[field]);
+    if (matched) {
+      result[field] = matched;
+    }
+  });
+
+  const recognizedSceneTags = normalizeSceneTags(source.scene_tags);
+  if (recognizedSceneTags.length) {
+    result.scene_tags = recognizedSceneTags;
+    result.sceneText = recognizedSceneTags.join("，");
+  }
+
+  return result;
+}
+
 function normalizeWardrobeItems(response) {
   const body = response && response.data ? response.data : response;
   const items = Array.isArray(body) ? body : body && Array.isArray(body.items) ? body.items : [];
@@ -246,6 +281,7 @@ function decorateWardrobeItem(item) {
   const source = item || {};
   const sceneTags = normalizeTextList(source.scene_tags);
   const recommendationStatus = source.recommendation_status || "normal";
+  const recognitionStatus = source.recognition_status || "succeeded";
   const primaryImage = source.primary_image || null;
   const primaryImageSrc = primaryImage && primaryImage.preview_url
     ? primaryImage.preview_url
@@ -273,6 +309,9 @@ function decorateWardrobeItem(item) {
     userNotesText: source.user_notes || source.notes || "未记录",
     is_core: isCore,
     recommendation_status: recommendationStatus,
+    recognition_status: recognitionStatus,
+    isRecognizing: recognitionStatus === "pending",
+    recognitionLabel: recognitionStatus === "pending" ? "识别中" : "",
     recommendationLabel: recommendationLabels[recommendationStatus] || "正常推荐",
     categoryLabel: categoryLabels[category] || category || "未分类",
     metaText,
@@ -346,11 +385,15 @@ function buildPayload(draft) {
     scene_tags: sceneTags,
     user_notes: String(source.user_notes || "").trim(),
     is_core: source.is_core !== false,
-    recommendation_status: source.recommendation_status || "normal"
+    recommendation_status: source.recommendation_status || "normal",
+    recognition_status: source.recognition_status || ""
   };
 
   if (Object.prototype.hasOwnProperty.call(source, "primary_asset_public_id")) {
     payload.primary_asset_public_id = String(source.primary_asset_public_id).trim();
+  }
+  if (Array.isArray(source.asset_public_ids)) {
+    payload.asset_public_ids = source.asset_public_ids.map((item) => String(item || "").trim()).filter(Boolean);
   }
 
   return payload;
@@ -365,7 +408,7 @@ function imageFilesFromAsset(asset) {
     return [];
   }
 
-  const name = source.name || String(source.object_key || url).split("/").filter(Boolean).pop() || "衣服主图";
+  const name = source.name || String(source.object_key || url).split("/").filter(Boolean).pop() || "衣服图片";
   return [
     {
       url,
@@ -399,7 +442,10 @@ function itemToDraft(item) {
     recommendation_status: decorated.recommendation_status,
     primary_asset_public_id: decorated.primary_image && decorated.primary_image.asset_public_id
       ? decorated.primary_image.asset_public_id
-      : ""
+      : "",
+    asset_public_ids: decorated.primary_image && decorated.primary_image.asset_public_id
+      ? [decorated.primary_image.asset_public_id]
+      : []
   });
 }
 
@@ -429,6 +475,7 @@ module.exports = {
   optionIndex,
   matchOptionValue,
   mergeRecognizedFieldsIntoDraft,
+  overwriteDraftWithRecognizedFields,
   normalizeWardrobeItems,
   decorateWardrobeItem,
   filterItems,

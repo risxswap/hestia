@@ -174,7 +174,7 @@ async function main() {
     await api.createWardrobeItem(createPayload);
     await api.updateWardrobeItem("wdi_test", updatePayload);
     await api.deleteWardrobeItem("wdi_test");
-    await api.recognizeWardrobeItemImage("ast_test");
+    await api.recognizeWardrobeItemImage("ast_test", { itemPublicID: "wdi_test", overwrite: true });
   });
 
   const wardrobePaths = wardrobeCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
@@ -196,6 +196,8 @@ async function main() {
   assert(wardrobeCalls[6].method === "POST", "recognizeWardrobeItemImage should use POST");
   assert(wardrobePaths[6] === "/api/user/wardrobe/items/recognize", `wardrobe recognize path mismatch: ${wardrobePaths[6]}`);
   assert(wardrobeCalls[6].data.asset_public_id === "ast_test", "recognizeWardrobeItemImage should pass asset_public_id");
+  assert(wardrobeCalls[6].data.item_public_id === "wdi_test", "recognizeWardrobeItemImage should pass item_public_id");
+  assert(wardrobeCalls[6].data.overwrite === true, "recognizeWardrobeItemImage should pass overwrite");
 
   const profileCalls = [];
   await withGlobals({

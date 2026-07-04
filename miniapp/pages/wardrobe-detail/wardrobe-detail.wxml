@@ -1,7 +1,7 @@
 <view class="page wardrobe-detail-page">
   <view class="detail-nav">
     <button class="secondary-button nav-button" bind:tap="handleBack">返回衣橱</button>
-    <button wx:if="{{item}}" class="primary-button nav-button" bind:tap="handleOpenEdit">编辑</button>
+    <button wx:if="{{item && !item.isRecognizing}}" class="primary-button nav-button" bind:tap="handleOpenEdit">编辑</button>
   </view>
 
   <view wx:if="{{loading}}" class="card state-card">
@@ -28,6 +28,7 @@
         </view>
         <text class="status-label {{item.isPreferred ? 'status-label--preferred' : ''}} {{item.isPaused ? 'status-label--paused' : ''}}">{{item.recommendationLabel}}</text>
       </view>
+      <text wx:if="{{item.isRecognizing}}" class="muted">图片识别中，完成前暂不能编辑。</text>
       <view class="basic-line">
         <text wx:if="{{item.silhouette}}">廓形：{{item.silhouette}}</text>
         <text wx:if="{{item.material}}">材质：{{item.material}}</text>
@@ -124,7 +125,7 @@
         </view>
 
         <view class="field-group upload-field">
-          <text class="field-label">主图</text>
+          <text class="field-label">上传图片</text>
           <t-upload
             files="{{imageFiles}}"
             max="{{1}}"
@@ -136,6 +137,11 @@
             bind:remove="handleImageRemove"
           />
           <text wx:if="{{imageUploadError}}" class="upload-error">{{imageUploadError}}</text>
+          <view class="upload-actions" wx:if="{{canRecognizeImage}}">
+            <button class="secondary-button" loading="{{imageRecognizing}}" bind:tap="handleRecognizeImageOverwrite">重新识别</button>
+          </view>
+          <text wx:if="{{imageRecognizing}}" class="muted">正在识别图片...</text>
+          <text wx:if="{{imageRecognizeError}}" class="upload-error">{{imageRecognizeError}}</text>
         </view>
 
         <label class="field-group">
