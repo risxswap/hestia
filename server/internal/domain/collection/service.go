@@ -33,7 +33,7 @@ func (s *Service) Summary(ctx context.Context, userID int64) (Summary, error) {
 
 	return Summary{
 		Types: []TypeSummary{
-			{Type: "wardrobe", Label: "衣服", Count: len(wardrobeItems), Hint: "常穿单品", Enabled: true, EntryPath: "/pages/wardrobe/wardrobe"},
+			{Type: "wardrobe", Label: "衣橱", Count: len(wardrobeItems), Hint: "常穿单品", Enabled: true, EntryPath: "/pages/wardrobe/wardrobe"},
 			{Type: "hair", Label: "发型", Count: 0, Hint: "常用发型", Enabled: true, EntryPath: "/pages/hair/hair"},
 			{Type: "makeup", Label: "妆容", Count: 0, Hint: "妆容方向", Enabled: true, EntryPath: "/pages/makeup/makeup"},
 			{Type: "references", Label: "参考", Count: 0, Hint: "参考图", Enabled: true, EntryPath: "/pages/references/references"},

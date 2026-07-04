@@ -62,7 +62,7 @@ func TestGetCollectionSummaryUsesTopLevelResources(t *testing.T) {
 	if got := len(body.Data.Types); got != 4 {
 		t.Fatalf("expected four collection types, got %d", got)
 	}
-	if body.Data.Types[0].Type != "wardrobe" || body.Data.Types[0].EntryPath != "/pages/wardrobe/wardrobe" {
+	if body.Data.Types[0].Type != "wardrobe" || body.Data.Types[0].Label != "衣橱" || body.Data.Types[0].EntryPath != "/pages/wardrobe/wardrobe" {
 		t.Fatalf("expected wardrobe top-level entry, got %#v", body.Data.Types[0])
 	}
 	if body.Data.Types[1].Type != "hair" || body.Data.Types[1].EntryPath != "/pages/hair/hair" {

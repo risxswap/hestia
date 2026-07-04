@@ -3,7 +3,9 @@ const api = require("../../utils/api");
 const DEFAULT_TYPES = [
   {
     type: "wardrobe",
-    label: "衣服",
+    label: "衣橱",
+    icon: "wardrobe",
+    iconSrc: "/assets/collection/wardrobe.webp",
     count: 0,
     hint: "常穿单品",
     enabled: true,
@@ -12,6 +14,8 @@ const DEFAULT_TYPES = [
   {
     type: "hair",
     label: "发型",
+    icon: "hair",
+    iconSrc: "/assets/collection/hair.webp",
     count: 0,
     hint: "常用发型",
     enabled: true,
@@ -20,6 +24,8 @@ const DEFAULT_TYPES = [
   {
     type: "makeup",
     label: "妆容",
+    icon: "makeup",
+    iconSrc: "/assets/collection/makeup.webp",
     count: 0,
     hint: "妆容方向",
     enabled: true,
@@ -28,6 +34,8 @@ const DEFAULT_TYPES = [
   {
     type: "references",
     label: "参考",
+    icon: "references",
+    iconSrc: "/assets/collection/references.webp",
     count: 0,
     hint: "参考图",
     enabled: true,
@@ -46,7 +54,9 @@ function normalizeType(rawType) {
   const count = Number(source.count || 0);
   return Object.assign({}, fallback, {
     type: type || fallback.type || "wardrobe",
-    label: source.label || fallback.label || "衣服",
+    label: source.label || fallback.label || "衣橱",
+    icon: source.icon || fallback.icon || "wardrobe",
+    iconSrc: source.iconSrc || source.icon_src || fallback.iconSrc || "/assets/collection/wardrobe.webp",
     count: Number.isFinite(count) ? count : 0,
     hint: source.hint || fallback.hint || "",
     enabled: source.enabled !== false,
@@ -67,12 +77,16 @@ function normalizeTypes(summary) {
 
 function normalizeRecentItem(rawItem) {
   const source = rawItem || {};
+  const image = source.image || source.preview_url || source.primaryImageSrc || "";
+  const imageURL = image && typeof image === "object"
+    ? image.preview_url || image.previewUrl || image.url || ""
+    : image;
   return {
     type: source.type || "wardrobe",
     public_id: source.public_id || source.publicID || "",
     title: source.title || source.name || "未命名",
     subtitle: source.subtitle || source.category || "",
-    image: source.image || source.preview_url || source.primaryImageSrc || "",
+    image: imageURL,
     entryPath: source.entry_path || source.entryPath || ""
   };
 }

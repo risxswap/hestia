@@ -282,7 +282,7 @@ async function verifyCollectionPage() {
         types: [
           {
             type: "wardrobe",
-            label: "衣服",
+            label: "衣橱",
             count: 2,
             hint: "常穿单品",
             enabled: true,
@@ -303,7 +303,9 @@ async function verifyCollectionPage() {
             public_id: "wdi_shirt",
             title: "米白衬衫",
             subtitle: "上装",
-            image: "https://cdn.example.com/wardrobe/wdi_shirt/main-preview.webp",
+            image: {
+              preview_url: "https://cdn.example.com/wardrobe/wdi_shirt/main-preview.webp",
+            },
             entry_path: "/pages/wardrobe-detail/wardrobe-detail?public_id=wdi_shirt",
           },
         ],
@@ -328,9 +330,18 @@ async function verifyCollectionPage() {
   await collection.config.loadCollection.call(collectionInstance);
   assert(collectionApiCalls.length === 1, "collection page should call getCollectionSummary once");
   assert(collectionInstance.data.types.length === 4, "collection page should show the four collection type entries");
-  assert(collectionInstance.data.types[0].label === "衣服", "collection page should keep type label");
+  assert(collectionInstance.data.types[0].label === "衣橱", "collection page should keep wardrobe type label as 衣橱");
+  assert(collectionInstance.data.types[0].icon === "wardrobe", "collection wardrobe type should use wardrobe icon");
+  assert(collectionInstance.data.types[0].iconSrc === "/assets/collection/wardrobe.webp", "collection wardrobe type should use wardrobe webp image asset");
   assert(collectionInstance.data.types[1].label === "发型", "collection page should keep returned hair label");
+  assert(collectionInstance.data.types[1].icon === "hair", "collection hair type should use hair icon");
+  assert(collectionInstance.data.types[2].icon === "makeup", "collection makeup type should use makeup icon");
+  assert(collectionInstance.data.types[3].icon === "references", "collection references type should use references icon");
   assert(collectionInstance.data.recentItems[0].title === "米白衬衫", "collection page should hydrate recent items");
+  assert(
+    collectionInstance.data.recentItems[0].image === "https://cdn.example.com/wardrobe/wdi_shirt/main-preview.webp",
+    "collection page should normalize recent image preview_url for rendering",
+  );
 
   const typeUrl = runNavigateCase(() => {
     collection.config.handleOpenType.call(collectionInstance, {
@@ -2521,12 +2532,19 @@ async function main() {
   );
 
   const originalDetailWx = global.wx;
+  let detailBackSwitchUrl = "";
   let detailSwitchUrl = "";
   global.wx = {
     switchTab(options) {
-      detailSwitchUrl = options && options.url ? options.url : "";
+      const url = options && options.url ? options.url : "";
+      if (!detailBackSwitchUrl) {
+        detailBackSwitchUrl = url;
+        return;
+      }
+      detailSwitchUrl = url;
     },
   };
+  wardrobeDetail.config.handleBack.call(detailInstance);
   await wardrobeDetail.config.handleDeleteItem.call(detailInstance, {
     currentTarget: {
       dataset: {
@@ -2540,14 +2558,18 @@ async function main() {
     global.wx = originalDetailWx;
   }
   assert(
+    detailBackSwitchUrl === "/pages/collection/collection",
+    "wardrobe detail back should return to collection tab",
+  );
+  assert(
     detailApiCalls.some(
       (call) => call[0] === "delete" && call[1] === "wdi_shirt",
     ),
     "wardrobe detail delete should call API",
   );
   assert(
-    detailSwitchUrl === "/pages/wardrobe/wardrobe",
-    "wardrobe detail delete should return to wardrobe tab",
+    detailSwitchUrl === "/pages/collection/collection",
+    "wardrobe detail delete should return to collection tab",
   );
   assert(
     detailInstance.data.wardrobeDirty === true,

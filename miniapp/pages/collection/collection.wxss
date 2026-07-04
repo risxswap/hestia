@@ -86,8 +86,8 @@
 }
 
 .private-type-card {
-  min-height: 180rpx;
-  padding: 18rpx;
+  min-height: 184rpx;
+  padding: 16rpx;
   flex-direction: row;
   gap: 16rpx;
   text-align: left;
@@ -98,23 +98,20 @@
 }
 
 .private-type-preview {
-  flex: 0 0 76rpx;
-  width: 76rpx;
-  height: 76rpx;
+  position: relative;
+  align-self: center;
+  flex: 0 0 132rpx;
+  width: 132rpx;
+  height: 132rpx;
   overflow: hidden;
   border-radius: 10rpx;
   background: #e8e0d2;
 }
 
-.private-type-initial {
-  display: flex;
+.private-type-image-icon {
+  display: block;
   width: 100%;
   height: 100%;
-  align-items: center;
-  justify-content: center;
-  color: #245d4f;
-  font-size: 24rpx;
-  font-weight: 700;
 }
 
 .private-type-copy {

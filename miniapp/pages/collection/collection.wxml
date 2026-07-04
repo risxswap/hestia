@@ -1,8 +1,6 @@
 <view class="page collection-page">
   <view class="collection-hero">
     <view class="top-copy">
-      <text class="eyebrow">个人长期记忆</text>
-      <text class="title">我的私藏</text>
       <text class="muted">保存衣服、发型、妆容和参考图，作为 Hestia 给你建议的依据。</text>
     </view>
   </view>
@@ -19,7 +17,7 @@
       <block wx:for="{{types}}" wx:key="type">
         <button class="card private-type-card {{item.enabled ? '' : 'private-type-card--disabled'}}" data-entry-path="{{item.entryPath}}" bind:tap="handleOpenType">
           <view class="private-type-preview">
-            <text class="private-type-initial">{{item.label}}</text>
+            <image class="private-type-image-icon" src="{{item.iconSrc}}" mode="aspectFill" />
           </view>
           <view class="private-type-copy">
             <text class="private-type-title">{{item.label}}</text>

@@ -275,7 +275,7 @@ const wardrobeDetailPageConfig = {
   handleBack() {
     if (typeof wx !== "undefined" && wx.switchTab) {
       wx.switchTab({
-        url: "/pages/wardrobe/wardrobe"
+        url: "/pages/collection/collection"
       });
     }
   },
@@ -624,7 +624,7 @@ const wardrobeDetailPageConfig = {
       showToast("已删除", "success");
       if (typeof wx !== "undefined" && wx.switchTab) {
         wx.switchTab({
-          url: "/pages/wardrobe/wardrobe"
+          url: "/pages/collection/collection"
         });
       }
     } catch (error) {

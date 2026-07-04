@@ -40,8 +40,8 @@
       {
         "pagePath": "pages/collection/collection",
         "text": "私藏",
-        "iconPath": "assets/tabbar/wardrobe.png",
-        "selectedIconPath": "assets/tabbar/wardrobe-active.png"
+        "iconPath": "assets/tabbar/collection.png",
+        "selectedIconPath": "assets/tabbar/collection-active.png"
       },
       {
         "pagePath": "pages/profile/profile",
