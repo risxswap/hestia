@@ -724,6 +724,21 @@ func (r *routeMemoryWardrobeRepo) CreateItemWithAssets(_ context.Context, item w
 	return item, nil
 }
 
+func (r *routeMemoryWardrobeRepo) ReplaceItemAssets(_ context.Context, userID int64, publicID string, assetPublicIDs []string) (wardrobe.Item, error) {
+	item, ok := r.items[publicID]
+	if !ok || item.UserID != userID || item.Status == wardrobe.StatusDeleted {
+		return wardrobe.Item{}, wardrobe.ErrItemNotFound
+	}
+	if len(assetPublicIDs) > 0 {
+		item.PrimaryImage = routePrimaryImage(assetPublicIDs[0])
+	} else {
+		item.PrimaryImage = nil
+	}
+	item.UpdatedAt = time.Now().UTC()
+	r.items[publicID] = item
+	return item, nil
+}
+
 func (r *routeMemoryWardrobeRepo) UpdateItem(_ context.Context, userID int64, publicID string, input wardrobe.UpdateInput) (wardrobe.Item, error) {
 	item, ok := r.items[publicID]
 	if !ok || item.UserID != userID || item.Status == wardrobe.StatusDeleted {

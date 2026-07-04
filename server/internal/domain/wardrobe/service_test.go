@@ -394,6 +394,24 @@ func (r *captureWardrobeRepo) UpdateItem(_ context.Context, userID int64, public
 	return Item{}, ErrItemNotFound
 }
 
+func (r *captureWardrobeRepo) ReplaceItemAssets(_ context.Context, userID int64, publicID string, assetPublicIDs []string) (Item, error) {
+	r.assetPublicIDs = append([]string{}, assetPublicIDs...)
+	if len(assetPublicIDs) > 0 {
+		r.primaryAssetPublicID = assetPublicIDs[0]
+	}
+	for _, item := range r.items {
+		if item.UserID == userID && item.PublicID == publicID && item.Status != StatusDeleted {
+			if len(assetPublicIDs) > 0 {
+				item.PrimaryImage = &Image{AssetPublicID: assetPublicIDs[0]}
+			} else {
+				item.PrimaryImage = nil
+			}
+			return item, nil
+		}
+	}
+	return Item{}, ErrItemNotFound
+}
+
 func (r *captureWardrobeRepo) SoftDeleteItem(_ context.Context, userID int64, publicID string) error {
 	for _, item := range r.items {
 		if item.UserID == userID && item.PublicID == publicID {
@@ -713,6 +731,34 @@ func TestUpdateItemRejectsWhenRecognitionPending(t *testing.T) {
 	_, err := service.UpdateItem(context.Background(), 12, "wdi_pending", UpdateInput{Name: &name})
 	if err != ErrRecognitionPending {
 		t.Fatalf("expected ErrRecognitionPending, got %v", err)
+	}
+}
+
+func TestUpdateItemReplacesAssetsAndUsesFirstAsPrimary(t *testing.T) {
+	repo := &captureWardrobeRepo{items: []Item{
+		{PublicID: "wdi_blazer", UserID: 12, Name: "黑色西装", Category: "外套", RecognitionStatus: RecognitionStatusSucceeded, RecommendationStatus: RecommendationStatusNormal, Status: StatusActive, IsCore: true},
+	}}
+	service := NewService(repo)
+
+	assetPublicIDs := []string{" ast_first ", "", "ast_side", " ast_detail "}
+	item, err := service.UpdateItem(context.Background(), 12, "wdi_blazer", UpdateInput{
+		AssetPublicIDs: &assetPublicIDs,
+	})
+	if err != nil {
+		t.Fatalf("update item assets: %v", err)
+	}
+
+	if len(repo.assetPublicIDs) != 3 || repo.assetPublicIDs[0] != "ast_first" || repo.assetPublicIDs[1] != "ast_side" || repo.assetPublicIDs[2] != "ast_detail" {
+		t.Fatalf("expected trimmed asset ids preserved, got %#v", repo.assetPublicIDs)
+	}
+	if repo.primaryAssetPublicID != "ast_first" {
+		t.Fatalf("expected first asset as primary, got %q", repo.primaryAssetPublicID)
+	}
+	if repo.lastUpdateInput.PrimaryAssetPublicID != nil {
+		t.Fatalf("expected primary asset field suppressed when full asset list is present, got %#v", repo.lastUpdateInput.PrimaryAssetPublicID)
+	}
+	if item.PrimaryImage == nil || item.PrimaryImage.AssetPublicID != "ast_first" {
+		t.Fatalf("expected returned item primary image from first asset, got %#v", item.PrimaryImage)
 	}
 }
 

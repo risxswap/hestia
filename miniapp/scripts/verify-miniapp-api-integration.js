@@ -884,7 +884,48 @@ async function main() {
       return upload.promise;
     },
   });
+  const wardrobeEditApiCalls = [];
+  const wardrobeEditUploadCalls = [];
+  const wardrobeEditUploads = [];
+  const wardrobeEdit = loadPage("pages/wardrobe-edit/wardrobe-edit.js", {
+    getWardrobeItems: async () => ({
+      items: [
+        {
+          public_id: "wdi_edit_multi",
+          name: "浅蓝衬衫",
+          category: "上装",
+          color: "浅蓝",
+          is_core: true,
+          recommendation_status: "normal",
+          primary_image: {
+            asset_public_id: "ast_existing_main",
+            preview_url:
+              "https://cdn.example.com/wardrobe/wdi_edit_multi/main-preview.webp",
+            object_key: "wardrobe/wdi_edit_multi/main.jpg",
+          },
+        },
+      ],
+    }),
+    getWardrobeOptions: async () => ({
+      categories: ["上装"],
+      materials: ["棉"],
+      seasons: ["春秋"],
+      silhouettes: ["微宽松"],
+    }),
+    updateWardrobeItem: async (publicID, payload) => {
+      wardrobeEditApiCalls.push(["update", publicID, payload]);
+      return Object.assign({ public_id: publicID, status: "active" }, payload);
+    },
+    uploadFileToQiniu: async (file, options) => {
+      wardrobeEditUploadCalls.push(["upload", file, options]);
+      const upload = createDeferred();
+      wardrobeEditUploads.push(upload);
+      return upload.promise;
+    },
+    recognizeWardrobeItemImage: async () => ({}),
+  });
   assert(wardrobe.config, "wardrobe.js should register a Page config");
+  assert(wardrobeEdit.config, "wardrobe-edit.js should register a Page config");
   assert(
     typeof wardrobe.config.loadWardrobe === "function",
     "wardrobe should load core wardrobe items",
@@ -928,6 +969,12 @@ async function main() {
   assert(
     typeof wardrobe.config.handleSaveItem === "function",
     "wardrobe should save uploaded item after user confirmation",
+  );
+  assert(
+    typeof wardrobeEdit.config.handleImageUpload === "function" &&
+      typeof wardrobeEdit.config.handleImageRemove === "function" &&
+      typeof wardrobeEdit.config.handleSaveItem === "function",
+    "wardrobe edit page should support image upload, remove and save",
   );
   assert(
     typeof wardrobe.config.loadWardrobeOptions === "function",
@@ -1418,6 +1465,114 @@ async function main() {
   assert(
     wardrobeInstance.data.editorVisible === false,
     "wardrobe save should close modal after create",
+  );
+
+  const wardrobeEditInstance = createPageInstance(wardrobeEdit.config);
+  await wardrobeEdit.config.loadWardrobeItem.call(
+    wardrobeEditInstance,
+    "wdi_edit_multi",
+  );
+  assert(
+    wardrobeEditInstance.data.imageFiles.length === 1 &&
+      wardrobeEditInstance.data.draft.primary_asset_public_id ===
+        "ast_existing_main",
+    "wardrobe edit page should initialize existing primary image",
+  );
+  const firstEditUpload = wardrobeEdit.config.handleImageUpload.call(
+    wardrobeEditInstance,
+    {
+      detail: {
+        files: [
+          {
+            url: "wxfile://wardrobe-edit-side.jpg",
+            size: 2048,
+            type: "image/jpeg",
+          },
+        ],
+      },
+    },
+  );
+  const duplicateEditUpload = wardrobeEdit.config.handleImageUpload.call(
+    wardrobeEditInstance,
+    {
+      detail: {
+        file: {
+          url: "wxfile://wardrobe-edit-side.jpg",
+          size: 2048,
+          type: "image/jpeg",
+        },
+      },
+    },
+  );
+  const secondEditUpload = wardrobeEdit.config.handleImageUpload.call(
+    wardrobeEditInstance,
+    {
+      detail: {
+        files: [
+          {
+            url: "wxfile://wardrobe-edit-detail.jpg",
+            size: 2048,
+            type: "image/jpeg",
+          },
+        ],
+      },
+    },
+  );
+  assert(
+    duplicateEditUpload === firstEditUpload,
+    "wardrobe edit duplicate upload event should reuse the in-flight upload",
+  );
+  assert(
+    wardrobeEditUploadCalls.length === 2,
+    "wardrobe edit image upload should ignore duplicate events and allow different uploads",
+  );
+  wardrobeEditUploads[0].resolve({
+    asset_public_id: "ast_edit_side",
+    object_key: "users/u1/assets/ast_edit_side.jpg",
+  });
+  wardrobeEditUploads[1].resolve({
+    asset_public_id: "ast_edit_detail",
+    object_key: "users/u1/assets/ast_edit_detail.jpg",
+  });
+  await firstEditUpload;
+  await secondEditUpload;
+  assert(
+    wardrobeEditInstance.data.draft.primary_asset_public_id ===
+      "ast_existing_main",
+    "wardrobe edit should keep the first image as primary after adding more images",
+  );
+  assert(
+    wardrobeEditInstance.data.draft.asset_public_ids.join(",") ===
+      "ast_existing_main,ast_edit_side,ast_edit_detail",
+    "wardrobe edit should keep uploaded asset ids in preview order",
+  );
+  wardrobeEdit.config.handleImageRemove.call(wardrobeEditInstance, {
+    detail: {
+      file: {
+        url: "https://cdn.example.com/wardrobe/wdi_edit_multi/main-preview.webp",
+        asset_public_id: "ast_existing_main",
+      },
+    },
+  });
+  assert(
+    wardrobeEditInstance.data.draft.primary_asset_public_id ===
+      "ast_edit_side",
+    "wardrobe edit should promote the next image when the first image is removed",
+  );
+  await wardrobeEdit.config.handleSaveItem.call(wardrobeEditInstance);
+  assert(
+    wardrobeEditApiCalls[0][0] === "update" &&
+      wardrobeEditApiCalls[0][1] === "wdi_edit_multi",
+    "wardrobe edit save should update the current item",
+  );
+  assert(
+    wardrobeEditApiCalls[0][2].primary_asset_public_id === "ast_edit_side",
+    "wardrobe edit payload should use the current first image as primary",
+  );
+  assert(
+    wardrobeEditApiCalls[0][2].asset_public_ids.join(",") ===
+      "ast_edit_side,ast_edit_detail",
+    "wardrobe edit payload should include all remaining uploaded images",
   );
   assert(
     wardrobeInstance.data.items.some(
@@ -2339,6 +2494,16 @@ async function main() {
     "wardrobe edit page should own edit behavior and return after save",
   );
   assert(
+    !editMarkup.includes("nav-button") &&
+      !editMarkup.includes("edit-header") &&
+      !editMarkup.includes("编辑单品") &&
+      !editMarkup.includes("修改后会继续影响后续搭配建议") &&
+      editMarkup.includes('<view class="editor-actions edit-actions">') &&
+      editMarkup.includes('<button class="secondary-button" bind:tap="handleBack">返回</button>') &&
+      !editMarkup.includes("handleDeleteItem"),
+    "wardrobe edit page should put back action in the bottom bar without a top edit header",
+  );
+  assert(
     !editMarkup.includes("suggestion-list"),
     "wardrobe edit page should not render inline suggestions",
   );
@@ -2352,8 +2517,10 @@ async function main() {
       editMarkup.includes("suggestion-trigger") &&
       editMarkup.includes("handleSuggestionOpen") &&
       editMarkup.includes("handleSuggestionClose") &&
-      editMarkup.includes("handleSuggestionSelect"),
-    "wardrobe edit page should render suggestions in a bottom sheet opened by trigger",
+      editMarkup.includes("handleSuggestionSelect") &&
+      !editMarkup.includes("suggestion-sheet-close") &&
+      !editMarkup.includes(">取消</button>"),
+    "wardrobe edit page should render suggestions in a bottom sheet without a cancel button",
   );
   assert(
     editMarkup.includes('placeholder="输入分类"'),
@@ -2380,19 +2547,49 @@ async function main() {
     "wardrobe edit fields should have vertical spacing",
   );
   assert(
+    editMarkup.includes("field-group field-group--full") &&
+      editStyles.includes(".field-group--full") &&
+      editStyles.includes("grid-column: 1 / -1") &&
+      editMarkup.indexOf("上传图片") < editMarkup.indexOf("名称") &&
+      editStyles.includes(".edit-scroll-content > .form-grid") &&
+      editMarkup.indexOf("核心单品") > editMarkup.indexOf("输入分类") &&
+      editMarkup.indexOf("核心单品") < editMarkup.indexOf("输入颜色") &&
+      editMarkup.includes("radio-actions") &&
+      editMarkup.includes("radio-button") &&
+      editMarkup.includes('data-value="true"') &&
+      editMarkup.includes('data-value="false"') &&
+      !editMarkup.includes("<switch") &&
+      !editMarkup.includes("更常进入每日建议") &&
+      editStyles.includes(".radio-actions") &&
+      editStyles.includes(".radio-button--active"),
+    "wardrobe edit should place upload first, name on a full row and core radio next to category without helper copy",
+  );
+  assert(
     editMarkup.includes("edit-scroll-content") &&
       editStyles.includes(".edit-scroll-content > .field-group") &&
       editStyles.includes("margin-top: 24rpx"),
     "wardrobe edit should keep spacing between form grid and following fields",
   );
   assert(
-    editStyles.includes("grid-template-columns: 1fr") &&
+    editStyles.includes("grid-template-columns: repeat(2, minmax(0, 1fr))") &&
+      editStyles.includes("column-gap: 16rpx") &&
       editStyles.includes(".edit-scroll") &&
       editStyles.includes("flex: 1") &&
-      editStyles.includes("padding: 0 0 156rpx") &&
-      !editStyles.includes("margin-right: -28rpx") &&
-      !editStyles.includes("grid-template-columns: repeat(2"),
-    "wardrobe edit page should use a standalone single-column layout without modal overflow margins",
+      editStyles.includes("padding: 0") &&
+      !editStyles.includes("margin-right: -28rpx"),
+    "wardrobe edit page should use a standalone two-column layout without modal overflow margins",
+  );
+  const editActionsStylesStart = editStyles.indexOf(".edit-actions {");
+  const editActionsStyles = editStyles.slice(
+    editActionsStylesStart,
+    editStyles.indexOf("}", editActionsStylesStart),
+  );
+  assert(
+    editActionsStyles.includes(".edit-actions") &&
+      !editActionsStyles.includes("position: fixed") &&
+      !editActionsStyles.includes("bottom: 0") &&
+      !editActionsStyles.includes("left: 28rpx"),
+    "wardrobe edit actions should stay in layout flow so recommendation status is not covered",
   );
   assert(
     editStyles.includes("overflow: hidden") &&
@@ -2415,6 +2612,10 @@ async function main() {
   assert(
     editMarkup.includes("<t-upload"),
     "wardrobe edit page should render TDesign upload block",
+  );
+  assert(
+    editMarkup.includes('max="{{6}}"'),
+    "wardrobe edit upload should allow multiple images",
   );
   assert(
     editMarkup.includes('mediaType="{{imageMediaType}}"'),
@@ -2441,8 +2642,18 @@ async function main() {
     "wardrobe edit page should bind manual recognition overwrite",
   );
   assert(
-    editMarkup.includes("重新识别"),
-    "wardrobe edit page should show manual recognition button",
+    editMarkup.includes("upload-heading") &&
+      editMarkup.includes("upload-recognize-button") &&
+      editMarkup.includes("重新分析") &&
+      !editMarkup.includes("重新识别") &&
+      editMarkup.indexOf("upload-recognize-button") < editMarkup.indexOf("<t-upload") &&
+      !editMarkup.includes("upload-actions") &&
+      editStyles.includes(".upload-heading") &&
+      editStyles.includes(".upload-recognize-button") &&
+      editStyles.lastIndexOf(".upload-recognize-button") > editStyles.indexOf(".secondary-button") &&
+      editStyles.includes("min-height: 46rpx") &&
+      editStyles.includes("font-size: 22rpx"),
+    "wardrobe edit page should show manual recognition button beside the upload title",
   );
   assert(
     editMarkup.includes('<text class="field-label">上传图片</text>'),

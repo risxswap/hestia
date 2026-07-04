@@ -48,6 +48,11 @@ type multiAssetItemRepository interface {
 	CreateItemWithAssets(ctx context.Context, item Item, assetPublicIDs []string) (Item, error)
 }
 
+type assetReplacingItemRepository interface {
+	itemRepository
+	ReplaceItemAssets(ctx context.Context, userID int64, publicID string, assetPublicIDs []string) (Item, error)
+}
+
 type recognizerAssetRepository interface {
 	FindRecognizableAsset(ctx context.Context, userID int64, assetPublicID string) (Image, error)
 }
@@ -284,6 +289,13 @@ func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string,
 	trimStringPtr(input.Season)
 	trimStringPtr(input.UserNotes)
 	trimStringPtr(input.PrimaryAssetPublicID)
+	if input.AssetPublicIDs != nil {
+		assetPublicIDs := trimStringSlice(*input.AssetPublicIDs)
+		input.AssetPublicIDs = &assetPublicIDs
+		if len(assetPublicIDs) > 0 {
+			input.PrimaryAssetPublicID = nil
+		}
+	}
 	repo, err := s.itemRepo()
 	if err != nil {
 		return Item{}, err
@@ -295,6 +307,26 @@ func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string,
 	}
 	if current.RecognitionStatus == RecognitionStatusPending {
 		return Item{}, ErrRecognitionPending
+	}
+	if input.AssetPublicIDs != nil {
+		assetPublicIDs := *input.AssetPublicIDs
+		if len(assetPublicIDs) == 0 {
+			empty := ""
+			input.PrimaryAssetPublicID = &empty
+		} else {
+			assetRepo, ok := repo.(assetReplacingItemRepository)
+			if !ok {
+				return Item{}, ErrRepositoryUnsupported
+			}
+			if _, err := repo.UpdateItem(ctx, userID, publicID, input); err != nil {
+				return Item{}, err
+			}
+			updated, err := assetRepo.ReplaceItemAssets(ctx, userID, publicID, assetPublicIDs)
+			if err != nil {
+				return Item{}, err
+			}
+			return s.enrichPrimaryImageURL(ctx, updated), nil
+		}
 	}
 	item, err := repo.UpdateItem(ctx, userID, publicID, input)
 	if err != nil {

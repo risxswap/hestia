@@ -96,9 +96,28 @@ function getUploadFile(event) {
   return null;
 }
 
+function getRemoveFile(event) {
+  const detail = event && event.detail ? event.detail : {};
+  return detail.file || detail.item || detail.currentFile || null;
+}
+
 function filePreviewUrl(file) {
   const source = file || {};
   return source.url || source.path || source.tempFilePath || "";
+}
+
+function assetPublicIDsFromFiles(files) {
+  return (Array.isArray(files) ? files : [])
+    .map((file) => (file && file.asset_public_id ? String(file.asset_public_id).trim() : ""))
+    .filter(Boolean);
+}
+
+function draftWithImageFiles(draft, files, state) {
+  const assetPublicIDs = assetPublicIDsFromFiles(files);
+  return decorateDraftForOptions(Object.assign({}, draft || {}, {
+    primary_asset_public_id: assetPublicIDs[0] || "",
+    asset_public_ids: assetPublicIDs
+  }), state || {});
 }
 
 function pendingImageFiles(file) {
@@ -166,8 +185,8 @@ function confirmRecognizeOverwrite() {
 
   return new Promise((resolve) => {
     wx.showModal({
-      title: "重新识别图片",
-      content: "重新识别会覆盖当前名称、分类、颜色、廓形、材质、季节、场景和备注，是否继续？",
+      title: "重新分析图片",
+      content: "重新分析会覆盖当前名称、分类、颜色、廓形、材质、季节、场景和备注，是否继续？",
       confirmText: "覆盖",
       success(result) {
         resolve(Boolean(result && result.confirm));
@@ -256,6 +275,9 @@ const wardrobeEditPageConfig = {
         return null;
       }
 
+      this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
+      this._imageUploadPromisesByURL = {};
+      this._activeImageUploads = 0;
       this.setData(Object.assign({}, optionState, {
         loading: false,
         item,
@@ -345,75 +367,99 @@ const wardrobeEditPageConfig = {
   },
 
   handleImageUpload(event) {
-    if (this.data.imageUploading) {
-      return this._imageUploadPromise || Promise.resolve([]);
-    }
-
     const file = getUploadFile(event);
     if (!file) {
       return Promise.resolve([]);
     }
 
+    const previewURL = filePreviewUrl(file);
+    if (previewURL) {
+      this._imageUploadPromisesByURL = this._imageUploadPromisesByURL || {};
+      if (this._imageUploadPromisesByURL[previewURL]) {
+        return this._imageUploadPromisesByURL[previewURL];
+      }
+    }
+
     this.setData({
-      imageFiles: pendingImageFiles(file),
+      imageFiles: this.data.imageFiles.concat(pendingImageFiles(file)),
       imageUploading: true,
       imageUploadError: ""
     });
 
-    const uploadRunID = (this._imageUploadRunID || 0) + 1;
-    this._imageUploadRunID = uploadRunID;
-    this._imageUploadPromise = api.uploadFileToQiniu(file, {
+    const uploadRunID = this._imageUploadRunID || 0;
+    this._activeImageUploads = (this._activeImageUploads || 0) + 1;
+    const uploadPromise = api.uploadFileToQiniu(file, {
       assetType: "wardrobe_item_photo"
     })
       .then((uploaded) => {
-        if (this._imageUploadRunID !== uploadRunID) {
+        if ((this._imageUploadRunID || 0) !== uploadRunID) {
           return uploaded;
         }
-        const draft = Object.assign({}, this.data.draft, {
-          primary_asset_public_id: uploaded && uploaded.asset_public_id ? uploaded.asset_public_id : ""
-        });
+        const confirmed = confirmedLocalImageFiles(file, uploaded)[0];
+        const nextFiles = this.data.imageFiles.map((item) => (
+          item.url === previewURL ? Object.assign({}, item, confirmed) : item
+        ));
+        const draft = draftWithImageFiles(this.data.draft, nextFiles, this.data);
+        this._activeImageUploads = Math.max(0, (this._activeImageUploads || 1) - 1);
         this.setData({
           draft,
-          imageFiles: confirmedLocalImageFiles(file, uploaded),
-          imageUploading: false,
+          imageFiles: nextFiles,
+          imageUploading: this._activeImageUploads > 0,
           imageUploadError: "",
           imageRecognizeError: "",
-          canRecognizeImage: Boolean(uploaded && uploaded.asset_public_id)
+          canRecognizeImage: Boolean(draft.primary_asset_public_id)
         });
-        this._imageUploadPromise = null;
         return uploaded;
       })
       .catch((error) => {
-        if (this._imageUploadRunID !== uploadRunID) {
+        if ((this._imageUploadRunID || 0) !== uploadRunID) {
           return null;
         }
         const message = error && error.message ? error.message : "图片上传失败";
+        this._activeImageUploads = Math.max(0, (this._activeImageUploads || 1) - 1);
         this.setData({
-          imageFiles: failedImageFiles(file, message),
-          imageUploading: false,
+          imageFiles: this.data.imageFiles.map((item) => (
+            item.url === previewURL ? Object.assign({}, item, failedImageFiles(file, message)[0]) : item
+          )),
+          imageUploading: this._activeImageUploads > 0,
           imageUploadError: message,
           canRecognizeImage: Boolean(this.data.draft.primary_asset_public_id)
         });
-        this._imageUploadPromise = null;
         return null;
       });
 
-    return this._imageUploadPromise;
+    if (previewURL) {
+      this._imageUploadPromisesByURL[previewURL] = uploadPromise;
+    }
+    return uploadPromise;
   },
 
-  handleImageRemove() {
-    this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
-    this._imageUploadPromise = null;
+  handleImageRemove(event) {
+    const targetFile = getRemoveFile(event);
+    const targetURL = filePreviewUrl(targetFile);
+    const targetAssetPublicID = targetFile && targetFile.asset_public_id ? targetFile.asset_public_id : "";
+    const nextFiles = targetURL || targetAssetPublicID
+      ? this.data.imageFiles.filter((file) => (
+        (targetURL && file.url === targetURL) || (targetAssetPublicID && file.asset_public_id === targetAssetPublicID)
+          ? false
+          : true
+      ))
+      : [];
+    const draft = draftWithImageFiles(this.data.draft, nextFiles, this.data);
+    if (!nextFiles.length) {
+      this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
+      this._imageUploadPromise = null;
+      this._imageUploadPromisesByURL = {};
+      this._activeImageUploads = 0;
+    }
     this.setData({
-      imageFiles: [],
-      imageUploading: false,
+      imageFiles: nextFiles,
+      imageUploading: nextFiles.length ? this.data.imageUploading : false,
       imageUploadError: "",
       imageRecognizing: false,
       imageRecognizeError: "",
-      canRecognizeImage: false,
-      draft: Object.assign({}, this.data.draft, {
-        primary_asset_public_id: ""
-      })
+      canRecognizeImage: Boolean(draft.primary_asset_public_id),
+      draft
     });
   },
 

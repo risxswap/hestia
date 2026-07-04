@@ -173,6 +173,28 @@ func (r *MySQLRepository) CreateItemWithAssets(ctx context.Context, item Item, a
 	return r.createItemWithAssets(ctx, item, assetPublicIDs)
 }
 
+func (r *MySQLRepository) ReplaceItemAssets(ctx context.Context, userID int64, publicID string, assetPublicIDs []string) (Item, error) {
+	if r == nil || r.ext == nil {
+		return Item{}, errors.New("wardrobe repository database is nil")
+	}
+	if starter, ok := r.ext.(txStarter); ok {
+		tx, err := starter.BeginTxx(ctx, nil)
+		if err != nil {
+			return Item{}, err
+		}
+		updated, err := (&MySQLRepository{ext: tx}).replaceItemAssets(ctx, userID, publicID, assetPublicIDs)
+		if err != nil {
+			_ = tx.Rollback()
+			return Item{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return Item{}, err
+		}
+		return updated, nil
+	}
+	return r.replaceItemAssets(ctx, userID, publicID, assetPublicIDs)
+}
+
 func (r *MySQLRepository) createItemWithAssets(ctx context.Context, item Item, assetPublicIDs []string) (Item, error) {
 	created, err := r.createItem(ctx, item, "")
 	if err != nil {
@@ -188,6 +210,22 @@ func (r *MySQLRepository) createItemWithAssets(ctx context.Context, item Item, a
 		}
 	}
 	return created, nil
+}
+
+func (r *MySQLRepository) replaceItemAssets(ctx context.Context, userID int64, publicID string, assetPublicIDs []string) (Item, error) {
+	current, err := r.findItemByPublicIDForUser(ctx, userID, publicID)
+	if err != nil {
+		return Item{}, err
+	}
+	if err := r.deleteItemAssets(ctx, current.ID); err != nil {
+		return Item{}, err
+	}
+	for index, assetPublicID := range trimStringSlice(assetPublicIDs) {
+		if _, err := r.addItemAsset(ctx, userID, current.ID, assetPublicID, index == 0, index); err != nil {
+			return Item{}, err
+		}
+	}
+	return r.findItemByPublicIDForUser(ctx, userID, publicID)
 }
 
 func (r *MySQLRepository) createItem(ctx context.Context, item Item, primaryAssetPublicID string) (Item, error) {
@@ -458,6 +496,14 @@ func (r *MySQLRepository) clearPrimaryAssets(ctx context.Context, wardrobeItemID
 	_, err := r.ext.ExecContext(ctx, `
 UPDATE wardrobe_item_assets
 SET is_primary = 0
+WHERE wardrobe_item_id = ?
+`, wardrobeItemID)
+	return err
+}
+
+func (r *MySQLRepository) deleteItemAssets(ctx context.Context, wardrobeItemID int64) error {
+	_, err := r.ext.ExecContext(ctx, `
+DELETE FROM wardrobe_item_assets
 WHERE wardrobe_item_id = ?
 `, wardrobeItemID)
 	return err

@@ -77,6 +77,7 @@ type UpdateInput struct {
 	IsCore               *bool     `json:"is_core"`
 	RecommendationStatus *string   `json:"recommendation_status"`
 	PrimaryAssetPublicID *string   `json:"primary_asset_public_id"`
+	AssetPublicIDs       *[]string `json:"asset_public_ids"`
 	RecognitionStatus    *string   `json:"recognition_status"`
 }
 
