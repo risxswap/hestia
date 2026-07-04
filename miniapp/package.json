@@ -9,6 +9,7 @@
     "verify:api-client": "node scripts/verify-api-client.js",
     "verify:api-integration": "node scripts/verify-miniapp-api-integration.js",
     "verify:profile-page": "node scripts/verify-profile-page.js",
+    "verify:private-tab-naming": "node scripts/verify-private-tab-naming.js",
     "verify:report-page": "node scripts/verify-report-page.js",
     "verify:tdesign-icon-font": "node scripts/verify-tdesign-icon-font.js",
     "verify:today-ui": "node scripts/verify-today-ui.js"

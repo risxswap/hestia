@@ -1,0 +1,18 @@
+<view class="page typed-collection-page">
+  <view class="typed-hero">
+    <text class="eyebrow">私藏</text>
+    <text class="title">妆容</text>
+    <text class="muted">保存日常、通勤或特殊场景里稳定适合你的妆容方向。</text>
+  </view>
+
+  <view wx:if="{{loading}}" class="card state-card">
+    <text class="muted">正在读取妆容...</text>
+  </view>
+  <view wx:elif="{{errorMessage}}" class="card state-card">
+    <text class="error-text">{{errorMessage}}</text>
+  </view>
+  <view wx:elif="{{!items.length}}" class="card empty-card">
+    <text class="section-title">还没有妆容私藏</text>
+    <text class="muted">之后可以记录适合的重点、色彩方向和需要避开的妆感。</text>
+  </view>
+</view>

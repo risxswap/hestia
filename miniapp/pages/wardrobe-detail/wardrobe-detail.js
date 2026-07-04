@@ -227,7 +227,7 @@ const wardrobeDetailPageConfig = {
     if (!publicID) {
       this.setData({
         loading: false,
-        errorMessage: "未找到要查看的单品",
+        errorMessage: "未找到要查看的私藏",
         itemPublicID: "",
         item: null
       });
@@ -266,7 +266,7 @@ const wardrobeDetailPageConfig = {
       this.setData({
         loading: false,
         item: null,
-        errorMessage: error && error.message ? error.message : "读取衣服详情失败"
+        errorMessage: error && error.message ? error.message : "读取私藏详情失败"
       });
       return null;
     }

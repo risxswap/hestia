@@ -158,6 +158,30 @@ function updateProfilePreferences(data) {
   });
 }
 
+function getCollectionSummary() {
+  return authorizedRequest({
+    path: "/api/user/collection"
+  });
+}
+
+function getHairItems() {
+  return authorizedRequest({
+    path: "/api/user/hair"
+  });
+}
+
+function getMakeupItems() {
+  return authorizedRequest({
+    path: "/api/user/makeup"
+  });
+}
+
+function getReferenceItems() {
+  return authorizedRequest({
+    path: "/api/user/references"
+  });
+}
+
 function getWardrobeItems(filters) {
   const params = filters || {};
   const query = Object.keys(params)
@@ -529,6 +553,10 @@ module.exports = {
   getProfileSummary,
   updateProfile,
   updateProfilePreferences,
+  getCollectionSummary,
+  getHairItems,
+  getMakeupItems,
+  getReferenceItems,
   getWardrobeItems,
   getWardrobeOptions,
   createWardrobeItem,

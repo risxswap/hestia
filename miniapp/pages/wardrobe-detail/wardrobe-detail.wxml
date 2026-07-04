@@ -1,6 +1,6 @@
 <view class="page wardrobe-detail-page">
   <view class="detail-nav">
-    <button class="secondary-button nav-button" bind:tap="handleBack">返回衣橱</button>
+    <button class="secondary-button nav-button" bind:tap="handleBack">返回私藏</button>
     <view class="detail-nav-actions" wx:if="{{item}}">
       <button class="danger-button nav-button detail-delete-button" data-public-id="{{item.public_id}}" bind:tap="handleDeleteItem">删除</button>
       <button wx:if="{{!item.isRecognizing}}" class="primary-button nav-button" bind:tap="handleOpenEdit">编辑</button>
@@ -8,7 +8,7 @@
   </view>
 
   <view wx:if="{{loading}}" class="card state-card">
-    <text class="muted">正在读取衣服详情...</text>
+    <text class="muted">正在读取私藏详情...</text>
   </view>
   <view wx:elif="{{errorMessage && !item}}" class="card state-card">
     <text class="error-text">{{errorMessage}}</text>

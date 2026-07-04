@@ -273,8 +273,94 @@ function runNavigateCase(action) {
   }
 }
 
+async function verifyCollectionPage() {
+  const collectionApiCalls = [];
+  const collection = loadPage("pages/collection/collection.js", {
+    getCollectionSummary: async () => {
+      collectionApiCalls.push("summary");
+      return {
+        types: [
+          {
+            type: "wardrobe",
+            label: "衣服",
+            count: 2,
+            hint: "常穿单品",
+            enabled: true,
+            entry_path: "/pages/wardrobe/wardrobe",
+          },
+          {
+            type: "hair",
+            label: "发型",
+            count: 0,
+            hint: "常用发型",
+            enabled: true,
+            entry_path: "/pages/hair/hair",
+          },
+        ],
+        recent_items: [
+          {
+            type: "wardrobe",
+            public_id: "wdi_shirt",
+            title: "米白衬衫",
+            subtitle: "上装",
+            image: "https://cdn.example.com/wardrobe/wdi_shirt/main-preview.webp",
+            entry_path: "/pages/wardrobe-detail/wardrobe-detail?public_id=wdi_shirt",
+          },
+        ],
+      };
+    },
+  });
+  assert(collection.config, "collection.js should register a Page config");
+  assert(
+    typeof collection.config.loadCollection === "function",
+    "collection page should load collection summary",
+  );
+  assert(
+    typeof collection.config.handleOpenType === "function",
+    "collection page should open type pages",
+  );
+  assert(
+    typeof collection.config.handleOpenRecent === "function",
+    "collection page should open recent saved items",
+  );
+
+  const collectionInstance = createPageInstance(collection.config);
+  await collection.config.loadCollection.call(collectionInstance);
+  assert(collectionApiCalls.length === 1, "collection page should call getCollectionSummary once");
+  assert(collectionInstance.data.types.length === 4, "collection page should show the four collection type entries");
+  assert(collectionInstance.data.types[0].label === "衣服", "collection page should keep type label");
+  assert(collectionInstance.data.types[1].label === "发型", "collection page should keep returned hair label");
+  assert(collectionInstance.data.recentItems[0].title === "米白衬衫", "collection page should hydrate recent items");
+
+  const typeUrl = runNavigateCase(() => {
+    collection.config.handleOpenType.call(collectionInstance, {
+      currentTarget: {
+        dataset: {
+          entryPath: "/pages/hair/hair",
+        },
+      },
+    });
+  });
+  assert(typeUrl === "/pages/hair/hair", `collection type navigation mismatch: ${typeUrl}`);
+
+  const recentUrl = runNavigateCase(() => {
+    collection.config.handleOpenRecent.call(collectionInstance, {
+      currentTarget: {
+        dataset: {
+          entryPath: "/pages/wardrobe-detail/wardrobe-detail?public_id=wdi_shirt",
+        },
+      },
+    });
+  });
+  assert(
+    recentUrl === "/pages/wardrobe-detail/wardrobe-detail?public_id=wdi_shirt",
+    `collection recent navigation mismatch: ${recentUrl}`,
+  );
+}
+
 async function main() {
   await verifyFirstEntryAppRouting();
+  await verifyCollectionPage();
 
   const appJson = JSON.parse(read("app.json"));
   assert(
@@ -943,6 +1029,26 @@ async function main() {
     "wardrobe should open create form",
   );
   assert(
+    !Object.prototype.hasOwnProperty.call(wardrobe.config.data, "privateTypeSummaries"),
+    "wardrobe should not keep collection type summaries in page data",
+  );
+  assert(
+    !Object.prototype.hasOwnProperty.call(wardrobe.config.data, "recentPrivateItems"),
+    "wardrobe should not keep collection recent items in page data",
+  );
+  assert(
+    typeof wardrobe.config.handleOpenPrivateType === "undefined",
+    "wardrobe should not own collection type entry navigation",
+  );
+  assert(
+    typeof wardrobe.config.handleOpenCreateTypePicker === "undefined",
+    "wardrobe should not own collection create type picker",
+  );
+  assert(
+    !Object.prototype.hasOwnProperty.call(wardrobe.config.data, "unsupportedPrivateMessage"),
+    "wardrobe should not keep unsupported collection type feedback in page data",
+  );
+  assert(
     typeof wardrobe.config.handleCloseEditor === "function",
     "wardrobe should close item editor modal",
   );
@@ -1256,6 +1362,36 @@ async function main() {
   assert(
     wardrobeInstance.data.categoryOptions[0].countLabel === "全部 2",
     "wardrobe should show all count in category chip",
+  );
+  assert(
+    !Object.prototype.hasOwnProperty.call(wardrobeInstance.data, "privateTypeSummaries"),
+    "wardrobe runtime state should not include collection type summaries",
+  );
+  assert(
+    !Object.prototype.hasOwnProperty.call(wardrobeInstance.data, "recentPrivateItems"),
+    "wardrobe runtime state should not include collection recent items",
+  );
+
+  const failingPrivateHomeWardrobe = loadPage("pages/wardrobe/wardrobe.js", {
+    getWardrobeItems: async () => {
+      throw new Error("wardrobe unavailable");
+    },
+    getLatestReport: async () => ({
+      content_json: {
+        wardrobe_gaps: ["浅色短外套"],
+      },
+    }),
+    getWardrobeOptions: async () => null,
+  });
+  const failingPrivateHomeWardrobeInstance = createPageInstance(failingPrivateHomeWardrobe.config);
+  await failingPrivateHomeWardrobe.config.loadWardrobe.call(failingPrivateHomeWardrobeInstance);
+  assert(
+    failingPrivateHomeWardrobeInstance.data.errorMessage === "wardrobe unavailable",
+    "wardrobe load failure should expose the load error",
+  );
+  assert(
+    !Object.prototype.hasOwnProperty.call(failingPrivateHomeWardrobeInstance.data, "recentPrivateItems"),
+    "wardrobe load failure should not manage collection recent items",
   );
   const originalWardrobeWx = global.wx;
   let wardrobeDetailUrl = "";
@@ -1765,12 +1901,16 @@ async function main() {
   const wardrobeUtils = read("utils/wardrobe.js");
   const wardrobeStyles = read("pages/wardrobe/wardrobe.wxss");
   assert(
-    wardrobeMarkup.includes("我的衣服"),
-    "wardrobe gallery should use gallery title",
+    wardrobeMarkup.includes("衣服"),
+    "wardrobe gallery should use clothes title",
   );
   assert(
-    wardrobeMarkup.includes("category-scroll"),
-    "wardrobe category row should be horizontally scrollable",
+    !wardrobeMarkup.includes("private-type-grid"),
+    "wardrobe page should not render the collection type grid",
+  );
+  assert(
+    wardrobeMarkup.includes("clothes-filter-strip"),
+    "wardrobe page should render the clothes category strip",
   );
   assert(
     wardrobeMarkup.includes("gallery-grid"),

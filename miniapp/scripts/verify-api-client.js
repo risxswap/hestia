@@ -49,6 +49,10 @@ async function main() {
     "submitOnboarding",
     "sendAgentMessage",
     "parseSSEEvents",
+    "getCollectionSummary",
+    "getHairItems",
+    "getMakeupItems",
+    "getReferenceItems",
     "getWardrobeItems",
     "getWardrobeOptions",
     "createWardrobeItem",
@@ -144,6 +148,45 @@ async function main() {
   assert(events.length === 2, "parseSSEEvents should parse two events");
   assert(events[0].event === "status", "first event should keep event name");
   assert(events[0].data.text === "准备好了", "first event should parse JSON data");
+
+  const collectionCalls = [];
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "collection_token";
+      },
+      request(options) {
+        collectionCalls.push(options);
+        options.success({
+          statusCode: 200,
+          data: {
+            code: "ok",
+            data: {
+              items: [],
+              types: []
+            }
+          }
+        });
+      }
+    }
+  }, async () => {
+    await api.getCollectionSummary();
+    await api.getHairItems();
+    await api.getMakeupItems();
+    await api.getReferenceItems();
+  });
+
+  const collectionPaths = collectionCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
+  assert(collectionCalls.every((call) => call.method === "GET"), "collection and asset-type APIs should use GET");
+  assert(collectionPaths[0] === "/api/user/collection", `collection path mismatch: ${collectionPaths[0]}`);
+  assert(collectionPaths[1] === "/api/user/hair", `hair path mismatch: ${collectionPaths[1]}`);
+  assert(collectionPaths[2] === "/api/user/makeup", `makeup path mismatch: ${collectionPaths[2]}`);
+  assert(collectionPaths[3] === "/api/user/references", `references path mismatch: ${collectionPaths[3]}`);
+  assert(
+    collectionPaths.every((apiPath) => !apiPath.includes("/private") && !apiPath.includes("/collection/")),
+    `collection-related APIs should not use private prefix or nested collection routes: ${collectionPaths.join(",")}`
+  );
 
   const wardrobeCalls = [];
   await withGlobals({

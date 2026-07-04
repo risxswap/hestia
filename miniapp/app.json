@@ -2,9 +2,13 @@
   "pages": [
     "pages/home/home",
     "pages/advisor/advisor",
+    "pages/collection/collection",
     "pages/wardrobe/wardrobe",
     "pages/wardrobe-detail/wardrobe-detail",
     "pages/wardrobe-edit/wardrobe-edit",
+    "pages/hair/hair",
+    "pages/makeup/makeup",
+    "pages/references/references",
     "pages/profile/profile",
     "pages/report/report",
     "pages/onboarding/onboarding"
@@ -34,8 +38,8 @@
         "selectedIconPath": "assets/tabbar/advisor-active.png"
       },
       {
-        "pagePath": "pages/wardrobe/wardrobe",
-        "text": "衣橱",
+        "pagePath": "pages/collection/collection",
+        "text": "私藏",
         "iconPath": "assets/tabbar/wardrobe.png",
         "selectedIconPath": "assets/tabbar/wardrobe-active.png"
       },

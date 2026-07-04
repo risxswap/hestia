@@ -107,7 +107,7 @@ function confirmDelete() {
 
   return new Promise((resolve) => {
     wx.showModal({
-      title: "删除核心单品",
+      title: "删除衣服",
       content: "删除后不会再用于后续穿搭建议。",
       confirmText: "删除",
       success(result) {
@@ -242,7 +242,7 @@ const wardrobePageConfig = {
         priorityItems: [],
         categoryOptions: categoryOptionsWithCounts([]),
         gaps: [],
-        errorMessage: error && error.message ? error.message : "读取核心衣橱失败"
+        errorMessage: error && error.message ? error.message : "读取衣服失败"
       });
     }
   },
@@ -285,7 +285,7 @@ const wardrobePageConfig = {
       this.setData({
         loading: false,
         gaps: [],
-        errorMessage: error && error.message ? error.message : "读取衣橱缺口失败"
+        errorMessage: error && error.message ? error.message : "读取补齐建议失败"
       });
     }
   },
@@ -321,7 +321,7 @@ const wardrobePageConfig = {
     this._imageUploadPromisesByURL = {};
     const category = this.data.activeCategory && this.data.activeCategory !== "all"
       ? this.data.activeCategory
-      : "top";
+      : "上装";
     this.setData({
       editorVisible: true,
       editingPublicID: "",

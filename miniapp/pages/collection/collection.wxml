@@ -1,0 +1,58 @@
+<view class="page collection-page">
+  <view class="collection-hero">
+    <view class="top-copy">
+      <text class="eyebrow">个人长期记忆</text>
+      <text class="title">我的私藏</text>
+      <text class="muted">保存衣服、发型、妆容和参考图，作为 Hestia 给你建议的依据。</text>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="card state-card">
+    <text class="muted">正在读取私藏...</text>
+  </view>
+  <view wx:elif="{{errorMessage}}" class="card state-card">
+    <text class="error-text">{{errorMessage}}</text>
+  </view>
+
+  <block wx:else>
+    <view class="private-type-grid">
+      <block wx:for="{{types}}" wx:key="type">
+        <button class="card private-type-card {{item.enabled ? '' : 'private-type-card--disabled'}}" data-entry-path="{{item.entryPath}}" bind:tap="handleOpenType">
+          <view class="private-type-preview">
+            <text class="private-type-initial">{{item.label}}</text>
+          </view>
+          <view class="private-type-copy">
+            <text class="private-type-title">{{item.label}}</text>
+            <text class="private-type-count">{{item.countLabel}}</text>
+            <text class="private-type-hint">{{item.hint}}</text>
+          </view>
+        </button>
+      </block>
+    </view>
+
+    <view wx:if="{{recentItems.length}}" class="recent-private-section">
+      <view class="section-heading">
+        <text class="section-title">最近收录</text>
+        <text class="muted">最近保存的内容会先出现在这里。</text>
+      </view>
+      <view class="recent-private-grid">
+        <block wx:for="{{recentItems}}" wx:key="public_id">
+          <view class="card recent-private-card" data-entry-path="{{item.entryPath}}" bind:tap="handleOpenRecent">
+            <view class="recent-private-media">
+              <image wx:if="{{item.image}}" class="recent-private-image" src="{{item.image}}" mode="aspectFill" />
+              <view wx:else class="recent-private-placeholder">
+                <text>{{item.subtitle || item.type}}</text>
+              </view>
+            </view>
+            <text class="recent-private-name">{{item.title}}</text>
+          </view>
+        </block>
+      </view>
+    </view>
+
+    <view wx:if="{{!recentItems.length}}" class="card empty-card">
+      <text class="section-title">先添加一件常用私藏</text>
+      <text class="muted">从一件常穿衣服、常用发型或喜欢的参考图开始即可。</text>
+    </view>
+  </block>
+</view>
