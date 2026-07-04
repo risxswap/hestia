@@ -52,7 +52,7 @@ func TestListItemsReturnsOnlyCurrentUserItems(t *testing.T) {
 	}
 }
 
-func TestListItemsInjectsPrimaryImageURL(t *testing.T) {
+func TestListItemsInjectsPrimaryImagePreviewAndOriginalURLsInBatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
 	repo.add(wardrobe.Item{
@@ -68,10 +68,22 @@ func TestListItemsInjectsPrimaryImageURL(t *testing.T) {
 			ObjectKey:     "users/12/wardrobe/ast_owned.jpg",
 		},
 	})
+	repo.add(wardrobe.Item{
+		PublicID:             "wdi_owned_two",
+		UserID:               12,
+		Name:                 "黑色西装",
+		Category:             "outerwear",
+		RecommendationStatus: wardrobe.RecommendationStatusNormal,
+		Status:               wardrobe.StatusActive,
+		IsCore:               true,
+		PrimaryImage: &wardrobe.Image{
+			AssetPublicID: "ast_owned_two",
+			ObjectKey:     "users/12/wardrobe/ast_owned_two.jpg",
+		},
+	})
 	service := wardrobe.NewService(repo)
-	service.SetImageURLSigner(routeImageURLSignerFunc(func(_ context.Context, objectKey string) (string, error) {
-		return fmt.Sprintf("https://private.example.test/%s?token=short", objectKey), nil
-	}))
+	signer := &routeBatchImageURLSigner{}
+	service.SetImageURLSigner(signer)
 	router := newWardrobeRouteTestRouterWithService(service)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/user/wardrobe/items", nil)
@@ -91,15 +103,30 @@ func TestListItemsInjectsPrimaryImageURL(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(body.Data.Items) != 1 {
+	if len(body.Data.Items) != 2 {
 		t.Fatalf("expected one item, got %#v", body.Data.Items)
 	}
 	if body.Data.Items[0].PrimaryImage == nil {
 		t.Fatalf("expected primary image, got nil")
 	}
-	expectedURL := "https://private.example.test/users/12/wardrobe/ast_owned.jpg?token=short"
-	if body.Data.Items[0].PrimaryImage.URL != expectedURL {
-		t.Fatalf("expected primary image URL %q, got %#v", expectedURL, body.Data.Items[0].PrimaryImage)
+	if signer.batchCalls != 1 || signer.singleCalls != 0 {
+		t.Fatalf("expected one batch signing call and no single calls, got batch=%d single=%d", signer.batchCalls, signer.singleCalls)
+	}
+	expectedOriginalURL := "https://private.example.test/users/12/wardrobe/ast_owned.jpg?token=original"
+	expectedPreviewURL := "https://private.example.test/users/12/wardrobe/ast_owned.jpg?imageView2/2/w/360/h/360/q/80/format/webp&token=preview"
+	if body.Data.Items[0].PrimaryImage.OriginalURL != expectedOriginalURL ||
+		body.Data.Items[0].PrimaryImage.PreviewURL != expectedPreviewURL {
+		t.Fatalf("expected primary image URLs, got %#v", body.Data.Items[0].PrimaryImage)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw response: %v", err)
+	}
+	data := raw["data"].(map[string]any)
+	items := data["items"].([]any)
+	primaryImage := items[0].(map[string]any)["primary_image"].(map[string]any)
+	if _, ok := primaryImage["url"]; ok {
+		t.Fatalf("primary image must not expose legacy url field: %#v", primaryImage)
 	}
 }
 
@@ -182,13 +209,11 @@ func TestCreateItemRejectsEmptyName(t *testing.T) {
 	}
 }
 
-func TestCreateItemInjectsPrimaryImageURL(t *testing.T) {
+func TestCreateItemInjectsPrimaryImagePreviewAndOriginalURLs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
 	service := wardrobe.NewService(repo)
-	service.SetImageURLSigner(routeImageURLSignerFunc(func(_ context.Context, objectKey string) (string, error) {
-		return fmt.Sprintf("https://private.example.test/%s?token=short", objectKey), nil
-	}))
+	service.SetImageURLSigner(&routeBatchImageURLSigner{})
 	router := newWardrobeRouteTestRouterWithService(service)
 
 	request := httptest.NewRequest(http.MethodPost, "/api/user/wardrobe/items", bytes.NewBufferString(`{"name":"米白衬衫","category":"top","primary_asset_public_id":"ast_created"}`))
@@ -210,9 +235,11 @@ func TestCreateItemInjectsPrimaryImageURL(t *testing.T) {
 	if body.Data.PrimaryImage == nil {
 		t.Fatalf("expected primary image, got nil")
 	}
-	expectedURL := "https://private.example.test/users/12/wardrobe/ast_created.jpg?token=short"
-	if body.Data.PrimaryImage.URL != expectedURL {
-		t.Fatalf("expected signed create URL %q, got %#v", expectedURL, body.Data.PrimaryImage)
+	expectedOriginalURL := "https://private.example.test/users/12/wardrobe/ast_created.jpg?token=original"
+	expectedPreviewURL := "https://private.example.test/users/12/wardrobe/ast_created.jpg?imageView2/2/w/360/h/360/q/80/format/webp&token=preview"
+	if body.Data.PrimaryImage.OriginalURL != expectedOriginalURL ||
+		body.Data.PrimaryImage.PreviewURL != expectedPreviewURL {
+		t.Fatalf("expected signed create URLs, got %#v", body.Data.PrimaryImage)
 	}
 }
 
@@ -246,14 +273,12 @@ func TestPatchItemUpdatesRecommendationStatus(t *testing.T) {
 	}
 }
 
-func TestPatchItemInjectsPrimaryImageURL(t *testing.T) {
+func TestPatchItemInjectsPrimaryImagePreviewAndOriginalURLs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newRouteMemoryWardrobeRepo()
 	repo.add(wardrobe.Item{PublicID: "wdi_owned", UserID: 12, Name: "米白衬衫", Category: "top", RecommendationStatus: wardrobe.RecommendationStatusNormal, Status: wardrobe.StatusActive, IsCore: true})
 	service := wardrobe.NewService(repo)
-	service.SetImageURLSigner(routeImageURLSignerFunc(func(_ context.Context, objectKey string) (string, error) {
-		return fmt.Sprintf("https://private.example.test/%s?token=short", objectKey), nil
-	}))
+	service.SetImageURLSigner(&routeBatchImageURLSigner{})
 	router := newWardrobeRouteTestRouterWithService(service)
 
 	request := httptest.NewRequest(http.MethodPatch, "/api/user/wardrobe/items/wdi_owned", bytes.NewBufferString(`{"primary_asset_public_id":"ast_updated"}`))
@@ -275,9 +300,11 @@ func TestPatchItemInjectsPrimaryImageURL(t *testing.T) {
 	if body.Data.PrimaryImage == nil {
 		t.Fatalf("expected primary image, got nil")
 	}
-	expectedURL := "https://private.example.test/users/12/wardrobe/ast_updated.jpg?token=short"
-	if body.Data.PrimaryImage.URL != expectedURL {
-		t.Fatalf("expected signed patch URL %q, got %#v", expectedURL, body.Data.PrimaryImage)
+	expectedOriginalURL := "https://private.example.test/users/12/wardrobe/ast_updated.jpg?token=original"
+	expectedPreviewURL := "https://private.example.test/users/12/wardrobe/ast_updated.jpg?imageView2/2/w/360/h/360/q/80/format/webp&token=preview"
+	if body.Data.PrimaryImage.OriginalURL != expectedOriginalURL ||
+		body.Data.PrimaryImage.PreviewURL != expectedPreviewURL {
+		t.Fatalf("expected signed patch URLs, got %#v", body.Data.PrimaryImage)
 	}
 }
 
@@ -327,7 +354,9 @@ func TestListItemsKeepsResponseWhenPrimaryImageSigningFails(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Data.Items[0].PrimaryImage == nil || body.Data.Items[0].PrimaryImage.URL != "" {
+	if body.Data.Items[0].PrimaryImage == nil ||
+		body.Data.Items[0].PrimaryImage.PreviewURL != "" ||
+		body.Data.Items[0].PrimaryImage.OriginalURL != "" {
 		t.Fatalf("expected empty URL after signing failure, got %#v", body.Data.Items[0].PrimaryImage)
 	}
 	if capturedObjectKey != "users/12/wardrobe/ast_owned.jpg" || !errors.Is(capturedErr, signErr) {
@@ -510,6 +539,28 @@ type routeImageURLSignerFunc func(ctx context.Context, objectKey string) (string
 
 func (f routeImageURLSignerFunc) PrivateDownloadURL(ctx context.Context, objectKey string) (string, error) {
 	return f(ctx, objectKey)
+}
+
+type routeBatchImageURLSigner struct {
+	batchCalls  int
+	singleCalls int
+}
+
+func (s *routeBatchImageURLSigner) PrivateDownloadURL(_ context.Context, objectKey string) (string, error) {
+	s.singleCalls++
+	return fmt.Sprintf("https://private.example.test/%s?token=original", objectKey), nil
+}
+
+func (s *routeBatchImageURLSigner) PrivateImageURLs(_ context.Context, objectKeys []string) (map[string]wardrobe.SignedImageURLs, error) {
+	s.batchCalls++
+	result := make(map[string]wardrobe.SignedImageURLs, len(objectKeys))
+	for _, objectKey := range objectKeys {
+		result[objectKey] = wardrobe.SignedImageURLs{
+			PreviewURL:  fmt.Sprintf("https://private.example.test/%s?imageView2/2/w/360/h/360/q/80/format/webp&token=preview", objectKey),
+			OriginalURL: fmt.Sprintf("https://private.example.test/%s?token=original", objectKey),
+		}
+	}
+	return result, nil
 }
 
 type routeImageRecognizerFunc func(ctx context.Context, userID int64, input wardrobe.RecognizeImageInput) (wardrobe.RecognizedItemFields, error)

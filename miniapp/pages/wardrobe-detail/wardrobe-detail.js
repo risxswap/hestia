@@ -74,6 +74,18 @@ function failedImageFiles(file, message) {
   }));
 }
 
+function confirmedLocalImageFiles(file, uploaded) {
+  const pending = pendingImageFiles(file);
+  if (!pending.length) {
+    return [];
+  }
+  return pending.map((item) => Object.assign({}, item, {
+    status: "done",
+    asset_public_id: uploaded && uploaded.asset_public_id ? uploaded.asset_public_id : "",
+    object_key: uploaded && uploaded.object_key ? uploaded.object_key : ""
+  }));
+}
+
 function confirmDelete() {
   if (typeof wx === "undefined" || !wx.showModal) {
     return Promise.resolve(true);
@@ -254,7 +266,7 @@ const wardrobeDetailPageConfig = {
         });
         this.setData({
           draft,
-          imageFiles: imageFilesFromAsset(uploaded),
+          imageFiles: confirmedLocalImageFiles(file, uploaded),
           imageUploading: false,
           imageUploadError: ""
         });

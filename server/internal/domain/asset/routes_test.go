@@ -171,6 +171,9 @@ func TestFileRoutesCreateUploadTokenAndConfirmWithRecognizedFields(t *testing.T)
 	if confirmData["file_public_id"] != testAssetPublicID || confirmData["file_type"] != "wardrobe_item_photo" {
 		t.Fatalf("expected file fields in confirm response: %#v", confirmData)
 	}
+	if _, ok := confirmData["url"]; ok {
+		t.Fatalf("confirm response must not expose expiring url: %#v", confirmData)
+	}
 	recognized, ok := confirmData["recognized_fields"].(map[string]any)
 	if !ok || recognized["name"] != "米白衬衫" || recognized["category"] != "top" {
 		t.Fatalf("expected recognized fields in confirm response: %#v", confirmData)
@@ -319,9 +322,11 @@ func TestConfirmCreatesAssetAndIsIdempotent(t *testing.T) {
 	firstData := responseData(t, first)
 	if firstData["asset_public_id"] != "ast_abcdefghijklmnopqrstuvwxyz" ||
 		firstData["object_key"] != "users/12/onboarding/ast_abcdefghijklmnopqrstuvwxyz.png" ||
-		firstData["url"] != "https://download.example.test/users/12/onboarding/ast_abcdefghijklmnopqrstuvwxyz.png" ||
 		firstData["asset_type"] != "onboarding_photo" {
 		t.Fatalf("unexpected confirm response data: %#v", firstData)
+	}
+	if _, ok := firstData["url"]; ok {
+		t.Fatalf("confirm response must not expose expiring url: %#v", firstData)
 	}
 	for _, internalKey := range []string{"owner_user_id", "metadata", "status", "review_status", "source", "bucket"} {
 		if _, ok := firstData[internalKey]; ok {
@@ -477,7 +482,7 @@ func TestConfirmRequiresConfiguredBucket(t *testing.T) {
 	}
 }
 
-func TestConfirmNormalizesPrivateDomainScheme(t *testing.T) {
+func TestConfirmDoesNotReturnPrivateDownloadURL(t *testing.T) {
 	options := defaultServiceOptions()
 	options.PrivateDomain = "private.example.test"
 	options.DownloadSigner = DownloadSignerFunc(func(_ context.Context, req DownloadSignRequest) (string, error) {
@@ -498,8 +503,8 @@ func TestConfirmNormalizesPrivateDomainScheme(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", recorder.Code, recorder.Body.String())
 	}
 	data := responseData(t, recorder)
-	if data["url"] != "https://private.example.test/users/12/onboarding/ast_abcdefghijklmnopqrstuvwxyz.png" {
-		t.Fatalf("expected normalized private URL, got %#v", data["url"])
+	if _, ok := data["url"]; ok {
+		t.Fatalf("confirm response must not expose expiring url: %#v", data)
 	}
 }
 

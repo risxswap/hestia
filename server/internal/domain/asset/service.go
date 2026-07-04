@@ -27,6 +27,7 @@ const (
 	maxImageFileSize       = 10 * 1024 * 1024
 	maxImageDimension      = 20000
 	qiniuStatTimeout       = 5 * time.Second
+	qiniuPreviewQuery      = "imageView2/2/w/360/h/360/q/80/format/webp"
 )
 
 var (
@@ -83,7 +84,13 @@ func (f UploadSignerFunc) SignUpload(ctx context.Context, req UploadSignRequest)
 type DownloadSignRequest struct {
 	PrivateDomain string
 	ObjectKey     string
+	Query         string
 	TTL           time.Duration
+}
+
+type SignedImageURLs = struct {
+	PreviewURL  string
+	OriginalURL string
 }
 
 type DownloadSigner interface {
@@ -383,6 +390,33 @@ func (s *Service) ConfirmUpload(ctx context.Context, userID int64, input Confirm
 }
 
 func (s *Service) PrivateDownloadURL(ctx context.Context, objectKey string) (string, error) {
+	return s.privateDownloadURL(ctx, objectKey, "")
+}
+
+func (s *Service) PrivateImageURLs(ctx context.Context, objectKeys []string) (map[string]SignedImageURLs, error) {
+	result := make(map[string]SignedImageURLs, len(objectKeys))
+	for _, objectKey := range objectKeys {
+		objectKey = strings.TrimSpace(objectKey)
+		if objectKey == "" {
+			continue
+		}
+		originalURL, err := s.privateDownloadURL(ctx, objectKey, "")
+		if err != nil {
+			return nil, err
+		}
+		previewURL, err := s.privateDownloadURL(ctx, objectKey, qiniuPreviewQuery)
+		if err != nil {
+			return nil, err
+		}
+		result[objectKey] = SignedImageURLs{
+			PreviewURL:  previewURL,
+			OriginalURL: originalURL,
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) privateDownloadURL(ctx context.Context, objectKey string, query string) (string, error) {
 	if s == nil || s.options.PrivateDomain == "" || s.options.DownloadSigner == nil {
 		return "", ErrAssetStorageNotReady
 	}
@@ -393,6 +427,7 @@ func (s *Service) PrivateDownloadURL(ctx context.Context, objectKey string) (str
 	return s.options.DownloadSigner.SignDownload(ctx, DownloadSignRequest{
 		PrivateDomain: s.options.PrivateDomain,
 		ObjectKey:     objectKey,
+		Query:         strings.TrimSpace(query),
 		TTL:           s.options.DownloadTTL,
 	})
 }
@@ -428,6 +463,9 @@ func (s qiniuDownloadSigner) SignDownload(_ context.Context, req DownloadSignReq
 		return "", ErrAssetStorageNotReady
 	}
 	deadline := time.Now().Add(req.TTL).Unix()
+	if strings.TrimSpace(req.Query) != "" {
+		return storage.MakePrivateURLv2WithQueryString(s.credentials, req.PrivateDomain, req.ObjectKey, req.Query, deadline), nil
+	}
 	return storage.MakePrivateURLv2(s.credentials, req.PrivateDomain, req.ObjectKey, deadline), nil
 }
 
@@ -498,7 +536,6 @@ func (s *Service) confirmResult(ctx context.Context, item Asset) (ConfirmResult,
 		AssetPublicID: item.PublicID,
 		FilePublicID:  item.PublicID,
 		ObjectKey:     item.ObjectKey,
-		URL:           url,
 		AssetType:     item.AssetType,
 		FileType:      item.AssetType,
 	}

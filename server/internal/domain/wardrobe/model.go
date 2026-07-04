@@ -25,7 +25,8 @@ type Item struct {
 type Image struct {
 	AssetPublicID string `json:"asset_public_id"`
 	ObjectKey     string `json:"object_key,omitempty"`
-	URL           string `json:"url,omitempty"`
+	PreviewURL    string `json:"preview_url,omitempty"`
+	OriginalURL   string `json:"original_url,omitempty"`
 }
 
 type OptionItem struct {

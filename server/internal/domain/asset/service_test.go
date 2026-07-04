@@ -122,6 +122,37 @@ func TestNewServiceWithOptionsDefaultsQiniuUploadHost(t *testing.T) {
 	}
 }
 
+func TestPrivateImageURLsSignsOriginalAndPreviewURLs(t *testing.T) {
+	var requests []DownloadSignRequest
+	service := NewServiceWithOptions(&captureRepo{}, ServiceOptions{
+		Bucket:        "private-assets",
+		PrivateDomain: "private.example.test",
+		DownloadSigner: DownloadSignerFunc(func(_ context.Context, req DownloadSignRequest) (string, error) {
+			requests = append(requests, req)
+			if req.Query != "" {
+				return req.PrivateDomain + "/" + req.ObjectKey + "?" + req.Query + "&token=preview", nil
+			}
+			return req.PrivateDomain + "/" + req.ObjectKey + "?token=original", nil
+		}),
+	})
+
+	urls, err := service.PrivateImageURLs(context.Background(), []string{"users/12/wardrobe/ast_test.jpg"})
+	if err != nil {
+		t.Fatalf("private image urls: %v", err)
+	}
+
+	got := urls["users/12/wardrobe/ast_test.jpg"]
+	if got.OriginalURL != "https://private.example.test/users/12/wardrobe/ast_test.jpg?token=original" {
+		t.Fatalf("expected original url, got %#v", got)
+	}
+	if got.PreviewURL != "https://private.example.test/users/12/wardrobe/ast_test.jpg?imageView2/2/w/360/h/360/q/80/format/webp&token=preview" {
+		t.Fatalf("expected preview url, got %#v", got)
+	}
+	if len(requests) != 2 || requests[0].Query != "" || requests[1].Query != qiniuPreviewQuery {
+		t.Fatalf("expected original and preview sign requests, got %#v", requests)
+	}
+}
+
 func qboxTestCredentials() *qbox.Mac {
 	return qbox.NewMac("test-ak", "test-sk")
 }

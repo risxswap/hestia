@@ -561,6 +561,8 @@ async function main() {
             recommendation_status: "preferred",
             scene_tags: ["通勤"],
             primary_image: {
+              preview_url: "https://cdn.example.com/wardrobe/wdi_shirt/main-preview.webp",
+              original_url: "https://cdn.example.com/wardrobe/wdi_shirt/main.jpg",
               object_key: "wardrobe/wdi_shirt/main.jpg"
             }
           },
@@ -725,8 +727,8 @@ async function main() {
   assert(wardrobeInstance.data.items.length === 2, "wardrobe should load two core wardrobe items");
   assert(wardrobeInstance.data.visibleItems.length === 2, "wardrobe all category should show all loaded items");
   assert(
-    wardrobeInstance.data.items[0].primaryImageSrc === "",
-    "wardrobe should not expose primary image object_key as display src when signed url is unavailable"
+    wardrobeInstance.data.items[0].primaryImageSrc === "https://cdn.example.com/wardrobe/wdi_shirt/main-preview.webp",
+    "wardrobe should use signed preview url as display src"
   );
   assert(wardrobeInstance.data.gaps[0] === "浅色短外套", "wardrobe should display report wardrobe gaps");
   assert(
@@ -830,7 +832,6 @@ async function main() {
   assert(wardrobeInstance.data.errorMessage === "图片还在上传，请稍后再保存", "wardrobe save should be blocked while image is uploading");
   wardrobeUploads[0].resolve({
     asset_public_id: "ast_create",
-    url: "https://cdn.example.com/wardrobe-create.jpg",
     object_key: "users/u1/assets/ast_create.jpg",
     recognized_fields: {
       name: "AI 识别开衫",
@@ -847,7 +848,7 @@ async function main() {
   await pendingWardrobeUpload;
   await duplicateWardrobeUpload;
   assert(wardrobeInstance.data.draft.primary_asset_public_id === "ast_create", "wardrobe upload success should set draft primary asset id");
-  assert(wardrobeInstance.data.imageFiles[0].url === "https://cdn.example.com/wardrobe-create.jpg", "wardrobe upload success should show uploaded image url");
+  assert(wardrobeInstance.data.imageFiles[0].url === "wxfile://wardrobe-create.jpg", "wardrobe upload success should keep local preview before server refresh");
   assert(wardrobeInstance.data.imageUploadError === "", "wardrobe upload success should clear image error");
   assert(wardrobeRecognizeCalls.length === 0, "wardrobe upload confirm recognized_fields should skip extra image recognition request");
   assert(wardrobeInstance.data.imageRecognizing === false, "wardrobe recognize success should clear recognizing state");
@@ -895,7 +896,6 @@ async function main() {
   assert(wardrobeInstance.data.imageUploading === false, "wardrobe image remove should clear uploading state");
   wardrobeUploads[1].resolve({
     asset_public_id: "ast_removed",
-    url: "https://cdn.example.com/removed.jpg",
     object_key: "users/u1/assets/ast_removed.jpg"
   });
   await removedWardrobeUpload;
@@ -1058,7 +1058,8 @@ async function main() {
           scene_tags: ["通勤", "见客户"],
           primary_image: {
             asset_public_id: "ast_old",
-            url: "https://cdn.example.com/wardrobe/wdi_shirt/main.jpg",
+            preview_url: "https://cdn.example.com/wardrobe/wdi_shirt/main-preview.webp",
+            original_url: "https://cdn.example.com/wardrobe/wdi_shirt/main.jpg",
             object_key: "wardrobe/wdi_shirt/main.jpg"
           }
         }
@@ -1083,7 +1084,6 @@ async function main() {
       }
       return {
         asset_public_id: "ast_detail",
-        url: "https://cdn.example.com/detail.jpg",
         object_key: "users/u1/assets/ast_detail.jpg"
       };
     }
@@ -1108,7 +1108,7 @@ async function main() {
   assert(detailInstance.data.item.styleLogic, "wardrobe detail should expose style logic text");
   wardrobeDetail.config.handleOpenEdit.call(detailInstance);
   assert(detailInstance.data.editorVisible === true, "wardrobe detail edit should open editor modal");
-  assert(detailInstance.data.imageFiles[0].url === "https://cdn.example.com/wardrobe/wdi_shirt/main.jpg", "wardrobe detail edit should echo existing primary image");
+  assert(detailInstance.data.imageFiles[0].url === "https://cdn.example.com/wardrobe/wdi_shirt/main-preview.webp", "wardrobe detail edit should echo existing primary image preview");
   await wardrobeDetail.config.handleImageUpload.call(detailInstance, {
     detail: {
       files: [{ url: "wxfile://detail.jpg", size: 4096, type: "image/jpeg" }]
@@ -1135,7 +1135,6 @@ async function main() {
   wardrobeDetail.config.handleImageRemove.call(detailInstance);
   detailRemoveUpload.resolve({
     asset_public_id: "ast_detail_removed",
-    url: "https://cdn.example.com/detail-removed.jpg",
     object_key: "users/u1/assets/ast_detail_removed.jpg"
   });
   await removedDetailUpload;

@@ -339,7 +339,6 @@ async function main() {
             data: {
               asset_public_id: "ast_upload",
               object_key: "users/u1/assets/ast_upload.webp",
-              url: "https://cdn.example.com/users/u1/assets/ast_upload.webp",
               asset_type: "wardrobe_item_photo"
             }
           }
@@ -369,7 +368,7 @@ async function main() {
 
     assert(uploaded.asset_public_id === "ast_upload", "uploadFileToQiniu should return confirmed asset_public_id");
     assert(uploaded.object_key === "users/u1/assets/ast_upload.webp", "uploadFileToQiniu should return confirmed object_key");
-    assert(uploaded.url === "https://cdn.example.com/users/u1/assets/ast_upload.webp", "uploadFileToQiniu should return confirmed url");
+    assert(!Object.prototype.hasOwnProperty.call(uploaded, "url"), "uploadFileToQiniu confirm result should not include expiring url");
     assert(uploaded.asset_type === "wardrobe_item_photo", "uploadFileToQiniu should return confirmed asset_type");
   });
 
@@ -429,7 +428,6 @@ async function main() {
             data: {
               asset_public_id: "ast_tdesign",
               object_key: "users/u1/assets/ast_tdesign.jpg",
-              url: "https://cdn.example.com/users/u1/assets/ast_tdesign.jpg",
               asset_type: "wardrobe_item_photo"
             }
           }

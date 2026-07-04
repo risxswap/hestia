@@ -62,7 +62,6 @@ type ConfirmResult struct {
 	AssetPublicID    string         `json:"asset_public_id"`
 	FilePublicID     string         `json:"file_public_id"`
 	ObjectKey        string         `json:"object_key"`
-	URL              string         `json:"url"`
 	AssetType        string         `json:"asset_type"`
 	FileType         string         `json:"file_type"`
 	RecognizedFields map[string]any `json:"recognized_fields,omitempty"`

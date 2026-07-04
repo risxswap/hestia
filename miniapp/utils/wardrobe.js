@@ -247,8 +247,8 @@ function decorateWardrobeItem(item) {
   const sceneTags = normalizeTextList(source.scene_tags);
   const recommendationStatus = source.recommendation_status || "normal";
   const primaryImage = source.primary_image || null;
-  const primaryImageSrc = primaryImage && primaryImage.url
-    ? primaryImage.url
+  const primaryImageSrc = primaryImage && primaryImage.preview_url
+    ? primaryImage.preview_url
     : "";
   const category = source.category || "";
   const isCore = source.is_core !== false;
@@ -358,7 +358,9 @@ function buildPayload(draft) {
 
 function imageFilesFromAsset(asset) {
   const source = asset || {};
-  const url = source.url || "";
+  const previewUrl = source.preview_url || source.local_url || "";
+  const originalUrl = source.original_url || "";
+  const url = previewUrl || originalUrl;
   if (!url) {
     return [];
   }
@@ -367,6 +369,8 @@ function imageFilesFromAsset(asset) {
   return [
     {
       url,
+      preview_url: previewUrl,
+      original_url: originalUrl,
       name,
       type: "image",
       status: "done",

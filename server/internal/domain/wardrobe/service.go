@@ -46,6 +46,16 @@ type ImageURLSigner interface {
 	PrivateDownloadURL(ctx context.Context, objectKey string) (string, error)
 }
 
+type SignedImageURLs = struct {
+	PreviewURL  string
+	OriginalURL string
+}
+
+type BatchImageURLSigner interface {
+	ImageURLSigner
+	PrivateImageURLs(ctx context.Context, objectKeys []string) (map[string]SignedImageURLs, error)
+}
+
 type ImageRecognizer interface {
 	RecognizeWardrobeItemImage(ctx context.Context, userID int64, input RecognizeImageInput) (RecognizedItemFields, error)
 }
@@ -343,8 +353,42 @@ func (s *Service) validateUpdateConfiguredOptions(ctx context.Context, input Upd
 }
 
 func (s *Service) enrichPrimaryImageURLs(ctx context.Context, items []Item) {
+	if len(items) == 0 {
+		return
+	}
+	batchSigner, ok := s.imageURLSigner.(BatchImageURLSigner)
+	if !ok || batchSigner == nil {
+		for i := range items {
+			items[i] = s.enrichPrimaryImageURL(ctx, items[i])
+		}
+		return
+	}
+	objectKeys := uniquePrimaryImageObjectKeys(items)
+	if len(objectKeys) == 0 {
+		return
+	}
+	signedURLs, err := batchSigner.PrivateImageURLs(ctx, objectKeys)
+	if err != nil {
+		if s.imageURLSignErrorHandler != nil {
+			for _, objectKey := range objectKeys {
+				s.imageURLSignErrorHandler(ctx, objectKey, err)
+			}
+		}
+		return
+	}
 	for i := range items {
-		items[i] = s.enrichPrimaryImageURL(ctx, items[i])
+		if items[i].PrimaryImage == nil {
+			continue
+		}
+		image := *items[i].PrimaryImage
+		image.PreviewURL = ""
+		image.OriginalURL = ""
+		objectKey := strings.TrimSpace(image.ObjectKey)
+		if urls, ok := signedURLs[objectKey]; ok {
+			image.PreviewURL = strings.TrimSpace(urls.PreviewURL)
+			image.OriginalURL = strings.TrimSpace(urls.OriginalURL)
+		}
+		items[i].PrimaryImage = &image
 	}
 }
 
@@ -353,17 +397,42 @@ func (s *Service) enrichPrimaryImageURL(ctx context.Context, item Item) Item {
 		return item
 	}
 	image := *item.PrimaryImage
-	image.URL = ""
+	image.PreviewURL = ""
+	image.OriginalURL = ""
 	objectKey := strings.TrimSpace(image.ObjectKey)
 	if s != nil && s.imageURLSigner != nil && objectKey != "" {
-		if url, err := s.imageURLSigner.PrivateDownloadURL(ctx, objectKey); err == nil {
-			image.URL = strings.TrimSpace(url)
+		if batchSigner, ok := s.imageURLSigner.(BatchImageURLSigner); ok {
+			if urls, err := batchSigner.PrivateImageURLs(ctx, []string{objectKey}); err == nil {
+				image.PreviewURL = strings.TrimSpace(urls[objectKey].PreviewURL)
+				image.OriginalURL = strings.TrimSpace(urls[objectKey].OriginalURL)
+			} else if s.imageURLSignErrorHandler != nil {
+				s.imageURLSignErrorHandler(ctx, objectKey, err)
+			}
+		} else if url, err := s.imageURLSigner.PrivateDownloadURL(ctx, objectKey); err == nil {
+			image.OriginalURL = strings.TrimSpace(url)
 		} else if s.imageURLSignErrorHandler != nil {
 			s.imageURLSignErrorHandler(ctx, objectKey, err)
 		}
 	}
 	item.PrimaryImage = &image
 	return item
+}
+
+func uniquePrimaryImageObjectKeys(items []Item) []string {
+	seen := map[string]bool{}
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.PrimaryImage == nil {
+			continue
+		}
+		objectKey := strings.TrimSpace(item.PrimaryImage.ObjectKey)
+		if objectKey == "" || seen[objectKey] {
+			continue
+		}
+		seen[objectKey] = true
+		keys = append(keys, objectKey)
+	}
+	return keys
 }
 
 func isValidRecommendationStatus(status string) bool {
