@@ -318,6 +318,7 @@ const wardrobePageConfig = {
 
   handleOpenCreate() {
     this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
+    this._imageUploadPromisesByURL = {};
     const category = this.data.activeCategory && this.data.activeCategory !== "all"
       ? this.data.activeCategory
       : "top";
@@ -338,6 +339,7 @@ const wardrobePageConfig = {
 
   handleCloseEditor() {
     this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
+    this._imageUploadPromisesByURL = {};
     this.setData({
       editorVisible: false,
       editingPublicID: "",
@@ -354,6 +356,7 @@ const wardrobePageConfig = {
 
   handleEditItem(event) {
     this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
+    this._imageUploadPromisesByURL = {};
     const dataset = getDataset(event);
     const publicID = dataset.publicId || dataset.public_id || dataset.id || "";
     const item = this.data.items.find((entry) => entry.public_id === publicID);
@@ -383,6 +386,14 @@ const wardrobePageConfig = {
       return Promise.resolve([]);
     }
 
+    const previewURL = filePreviewUrl(file);
+    if (previewURL) {
+      this._imageUploadPromisesByURL = this._imageUploadPromisesByURL || {};
+      if (this._imageUploadPromisesByURL[previewURL]) {
+        return this._imageUploadPromisesByURL[previewURL];
+      }
+    }
+
     const pendingFiles = this.data.imageFiles.concat(pendingImageFiles(file));
     this.setData({
       imageFiles: pendingFiles,
@@ -408,7 +419,6 @@ const wardrobePageConfig = {
           primary_asset_public_id: this.data.draft.primary_asset_public_id || assetPublicID,
           asset_public_ids: assetPublicIDs
         }), this.data);
-        const previewURL = filePreviewUrl(file);
         const nextFiles = this.data.imageFiles.map((item) => (
           item.url === previewURL ? Object.assign({}, item, confirmedLocalImageFiles(file, uploaded)[0]) : item
         ));
@@ -440,12 +450,16 @@ const wardrobePageConfig = {
         return null;
       });
 
+    if (previewURL) {
+      this._imageUploadPromisesByURL[previewURL] = uploadPromise;
+    }
     return uploadPromise;
   },
 
   handleImageRemove() {
     this._imageUploadRunID = (this._imageUploadRunID || 0) + 1;
     this._imageUploadPromise = null;
+    this._imageUploadPromisesByURL = {};
     this._activeImageUploads = 0;
     this.setData({
       imageFiles: [],

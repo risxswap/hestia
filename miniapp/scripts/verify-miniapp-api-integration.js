@@ -820,12 +820,19 @@ async function main() {
       files: [{ url: "wxfile://wardrobe-create-main.jpg", size: 2048, type: "image/jpeg" }]
     }
   });
+  const duplicatedWardrobeUpload = wardrobe.config.handleImageUpload.call(wardrobeInstance, {
+    detail: {
+      file: { url: "wxfile://wardrobe-create-main.jpg", size: 2048, type: "image/jpeg" }
+    }
+  });
   const secondWardrobeUpload = wardrobe.config.handleImageUpload.call(wardrobeInstance, {
     detail: {
       files: [{ url: "wxfile://wardrobe-create-side.jpg", size: 2048, type: "image/jpeg" }]
     }
   });
-  assert(wardrobeUploadCalls.length === 2, "wardrobe image upload should allow multiple uploads");
+  assert(duplicatedWardrobeUpload === pendingWardrobeUpload, "wardrobe duplicate upload event should reuse the in-flight upload");
+  assert(wardrobeUploadCalls.length === 2, "wardrobe image upload should ignore duplicate events and allow different uploads");
+  assert(wardrobeInstance.data.imageFiles.length === 2, "wardrobe duplicate upload event should not duplicate preview files");
   assert(wardrobeUploadCalls[0][2].assetType === "wardrobe_item_photo", "wardrobe image upload should use wardrobe_item_photo asset type");
   await wardrobe.config.handleSaveItem.call(wardrobeInstance);
   assert(wardrobeInstance.data.errorMessage === "图片还在上传，请稍后再保存", "wardrobe save should be blocked while image is uploading");
