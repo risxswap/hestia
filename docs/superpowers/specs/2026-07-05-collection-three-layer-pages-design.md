@@ -83,6 +83,17 @@
 - `pages/references/edit`
 - `pages/profile/edit`
 - `pages/preferences/edit`
+
+### 独立管理页
+
+职责：
+
+- 承载不是详情页、也不是表单编辑页的独立管理能力。
+- 页面可以展示列表、分组、说明和轻量纠错操作。
+
+适用页面：
+
+- `pages/memory/index`
 - `pages/privacy/index`
 
 ### 弹层允许范围
@@ -104,9 +115,9 @@
 
 ## 页面矩阵
 
-| 对象 | 列表/概览页 | 详情页 | 新增方式 | 编辑页 |
+| 对象 | 列表/概览页 | 详情页 | 新增方式 | 编辑/管理页 |
 |---|---|---|---|---|
-| 我的 | `pages/profile/index` | 不做传统详情，使用只读摘要卡 | 不适用 | `pages/profile/edit`、`pages/preferences/edit`、`pages/privacy/index` |
+| 我的 | `pages/profile/index` | 不做传统详情，使用只读摘要卡 | 不适用 | `pages/profile/edit`、`pages/preferences/edit`、`pages/memory/index`、`pages/privacy/index` |
 | 衣服 | `pages/wardrobe/list` | `pages/wardrobe/detail` | 列表页轻量弹层 | `pages/wardrobe/edit?public_id=...` |
 | 发型 | `pages/hair/list` | `pages/hair/detail` | 列表页轻量弹层 | `pages/hair/edit?public_id=...` |
 | 妆容 | `pages/makeup/list` | `pages/makeup/detail` | 列表页轻量弹层 | `pages/makeup/edit?public_id=...` |
@@ -121,7 +132,7 @@
 保留：
 
 - 顶部身份区。
-- 长期记忆摘要。
+- 长期记忆摘要入口。
 - 快捷入口卡片。
 
 移除：
@@ -134,6 +145,7 @@
 
 - 基础档案：`/pages/profile/edit`
 - 偏好与禁忌：`/pages/preferences/edit`
+- 记忆：`/pages/memory/index`
 - 报告与路线：`/pages/report/report`
 - 隐私与数据：`/pages/privacy/index`
 - 补充档案：`/pages/onboarding/onboarding`
@@ -169,6 +181,18 @@
 提交接口复用：
 
 - `PATCH /api/user/profile/preferences`
+
+### 记忆页
+
+`pages/memory/index`
+
+首版能力：
+
+- 展示长期记忆列表和摘要统计。
+- 区分用户明确陈述的事实、偏好、禁忌和 AI 推断。
+- 对 AI 推断展示不确定性和来源说明。
+- 提供轻量纠错入口，例如标记不准、待确认、后续补充。
+- 不在我的概览页直接展开完整记忆列表。
 
 ### 隐私与数据页
 
@@ -596,6 +620,7 @@
 - 手动验证路径：
   - 我的页进入基础档案编辑并保存。
   - 我的页进入偏好编辑并保存。
+  - 我的页进入记忆页并查看事实、偏好、禁忌和推断分组。
   - 衣服、发型、妆容、参考列表通过轻量弹层新增。
   - 衣服详情只读，编辑按钮进入编辑页。
   - 发型、妆容、参考分别完成轻量新增、详情、编辑、删除。
@@ -606,7 +631,7 @@
 2. 后端领域：为 hair、makeup、reference 补齐 model、repo、service、handler、routes、tests。
 3. Collection 聚合：接入四类真实数量和最近项。
 4. 小程序 API：补齐 CRUD 客户端方法。
-5. 我的页拆分：新增 `pages/profile/edit`、`pages/preferences/edit`、`pages/privacy/index`，移除同页表单。
+5. 我的页拆分：新增 `pages/profile/edit`、`pages/preferences/edit`、`pages/memory/index`、`pages/privacy/index`，移除同页表单和完整记忆列表。
 6. 私藏新增收口：衣服、发型、妆容、参考都使用列表页轻量新增弹层，确保详情页只读、编辑页只处理已有对象。
 7. 发型、妆容、参考页面闭环：列表、详情、编辑。
 8. 验证脚本和手动路径验证。
