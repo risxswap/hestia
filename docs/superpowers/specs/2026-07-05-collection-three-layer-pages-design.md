@@ -43,7 +43,7 @@
 
 适用页面：
 
-- `pages/profile/profile`
+- `pages/profile/index`
 - `pages/collection/collection`
 - `pages/wardrobe/list`
 - `pages/hair/list`
@@ -81,9 +81,9 @@
 - `pages/hair/edit`
 - `pages/makeup/edit`
 - `pages/references/edit`
-- `pages/profile-edit/profile-edit`
-- `pages/preferences-edit/preferences-edit`
-- `pages/privacy/privacy`
+- `pages/profile/edit`
+- `pages/profile/preferences`
+- `pages/profile/privacy`
 
 ### 弹层允许范围
 
@@ -106,7 +106,7 @@
 
 | 对象 | 列表/概览页 | 详情页 | 新增方式 | 编辑页 |
 |---|---|---|---|---|
-| 我的 | `profile` | 不做传统详情，使用只读摘要卡 | 不适用 | `profile-edit`、`preferences-edit`、`privacy` |
+| 我的 | `pages/profile/index` | 不做传统详情，使用只读摘要卡 | 不适用 | `pages/profile/edit`、`pages/profile/preferences`、`pages/profile/privacy` |
 | 衣服 | `pages/wardrobe/list` | `pages/wardrobe/detail` | 列表页轻量弹层 | `pages/wardrobe/edit?public_id=...` |
 | 发型 | `pages/hair/list` | `pages/hair/detail` | 列表页轻量弹层 | `pages/hair/edit?public_id=...` |
 | 妆容 | `pages/makeup/list` | `pages/makeup/detail` | 列表页轻量弹层 | `pages/makeup/edit?public_id=...` |
@@ -116,7 +116,7 @@
 
 ### 我的页
 
-`pages/profile/profile` 改为概览页。
+`pages/profile/index` 改为概览页。
 
 保留：
 
@@ -132,15 +132,15 @@
 
 入口跳转：
 
-- 基础档案：`/pages/profile-edit/profile-edit`
-- 偏好与禁忌：`/pages/preferences-edit/preferences-edit`
+- 基础档案：`/pages/profile/edit`
+- 偏好与禁忌：`/pages/profile/preferences`
 - 报告与路线：`/pages/report/report`
-- 隐私与数据：`/pages/privacy/privacy`
+- 隐私与数据：`/pages/profile/privacy`
 - 补充档案：`/pages/onboarding/onboarding`
 
 ### 基础档案编辑页
 
-`pages/profile-edit/profile-edit`
+`pages/profile/edit`
 
 字段：
 
@@ -158,7 +158,7 @@
 
 ### 偏好与禁忌编辑页
 
-`pages/preferences-edit/preferences-edit`
+`pages/profile/preferences`
 
 字段：
 
@@ -172,7 +172,7 @@
 
 ### 隐私与数据页
 
-`pages/privacy/privacy`
+`pages/profile/privacy`
 
 首版能力：
 
@@ -606,7 +606,7 @@
 2. 后端领域：为 hair、makeup、reference 补齐 model、repo、service、handler、routes、tests。
 3. Collection 聚合：接入四类真实数量和最近项。
 4. 小程序 API：补齐 CRUD 客户端方法。
-5. 我的页拆分：新增 profile-edit、preferences-edit、privacy，移除同页表单。
+5. 我的页拆分：新增 `pages/profile/edit`、`pages/profile/preferences`、`pages/profile/privacy`，移除同页表单。
 6. 私藏新增收口：衣服、发型、妆容、参考都使用列表页轻量新增弹层，确保详情页只读、编辑页只处理已有对象。
 7. 发型、妆容、参考页面闭环：列表、详情、编辑。
 8. 验证脚本和手动路径验证。
