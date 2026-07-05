@@ -6,7 +6,7 @@
 
 - `我的` 页直接展示基础档案、偏好与禁忌、隐私操作。
 - `衣服` 页已有独立详情页和编辑页，新增字段较少，适合保留列表页轻量新增弹层。
-- `发型`、`妆容`、`参考` 目前只有空列表页，没有详情、编辑和完整数据闭环。
+- `发型`、`妆容` 目前只有空列表页，没有详情、编辑和完整数据闭环。
 
 项目仍处于开发阶段，不需要兼容旧入口或旧交互。本轮目标是一次性建立清晰的页面层级和数据模型，避免未来把复杂字段继续堆在概览页、弹层或 JSON 字段中。
 
@@ -17,9 +17,9 @@
 - 概览/列表页不直接展示数据量较多的表单。
 - 弹层只用于轻量新增、删除确认、候选项选择、轻量筛选等辅助操作。
 - `我的` 页改成档案概览和入口页。
-- `衣服`、`发型`、`妆容`、`参考` 的新增都使用列表页轻量弹层；详情页仍必须只读。
-- `发型`、`妆容`、`参考` 一次性补齐列表、详情、轻量新增、编辑、删除闭环。
-- `发型`、`妆容`、`参考` 后端使用独立表，核心业务字段尽量使用显式列，不把长期演进数据堆进 JSON。
+- `衣服`、`发型`、`妆容` 的新增都使用列表页轻量弹层；详情页仍必须只读。
+- `发型`、`妆容` 一次性补齐列表、详情、轻量新增、编辑、删除闭环。
+- `发型`、`妆容` 后端使用独立表，核心业务字段尽量使用显式列，不把长期演进数据堆进 JSON。
 
 ## 非目标
 
@@ -48,7 +48,6 @@
 - `pages/wardrobe/list`
 - `pages/hair/list`
 - `pages/makeup/list`
-- `pages/references/list`
 
 ### 详情页
 
@@ -64,7 +63,6 @@
 - `pages/wardrobe/detail`
 - `pages/hair/detail`
 - `pages/makeup/detail`
-- `pages/references/detail`
 
 ### 编辑页
 
@@ -80,7 +78,6 @@
 - `pages/wardrobe/edit`
 - `pages/hair/edit`
 - `pages/makeup/edit`
-- `pages/references/edit`
 - `pages/profile/edit`
 - `pages/preferences/edit`
 
@@ -121,7 +118,6 @@
 | 衣服 | `pages/wardrobe/list` | `pages/wardrobe/detail` | 列表页轻量弹层 | `pages/wardrobe/edit?public_id=...` |
 | 发型 | `pages/hair/list` | `pages/hair/detail` | 列表页轻量弹层 | `pages/hair/edit?public_id=...` |
 | 妆容 | `pages/makeup/list` | `pages/makeup/detail` | 列表页轻量弹层 | `pages/makeup/edit?public_id=...` |
-| 参考图 | `pages/references/list` | `pages/references/detail` | 列表页轻量弹层 | `pages/references/edit?public_id=...` |
 
 ## 小程序页面设计
 
@@ -308,53 +304,6 @@
 - 用户备注。
 - 推荐状态。
 
-### 参考图页
-
-新增页面：
-
-- `pages/references/detail`
-- `pages/references/edit`
-
-`pages/references/list`：
-
-- 展示参考图卡片列表。
-- 空态引导新增。
-- 新增按钮打开轻量新增弹层。
-- 新增弹层只采集图片、名称、参考类型和少量必要字段；完整字段进入编辑页完善。
-- 卡片点击进入 `pages/references/detail?public_id=...`。
-
-`pages/references/detail` 只读展示：
-
-- 主图。
-- 名称。
-- 参考来源名。
-- 参考类型。
-- 风格关键词。
-- 可迁移元素。
-- 不适合照搬的风险。
-- 适用场景。
-- 用户备注。
-- 推荐状态。
-
-`pages/references/edit` 字段：
-
-- 图片。
-- 名称。
-- 参考来源名。
-- 参考类型。
-- 风格关键词。
-- 可迁移元素。
-- 不适合照搬的风险。
-- 适用场景。
-- 用户备注。
-- 推荐状态。
-
-表达约束：
-
-- 强调“参考造型逻辑”，例如比例、廓形、色彩、发型方向、单品结构和场景表达。
-- 避免把结论写成“你像某明星”。
-- 不自动从互联网抓取明星图片。
-
 ## 后端接口设计
 
 ### 衣服
@@ -392,31 +341,21 @@
 - `PATCH /api/user/makeup/:public_id`
 - `DELETE /api/user/makeup/:public_id`
 
-### 参考图
-
-新增接口：
-
-- `GET /api/user/references`
-- `GET /api/user/references/:public_id`
-- `POST /api/user/references`
-- `PATCH /api/user/references/:public_id`
-- `DELETE /api/user/references/:public_id`
-
 ### 私藏聚合
 
 `GET /api/user/collection` 继续作为聚合接口。
 
 调整：
 
-- 四类数量都来自真实领域表。
-- `recent_items` 聚合衣服、发型、妆容、参考图最近更新项。
+- 三类数量都来自真实领域表。
+- `recent_items` 聚合衣服、发型、妆容最近更新项。
 - `entry_path` 指向各自列表页或详情页。
 
 ## 数据库设计
 
 ### 设计原则
 
-- `发型`、`妆容`、`参考` 分别使用独立表。
+- `发型`、`妆容` 分别使用独立表。
 - 核心业务字段使用显式列。
 - 多值标签使用独立子表，不在主表里使用 JSON 数组。
 - 图片关系使用独立关联表，保持和 `wardrobe_item_assets` 一致。
@@ -503,50 +442,6 @@
   - `sort_order`
   - `created_at`
 
-### style_references
-
-建议字段：
-
-- `id`
-- `public_id`
-- `user_id`
-- `name`
-- `subject_name`
-- `reference_type`
-- `transferable_elements`
-- `non_transferable_risks`
-- `user_notes`
-- `recommendation_status`
-- `status`
-- `created_at`
-- `updated_at`
-- `deleted_at`
-
-关联表：
-
-- `style_reference_assets`
-  - `id`
-  - `style_reference_id`
-  - `asset_id`
-  - `is_primary`
-  - `sort_order`
-  - `created_at`
-
-标签表：
-
-- `style_reference_keywords`
-  - `id`
-  - `style_reference_id`
-  - `keyword`
-  - `sort_order`
-  - `created_at`
-- `style_reference_scene_tags`
-  - `id`
-  - `style_reference_id`
-  - `tag`
-  - `sort_order`
-  - `created_at`
-
 ### JSON 使用边界
 
 原则上不在本轮新增表中使用 JSON 字段。
@@ -595,21 +490,20 @@
 
 ## 隐私与安全
 
-- 自拍、衣橱、发型、妆容、参考图、偏好和反馈都视为敏感个人数据。
+- 自拍、衣橱、发型、妆容、偏好和反馈都视为敏感个人数据。
 - 图片资产必须归属当前用户，跨用户资产不可关联。
 - 删除对象默认软删除；服务端删除资产能力后续独立设计。
 - 危险操作必须二次确认。
 - 文案避免羞辱式、焦虑式表达。
 - 发型和妆容建议不输出医疗诊断或需要专业资质的判断。
-- 参考图能力不做相貌对比，不自动抓取公开明星图片。
 
 ## 测试与验证
 
 服务端：
 
-- 路由测试覆盖四类 CRUD。
+- 路由测试覆盖三类 CRUD。
 - Repository 测试覆盖创建、列表、详情、更新、软删除、资产关联。
-- Collection 聚合测试覆盖四类计数和最近项。
+- Collection 聚合测试覆盖三类计数和最近项。
 - 资产归属校验测试覆盖跨用户资产不可关联。
 
 小程序：
@@ -621,17 +515,17 @@
   - 我的页进入基础档案编辑并保存。
   - 我的页进入偏好编辑并保存。
   - 我的页进入记忆页并查看事实、偏好、禁忌和推断分组。
-  - 衣服、发型、妆容、参考列表通过轻量弹层新增。
+  - 衣服、发型、妆容列表通过轻量弹层新增。
   - 衣服详情只读，编辑按钮进入编辑页。
-  - 发型、妆容、参考分别完成轻量新增、详情、编辑、删除。
+  - 发型、妆容分别完成轻量新增、详情、编辑、删除。
 
 ## 实施顺序建议
 
-1. 数据库 migration：新增三类主表和资产关联表。
-2. 后端领域：为 hair、makeup、reference 补齐 model、repo、service、handler、routes、tests。
-3. Collection 聚合：接入四类真实数量和最近项。
+1. 数据库 migration：新增发型、妆容主表、资产关联表和标签表。
+2. 后端领域：为 hair、makeup 补齐 model、repo、service、handler、routes、tests。
+3. Collection 聚合：接入三类真实数量和最近项。
 4. 小程序 API：补齐 CRUD 客户端方法。
 5. 我的页拆分：新增 `pages/profile/edit`、`pages/preferences/edit`、`pages/memory/index`、`pages/privacy/index`，移除同页表单和完整记忆列表。
-6. 私藏新增收口：衣服、发型、妆容、参考都使用列表页轻量新增弹层，确保详情页只读、编辑页只处理已有对象。
-7. 发型、妆容、参考页面闭环：列表、详情、编辑。
+6. 私藏新增收口：衣服、发型、妆容都使用列表页轻量新增弹层，确保详情页只读、编辑页只处理已有对象。
+7. 发型、妆容页面闭环：列表、详情、编辑。
 8. 验证脚本和手动路径验证。
