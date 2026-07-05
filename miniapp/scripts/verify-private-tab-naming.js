@@ -34,6 +34,7 @@ function assertTabIcon(relativePath) {
 }
 
 const appJson = JSON.parse(read("app.json"));
+const projectJson = JSON.parse(read("project.config.json"));
 const collectionJson = JSON.parse(read("pages/collection/collection.json"));
 const clothesJson = JSON.parse(read("pages/clothes/list.json"));
 const clothesDetailJson = JSON.parse(read("pages/clothes/detail.json"));
@@ -57,6 +58,14 @@ appJson.tabBar.list.forEach((item) => {
   assertTabIcon(item.iconPath);
   assertTabIcon(item.selectedIconPath);
 });
+assert(
+  projectJson.setting && projectJson.setting.ignoreDevUnusedFiles !== true,
+  "project config should not ignore dev unused files after page route renames",
+);
+assert(
+  projectJson.packOptions && Array.isArray(projectJson.packOptions.ignore) && projectJson.packOptions.ignore.length === 0,
+  "project config should not exclude page files from package",
+);
 
 [
   "pages/collection/collection",
@@ -76,6 +85,9 @@ appJson.tabBar.list.forEach((item) => {
   "pages/privacy/index"
 ].forEach((pagePath) => {
   assert(appJson.pages.includes(pagePath), `app.json should register ${pagePath}`);
+  [".js", ".json", ".wxml", ".wxss"].forEach((extension) => {
+    assert(fs.existsSync(path.join(root, `${pagePath}${extension}`)), `${pagePath}${extension} should exist`);
+  });
 });
 
 [
@@ -112,10 +124,14 @@ assert(!collectionStyles.includes(".icon-line"), "collection styles should not d
 
 assert(clothesMarkup.includes("新增衣服"), "clothes list should keep lightweight create entry");
 assert(clothesMarkup.includes("modal-sheet"), "clothes list should use create modal");
+assert(clothesMarkup.includes('bind:add="handleImageUpload"'), "clothes list upload should use add event");
+assert(!clothesMarkup.includes('bind:success="handleImageUpload"'), "clothes list upload should not bind success to upload handler");
 assert(clothesScript.includes("createClothesItem"), "clothes list should create through clothes API");
 assert(clothesScript.includes("/pages/clothes/detail"), "clothes list should navigate to detail route");
 assert(clothesScript.includes("source=clothes"), "clothes list should pass source when navigating to detail");
 assert(clothesDetailMarkup.includes("编辑"), "clothes detail should expose edit action");
+assert(clothesDetailMarkup.includes("<swiper"), "clothes detail should support swiping between images");
+assert(clothesDetailMarkup.includes("imageSlides"), "clothes detail swiper should render normalized image slides");
 assert(clothesDetailMarkup.includes("{{backLabel}}"), "clothes detail should bind back label from source state");
 assert(clothesDetailScript.includes('backLabel: "返回私藏"'), "clothes detail should default back label to 私藏");
 assert(clothesDetailScript.includes('backUrl: "/pages/collection/collection"'), "clothes detail should default back url to collection");
@@ -130,6 +146,8 @@ assert(!clothesDetailMarkup.includes("<textarea"), "clothes detail should not in
 assert(!clothesDetailMarkup.includes("保存"), "clothes detail should not include save action");
 assert(clothesEditMarkup.includes("<input"), "clothes edit should include form inputs");
 assert(clothesEditMarkup.includes("保存"), "clothes edit should include save action");
+assert(clothesEditMarkup.includes('bind:add="handleImageUpload"'), "clothes edit upload should use add event");
+assert(!clothesEditMarkup.includes('bind:success="handleImageUpload"'), "clothes edit upload should not bind success to upload handler");
 
 assert(!profileMarkup.includes("<input"), "profile index should not include profile form inputs");
 assert(!profileMarkup.includes("<textarea"), "profile index should not include textareas");

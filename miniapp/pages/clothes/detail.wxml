@@ -16,7 +16,20 @@
 
   <block wx:if="{{item}}">
     <view class="detail-media card">
-      <image wx:if="{{item.primaryImageSrc}}" class="detail-image" src="{{item.primaryImageSrc}}" mode="aspectFill" />
+      <block wx:if="{{item.imageSlides.length}}">
+        <swiper
+          class="detail-swiper"
+          indicator-dots="{{item.hasMultipleImages}}"
+          circular="{{item.hasMultipleImages}}"
+        >
+          <block wx:for="{{item.imageSlides}}" wx:key="asset_public_id">
+            <swiper-item>
+              <image class="detail-image" src="{{item.src}}" mode="aspectFill" />
+            </swiper-item>
+          </block>
+        </swiper>
+        <text wx:if="{{item.hasMultipleImages}}" class="detail-image-count">{{item.imageSlides.length}} 张</text>
+      </block>
       <view wx:else class="detail-placeholder">
         <text class="placeholder-category">{{item.categoryLabel}}</text>
         <text class="placeholder-name">{{item.name}}</text>

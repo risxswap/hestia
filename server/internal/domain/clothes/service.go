@@ -560,7 +560,10 @@ func (s *Service) enrichPrimaryImageURLs(ctx context.Context, items []Item) {
 		}
 		return
 	}
-	objectKeys := uniquePrimaryImageObjectKeys(items)
+	for i := range items {
+		items[i] = normalizeItemImages(items[i])
+	}
+	objectKeys := uniqueImageObjectKeys(items)
 	if len(objectKeys) == 0 {
 		return
 	}
@@ -574,60 +577,89 @@ func (s *Service) enrichPrimaryImageURLs(ctx context.Context, items []Item) {
 		return
 	}
 	for i := range items {
-		if items[i].PrimaryImage == nil {
-			continue
-		}
-		image := *items[i].PrimaryImage
-		image.PreviewURL = ""
-		image.OriginalURL = ""
-		objectKey := strings.TrimSpace(image.ObjectKey)
-		if urls, ok := signedURLs[objectKey]; ok {
-			image.PreviewURL = strings.TrimSpace(urls.PreviewURL)
-			image.OriginalURL = strings.TrimSpace(urls.OriginalURL)
-		}
-		items[i].PrimaryImage = &image
+		items[i] = applySignedImageURLs(items[i], signedURLs)
 	}
 }
 
 func (s *Service) enrichPrimaryImageURL(ctx context.Context, item Item) Item {
-	if item.PrimaryImage == nil {
+	item = normalizeItemImages(item)
+	if len(item.Images) == 0 {
 		return item
 	}
-	image := *item.PrimaryImage
-	image.PreviewURL = ""
-	image.OriginalURL = ""
-	objectKey := strings.TrimSpace(image.ObjectKey)
-	if s != nil && s.imageURLSigner != nil && objectKey != "" {
+	if s != nil && s.imageURLSigner != nil {
 		if batchSigner, ok := s.imageURLSigner.(BatchImageURLSigner); ok {
-			if urls, err := batchSigner.PrivateImageURLs(ctx, []string{objectKey}); err == nil {
-				image.PreviewURL = strings.TrimSpace(urls[objectKey].PreviewURL)
-				image.OriginalURL = strings.TrimSpace(urls[objectKey].OriginalURL)
+			objectKeys := uniqueImageObjectKeys([]Item{item})
+			if urls, err := batchSigner.PrivateImageURLs(ctx, objectKeys); err == nil {
+				item = applySignedImageURLs(item, urls)
 			} else if s.imageURLSignErrorHandler != nil {
-				s.imageURLSignErrorHandler(ctx, objectKey, err)
+				for _, objectKey := range objectKeys {
+					s.imageURLSignErrorHandler(ctx, objectKey, err)
+				}
 			}
-		} else if url, err := s.imageURLSigner.PrivateDownloadURL(ctx, objectKey); err == nil {
-			image.OriginalURL = strings.TrimSpace(url)
-		} else if s.imageURLSignErrorHandler != nil {
-			s.imageURLSignErrorHandler(ctx, objectKey, err)
+		} else {
+			for index := range item.Images {
+				objectKey := strings.TrimSpace(item.Images[index].ObjectKey)
+				item.Images[index].PreviewURL = ""
+				item.Images[index].OriginalURL = ""
+				if objectKey == "" {
+					continue
+				}
+				if url, err := s.imageURLSigner.PrivateDownloadURL(ctx, objectKey); err == nil {
+					item.Images[index].OriginalURL = strings.TrimSpace(url)
+				} else if s.imageURLSignErrorHandler != nil {
+					s.imageURLSignErrorHandler(ctx, objectKey, err)
+				}
+			}
+			item = syncPrimaryImageFromImages(item)
 		}
 	}
-	item.PrimaryImage = &image
 	return item
 }
 
-func uniquePrimaryImageObjectKeys(items []Item) []string {
+func normalizeItemImages(item Item) Item {
+	if len(item.Images) == 0 && item.PrimaryImage != nil {
+		item.Images = []Image{*item.PrimaryImage}
+	}
+	return syncPrimaryImageFromImages(item)
+}
+
+func syncPrimaryImageFromImages(item Item) Item {
+	if len(item.Images) > 0 {
+		image := item.Images[0]
+		item.PrimaryImage = &image
+	}
+	return item
+}
+
+func applySignedImageURLs(item Item, signedURLs map[string]SignedImageURLs) Item {
+	for index := range item.Images {
+		item.Images[index].PreviewURL = ""
+		item.Images[index].OriginalURL = ""
+		objectKey := strings.TrimSpace(item.Images[index].ObjectKey)
+		if urls, ok := signedURLs[objectKey]; ok {
+			item.Images[index].PreviewURL = strings.TrimSpace(urls.PreviewURL)
+			item.Images[index].OriginalURL = strings.TrimSpace(urls.OriginalURL)
+		}
+	}
+	return syncPrimaryImageFromImages(item)
+}
+
+func uniqueImageObjectKeys(items []Item) []string {
 	seen := map[string]bool{}
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
-		if item.PrimaryImage == nil {
-			continue
+		images := item.Images
+		if len(images) == 0 && item.PrimaryImage != nil {
+			images = []Image{*item.PrimaryImage}
 		}
-		objectKey := strings.TrimSpace(item.PrimaryImage.ObjectKey)
-		if objectKey == "" || seen[objectKey] {
-			continue
+		for _, image := range images {
+			objectKey := strings.TrimSpace(image.ObjectKey)
+			if objectKey == "" || seen[objectKey] {
+				continue
+			}
+			seen[objectKey] = true
+			keys = append(keys, objectKey)
 		}
-		seen[objectKey] = true
-		keys = append(keys, objectKey)
 	}
 	return keys
 }

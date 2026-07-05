@@ -255,9 +255,24 @@ function decorateClothesItem(item) {
   const recommendationStatus = source.recommendation_status || "normal";
   const recognitionStatus = source.recognition_status || "succeeded";
   const primaryImage = source.primary_image || null;
+  const rawImages = Array.isArray(source.images) && source.images.length
+    ? source.images
+    : primaryImage
+      ? [primaryImage]
+      : [];
+  const imageSlides = rawImages
+    .map((image) => {
+      const src = image && (image.preview_url || image.original_url) ? image.preview_url || image.original_url : "";
+      return Object.assign({}, image || {}, {
+        src
+      });
+    })
+    .filter((image) => image.src);
   const primaryImageSrc = primaryImage && primaryImage.preview_url
     ? primaryImage.preview_url
-    : "";
+    : imageSlides.length
+      ? imageSlides[0].src
+      : "";
   const category = source.category || "";
   const isCore = source.is_core !== false;
   const metaText = [categoryLabels[category] || category || "未分类", source.color || ""].filter(Boolean).join(" · ");
@@ -288,6 +303,9 @@ function decorateClothesItem(item) {
     categoryLabel: categoryLabels[category] || category || "未分类",
     metaText,
     primary_image: primaryImage,
+    images: rawImages,
+    imageSlides,
+    hasMultipleImages: imageSlides.length > 1,
     primaryImageSrc,
     status: source.status || "active",
     isPreferred: recommendationStatus === "preferred",

@@ -106,6 +106,20 @@ function filePreviewUrl(file) {
   return source.url || source.path || source.tempFilePath || "";
 }
 
+function upsertImageFile(files, nextFile) {
+  if (!nextFile || !nextFile.url) {
+    return Array.isArray(files) ? files.slice() : [];
+  }
+  const source = Array.isArray(files) ? files : [];
+  const index = source.findIndex((item) => item && item.url === nextFile.url);
+  if (index < 0) {
+    return source.concat(nextFile);
+  }
+  return source.map((item, itemIndex) => (
+    itemIndex === index ? Object.assign({}, item, nextFile) : item
+  ));
+}
+
 function assetPublicIDsFromFiles(files) {
   return (Array.isArray(files) ? files : [])
     .map((file) => (file && file.asset_public_id ? String(file.asset_public_id).trim() : ""))
@@ -381,8 +395,9 @@ const clothesEditPageConfig = {
       }
     }
 
+    const pendingFile = pendingImageFiles(file)[0];
     this.setData({
-      imageFiles: this.data.imageFiles.concat(pendingImageFiles(file)),
+      imageFiles: upsertImageFile(this.data.imageFiles, pendingFile),
       imageUploading: true,
       imageUploadError: ""
     });
@@ -397,9 +412,7 @@ const clothesEditPageConfig = {
           return uploaded;
         }
         const confirmed = confirmedLocalImageFiles(file, uploaded)[0];
-        const nextFiles = this.data.imageFiles.map((item) => (
-          item.url === previewURL ? Object.assign({}, item, confirmed) : item
-        ));
+        const nextFiles = upsertImageFile(this.data.imageFiles, confirmed);
         const draft = draftWithImageFiles(this.data.draft, nextFiles, this.data);
         this._activeImageUploads = Math.max(0, (this._activeImageUploads || 1) - 1);
         this.setData({

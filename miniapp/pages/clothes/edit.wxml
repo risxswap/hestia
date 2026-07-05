@@ -21,7 +21,6 @@
             gridConfig="{{imageGridConfig}}"
             sizeLimit="{{imageSizeLimit}}"
             bind:add="handleImageUpload"
-            bind:success="handleImageUpload"
             bind:remove="handleImageRemove"
           />
           <text wx:if="{{imageUploadError}}" class="upload-error">{{imageUploadError}}</text>

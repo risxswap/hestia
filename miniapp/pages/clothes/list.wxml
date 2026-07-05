@@ -102,7 +102,6 @@
             gridConfig="{{imageGridConfig}}"
             sizeLimit="{{imageSizeLimit}}"
             bind:add="handleImageUpload"
-            bind:success="handleImageUpload"
             bind:remove="handleImageRemove"
           />
           <text wx:if="{{imageRecognizing}}" class="muted">正在识别图片并回填表单...</text>

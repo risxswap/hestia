@@ -164,6 +164,8 @@ async function verifyCollectionPage() {
 }
 
 async function verifyClothesPages() {
+  const clothesItemNames = ["米白衬衫"];
+  const clothesItemRequests = [];
   const apiStub = {
     getLatestReport: async () => ({ content_json: { clothes_gaps: ["浅色短外套"] } }),
     getClothesOptions: async () => ({ categories: ["上装", "下装"], colors: ["米白"] }),
@@ -178,9 +180,9 @@ async function verifyClothesPages() {
         recognition_status: "succeeded"
       }]
     }),
-    getClothesItem: async () => ({
+    getClothesItem: async (publicID) => ({
       public_id: "clo_shirt",
-      name: "米白衬衫",
+      name: clothesItemNames[Math.min(clothesItemRequests.length, clothesItemNames.length - 1)],
       category: "上装",
       color: "米白",
       is_core: true,
@@ -235,8 +237,26 @@ async function verifyClothesPages() {
   const detail = loadPage("pages/clothes/detail.js", apiStub);
   assert(detail.config, "clothes detail should register Page config");
   const detailPage = createPageInstance(detail.config);
+  apiStub.getClothesItem = async (publicID) => {
+    clothesItemRequests.push(publicID);
+    return {
+      public_id: "clo_shirt",
+      name: clothesItemNames[Math.min(clothesItemRequests.length - 1, clothesItemNames.length - 1)],
+      category: "上装",
+      color: "米白",
+      images: [
+        { asset_public_id: "ast_front", preview_url: "https://img.example.test/front.webp" },
+        { asset_public_id: "ast_side", preview_url: "https://img.example.test/side.webp" }
+      ],
+      is_core: true,
+      recommendation_status: "normal",
+      recognition_status: "succeeded"
+    };
+  };
   await detailPage.onLoad.call(detailPage, { public_id: "clo_shirt", source: "clothes" });
   assert(detailPage.data.item.name === "米白衬衫", "clothes detail should load item");
+  assert(detailPage.data.item.imageSlides.length === 2, "clothes detail should normalize all item images for swiper");
+  assert(detailPage.data.item.hasMultipleImages === true, "clothes detail should mark multiple image items");
   assert(detailPage.data.backLabel === "返回衣服", "clothes detail opened from clothes should show clothes back label");
   assert(detailPage.data.backUrl === "/pages/clothes/list", "clothes detail opened from clothes should return to clothes list");
   const collectionDetailPage = createPageInstance(detail.config);
@@ -252,6 +272,17 @@ async function verifyClothesPages() {
     detailPage.handleOpenEdit.call(detailPage);
   });
   assert(detailNavigations[0] === "/pages/clothes/edit?public_id=clo_shirt", "clothes detail should navigate to edit");
+  clothesItemNames.push("米白衬衫更新");
+  await withWx({}, async (app) => {
+    app.globalData.clothesDirty = true;
+    await detailPage.onShow.call(detailPage);
+    assert(app.globalData.clothesDirty === false, "clothes detail refresh should clear dirty flag after reload");
+  });
+  assert(detailPage.data.item.name === "米白衬衫更新", "clothes detail should reload item after edit page marks dirty");
+  assert(
+    clothesItemRequests.filter((publicID) => publicID === "clo_shirt").length >= 2,
+    "clothes detail onShow should fetch current item when dirty",
+  );
 
   const edit = loadPage("pages/clothes/edit.js", apiStub);
   assert(edit.config, "clothes edit should register Page config");

@@ -233,6 +233,26 @@ const clothesDetailPageConfig = {
     return this.loadClothesItem(publicID);
   },
 
+  async onShow() {
+    const app = typeof getApp === "function" ? getApp() : null;
+    const globalData = app && app.globalData ? app.globalData : {};
+    const wasDirty = Boolean(globalData.clothesDirty || this.data.clothesDirty);
+    if (!wasDirty || !this.data.itemPublicID) {
+      return Promise.resolve();
+    }
+    this.setData({
+      clothesDirty: true
+    });
+    await this.loadClothesItem(this.data.itemPublicID);
+    if (!this.data.errorMessage) {
+      globalData.clothesDirty = false;
+      this.setData({
+        clothesDirty: false
+      });
+    }
+    return Promise.resolve();
+  },
+
   async loadClothesItem(publicID) {
     if (!publicID) {
       this.setData({

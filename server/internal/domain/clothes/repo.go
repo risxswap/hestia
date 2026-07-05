@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -357,7 +358,7 @@ WHERE id = ?
 		if err != nil {
 			return Item{}, err
 		}
-		if err := dbutil.RequireRowsAffected(result, "clothes item update"); err != nil {
+		if err := allowZeroRowsAffected(result, "clothes item update"); err != nil {
 			return Item{}, err
 		}
 	}
@@ -372,6 +373,13 @@ WHERE id = ?
 		}
 	}
 	return r.findItemByPublicIDForUser(ctx, userID, publicID)
+}
+
+func allowZeroRowsAffected(result sql.Result, operation string) error {
+	if _, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("%s rows affected: %w", operation, err)
+	}
+	return nil
 }
 
 func (r *MySQLRepository) SoftDeleteItem(ctx context.Context, userID int64, publicID string) error {
@@ -426,18 +434,100 @@ func (r *MySQLRepository) FindRecognizableAsset(ctx context.Context, userID int6
 }
 
 func (r *MySQLRepository) findItemByPublicIDForUser(ctx context.Context, userID int64, publicID string) (Item, error) {
-	var rows []clothItemRow
-	err := sqlx.SelectContext(ctx, r.ext, &rows, clothItemSelectSQL(`
+	var row clothItemRow
+	err := sqlx.GetContext(ctx, r.ext, &row, clothItemDetailSelectSQL(`
 WHERE wi.user_id = ?
   AND wi.public_id = ?
   AND wi.status <> ?
   AND wi.deleted_at IS NULL
 LIMIT 1
 `), userID, publicID, StatusDeleted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Item{}, ErrItemNotFound
+	}
 	if err != nil {
 		return Item{}, err
 	}
-	return firstClothesItemFromRows(rows)
+	item, err := row.toItem()
+	if err != nil {
+		return Item{}, err
+	}
+	images, err := r.findItemImages(ctx, item.UserID, item.ID)
+	if err != nil {
+		return Item{}, err
+	}
+	if len(images) > 0 {
+		item.Images = images
+		item.PrimaryImage = &images[0]
+	} else if item.PrimaryImage != nil {
+		item.Images = []Image{*item.PrimaryImage}
+	}
+	return item, nil
+}
+
+func (r *MySQLRepository) findItemImages(ctx context.Context, userID int64, clothItemID int64) ([]Image, error) {
+	var relationRows []clothItemAssetRelationRow
+	if err := sqlx.SelectContext(ctx, r.ext, &relationRows, `
+SELECT
+  wia.id AS asset_relation_id,
+  wia.asset_id,
+  wia.sort_order AS asset_sort_order,
+  wia.is_primary AS asset_is_primary
+FROM clothes_assets wia
+WHERE wia.clothes_id = ?
+ORDER BY wia.sort_order ASC, wia.is_primary DESC, wia.id ASC
+`, clothItemID); err != nil {
+		return nil, err
+	}
+	if len(relationRows) == 0 {
+		return nil, nil
+	}
+	assetIDs := make([]int64, 0, len(relationRows))
+	for _, row := range relationRows {
+		if row.AssetID.Valid {
+			assetIDs = append(assetIDs, row.AssetID.Int64)
+		}
+	}
+	if len(assetIDs) == 0 {
+		return nil, nil
+	}
+	return r.findImagesByAssetIDs(ctx, userID, assetIDs)
+}
+
+func (r *MySQLRepository) findImagesByAssetIDs(ctx context.Context, userID int64, assetIDs []int64) ([]Image, error) {
+	query, args, err := sqlx.In(`
+SELECT
+  id,
+  public_id AS asset_public_id,
+  object_key AS asset_object_key
+FROM files
+WHERE id IN (?)
+  AND owner_user_id = ?
+  AND deleted_at IS NULL
+  AND status <> 'deleted'
+  AND asset_type = ?
+  AND source = ?
+  AND bucket <> ?
+  AND object_key LIKE CONCAT('users/', owner_user_id, '/clothes/', public_id, '.%')
+ORDER BY FIELD(id, ?)
+`, assetIDs, userID, clothPrimaryAssetType, clothPrimaryAssetSource, localOnboardingBucket, assetIDs)
+	if err != nil {
+		return nil, err
+	}
+	query = sqlx.Rebind(sqlx.BindType("mysql"), query)
+	var rows []clothItemImageRow
+	if err := sqlx.SelectContext(ctx, r.ext, &rows, query, args...); err != nil {
+		return nil, err
+	}
+	images := make([]Image, 0, len(rows))
+	for _, row := range rows {
+		image, ok := row.image()
+		if !ok {
+			continue
+		}
+		images = append(images, image)
+	}
+	return images, nil
 }
 
 func (r *MySQLRepository) setPrimaryAsset(ctx context.Context, userID int64, clothItemID int64, assetPublicID string) (Image, error) {
@@ -555,9 +645,39 @@ SELECT
   primary_wia.id AS primary_asset_relation_id,
   primary_wia.sort_order AS primary_asset_sort_order,
   a.public_id AS primary_asset_public_id,
-  a.object_key AS primary_object_key
+  a.object_key AS primary_object_key,
+  all_wia.id AS asset_relation_id,
+  all_wia.asset_id AS asset_id,
+  all_wia.sort_order AS asset_sort_order,
+  all_wia.is_primary AS asset_is_primary,
+  all_a.public_id AS asset_public_id,
+  all_a.object_key AS asset_object_key
 FROM clothes wi
-` + primaryImageJoinSQL() + where
+` + primaryImageJoinSQL() + allImagesJoinSQL() + where
+}
+
+func clothItemDetailSelectSQL(where string) string {
+	return `
+SELECT
+  wi.id,
+  wi.public_id,
+  wi.user_id,
+  wi.name,
+  wi.category,
+  wi.color,
+  wi.silhouette,
+  wi.material,
+  wi.season,
+  wi.scene_tags,
+  wi.user_notes,
+  wi.is_core,
+  wi.recommendation_status,
+  wi.recognition_status,
+  wi.status,
+  wi.created_at,
+  wi.updated_at
+FROM clothes wi
+` + where
 }
 
 func primaryImageJoinSQL() string {
@@ -585,6 +705,20 @@ LEFT JOIN files a
 `
 }
 
+func allImagesJoinSQL() string {
+	return `LEFT JOIN clothes_assets all_wia
+  ON all_wia.clothes_id = wi.id
+LEFT JOIN files all_a
+  ON all_a.id = all_wia.asset_id
+  AND all_a.deleted_at IS NULL
+  AND all_a.status <> 'deleted'
+  AND all_a.asset_type = '` + clothPrimaryAssetType + `'
+  AND all_a.source = '` + clothPrimaryAssetSource + `'
+  AND all_a.bucket <> '` + localOnboardingBucket + `'
+  AND all_a.object_key LIKE CONCAT('users/', wi.user_id, '/clothes/', all_a.public_id, '.%')
+`
+}
+
 type txStarter interface {
 	BeginTxx(ctx context.Context, opts *sql.TxOptions) (*sqlx.Tx, error)
 }
@@ -609,8 +743,30 @@ type clothItemRow struct {
 	PrimaryAssetSortOrder  sql.NullInt64   `db:"primary_asset_sort_order"`
 	PrimaryAssetPublicID   sql.NullString  `db:"primary_asset_public_id"`
 	PrimaryObjectKey       sql.NullString  `db:"primary_object_key"`
+	AssetRelationID        sql.NullInt64   `db:"asset_relation_id"`
+	AssetID                sql.NullInt64   `db:"asset_id"`
+	AssetSortOrder         sql.NullInt64   `db:"asset_sort_order"`
+	AssetIsPrimary         sql.NullBool    `db:"asset_is_primary"`
+	AssetPublicID          sql.NullString  `db:"asset_public_id"`
+	AssetObjectKey         sql.NullString  `db:"asset_object_key"`
 	CreatedAt              time.Time       `db:"created_at"`
 	UpdatedAt              time.Time       `db:"updated_at"`
+}
+
+type clothItemImageRow struct {
+	ID              int64          `db:"id"`
+	AssetRelationID sql.NullInt64  `db:"asset_relation_id"`
+	AssetSortOrder  sql.NullInt64  `db:"asset_sort_order"`
+	AssetIsPrimary  sql.NullBool   `db:"asset_is_primary"`
+	AssetPublicID   sql.NullString `db:"asset_public_id"`
+	AssetObjectKey  sql.NullString `db:"asset_object_key"`
+}
+
+type clothItemAssetRelationRow struct {
+	AssetRelationID sql.NullInt64 `db:"asset_relation_id"`
+	AssetID         sql.NullInt64 `db:"asset_id"`
+	AssetSortOrder  sql.NullInt64 `db:"asset_sort_order"`
+	AssetIsPrimary  sql.NullBool  `db:"asset_is_primary"`
 }
 
 func (r clothItemRow) toItem() (Item, error) {
@@ -650,6 +806,8 @@ func clothItemsFromRows(rows []clothItemRow) ([]Item, error) {
 	items := make([]Item, 0, len(rows))
 	indexByID := make(map[int64]int, len(rows))
 	primaryByID := make(map[int64]primaryImageCandidate, len(rows))
+	imagesByID := make(map[int64][]imageCandidate, len(rows))
+	seenImageByID := make(map[int64]map[int64]bool, len(rows))
 	for _, row := range rows {
 		index, ok := indexByID[row.ID]
 		if !ok {
@@ -673,6 +831,38 @@ func clothItemsFromRows(rows []clothItemRow) ([]Item, error) {
 				ObjectKey:     candidate.objectKey,
 			}
 		}
+		imageCandidate, ok := row.imageCandidate()
+		if !ok {
+			continue
+		}
+		seenByRelationID := seenImageByID[row.ID]
+		if seenByRelationID == nil {
+			seenByRelationID = map[int64]bool{}
+			seenImageByID[row.ID] = seenByRelationID
+		}
+		if seenByRelationID[imageCandidate.relationID] {
+			continue
+		}
+		seenByRelationID[imageCandidate.relationID] = true
+		imagesByID[row.ID] = append(imagesByID[row.ID], imageCandidate)
+	}
+	for i := range items {
+		candidates := imagesByID[items[i].ID]
+		sort.SliceStable(candidates, func(left, right int) bool {
+			return candidates[left].betterThan(candidates[right])
+		})
+		if len(candidates) == 0 && items[i].PrimaryImage != nil {
+			items[i].Images = []Image{*items[i].PrimaryImage}
+			continue
+		}
+		images := make([]Image, 0, len(candidates))
+		for _, candidate := range candidates {
+			images = append(images, Image{
+				AssetPublicID: candidate.assetPublicID,
+				ObjectKey:     candidate.objectKey,
+			})
+		}
+		items[i].Images = images
 	}
 	return items, nil
 }
@@ -717,6 +907,54 @@ func (c primaryImageCandidate) betterThan(other primaryImageCandidate) bool {
 		return c.sortOrder < other.sortOrder
 	}
 	return c.relationID > other.relationID
+}
+
+type imageCandidate struct {
+	relationID    int64
+	sortOrder     int64
+	isPrimary     bool
+	assetPublicID string
+	objectKey     string
+}
+
+func (r clothItemRow) imageCandidate() (imageCandidate, bool) {
+	if !r.AssetPublicID.Valid {
+		return imageCandidate{}, false
+	}
+	candidate := imageCandidate{
+		assetPublicID: r.AssetPublicID.String,
+		objectKey:     nullStringValue(r.AssetObjectKey),
+	}
+	if r.AssetRelationID.Valid {
+		candidate.relationID = r.AssetRelationID.Int64
+	}
+	if r.AssetSortOrder.Valid {
+		candidate.sortOrder = r.AssetSortOrder.Int64
+	}
+	if r.AssetIsPrimary.Valid {
+		candidate.isPrimary = r.AssetIsPrimary.Bool
+	}
+	return candidate, true
+}
+
+func (r clothItemImageRow) image() (Image, bool) {
+	if !r.AssetPublicID.Valid {
+		return Image{}, false
+	}
+	return Image{
+		AssetPublicID: r.AssetPublicID.String,
+		ObjectKey:     nullStringValue(r.AssetObjectKey),
+	}, true
+}
+
+func (c imageCandidate) betterThan(other imageCandidate) bool {
+	if c.sortOrder != other.sortOrder {
+		return c.sortOrder < other.sortOrder
+	}
+	if c.isPrimary != other.isPrimary {
+		return c.isPrimary
+	}
+	return c.relationID < other.relationID
 }
 
 type clothAssetRow struct {

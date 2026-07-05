@@ -20,6 +20,7 @@ type Item struct {
 	RecognitionJobPublicID string    `json:"recognition_job_public_id,omitempty"`
 	Status                 string    `json:"status"`
 	PrimaryImage           *Image    `json:"primary_image,omitempty"`
+	Images                 []Image   `json:"images,omitempty"`
 	CreatedAt              time.Time `json:"created_at,omitempty"`
 	UpdatedAt              time.Time `json:"updated_at,omitempty"`
 }

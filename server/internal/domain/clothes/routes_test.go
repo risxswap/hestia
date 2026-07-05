@@ -288,6 +288,14 @@ func TestCreateItemWithMultipleAssetsUsesFirstAsPrimary(t *testing.T) {
 	if body.Data.PrimaryImage == nil || body.Data.PrimaryImage.AssetPublicID != "ast_first" {
 		t.Fatalf("expected first uploaded asset as primary, got %#v", body.Data.PrimaryImage)
 	}
+	if len(body.Data.Images) != 2 ||
+		body.Data.Images[0].AssetPublicID != "ast_first" ||
+		body.Data.Images[1].AssetPublicID != "ast_second" {
+		t.Fatalf("expected all uploaded assets for detail swiper, got %#v", body.Data.Images)
+	}
+	if body.Data.Images[0].PreviewURL == "" || body.Data.Images[1].PreviewURL == "" {
+		t.Fatalf("expected signed image URLs for all uploaded assets, got %#v", body.Data.Images)
+	}
 	if body.Data.RecognitionStatus != cloth.RecognitionStatusPending {
 		t.Fatalf("expected pending recognition status, got %#v", body.Data)
 	}
@@ -711,6 +719,7 @@ func (r *routeMemoryClothesRepo) ListClothesOptions(context.Context) (cloth.Clot
 func (r *routeMemoryClothesRepo) CreateItem(_ context.Context, item cloth.Item, primaryAssetPublicID string) (cloth.Item, error) {
 	if primaryAssetPublicID != "" {
 		item.PrimaryImage = routePrimaryImage(primaryAssetPublicID)
+		item.Images = []cloth.Image{*item.PrimaryImage}
 	}
 	r.add(item)
 	return item, nil
@@ -718,7 +727,8 @@ func (r *routeMemoryClothesRepo) CreateItem(_ context.Context, item cloth.Item, 
 
 func (r *routeMemoryClothesRepo) CreateItemWithAssets(_ context.Context, item cloth.Item, assetPublicIDs []string) (cloth.Item, error) {
 	if len(assetPublicIDs) > 0 {
-		item.PrimaryImage = routePrimaryImage(assetPublicIDs[0])
+		item.Images = routeImages(assetPublicIDs)
+		item.PrimaryImage = &item.Images[0]
 	}
 	r.add(item)
 	return item, nil
@@ -730,9 +740,11 @@ func (r *routeMemoryClothesRepo) ReplaceItemAssets(_ context.Context, userID int
 		return cloth.Item{}, cloth.ErrItemNotFound
 	}
 	if len(assetPublicIDs) > 0 {
-		item.PrimaryImage = routePrimaryImage(assetPublicIDs[0])
+		item.Images = routeImages(assetPublicIDs)
+		item.PrimaryImage = &item.Images[0]
 	} else {
 		item.PrimaryImage = nil
+		item.Images = nil
 	}
 	item.UpdatedAt = time.Now().UTC()
 	r.items[publicID] = item
@@ -780,8 +792,10 @@ func (r *routeMemoryClothesRepo) UpdateItem(_ context.Context, userID int64, pub
 	if input.PrimaryAssetPublicID != nil {
 		if *input.PrimaryAssetPublicID == "" {
 			item.PrimaryImage = nil
+			item.Images = nil
 		} else {
 			item.PrimaryImage = routePrimaryImage(*input.PrimaryAssetPublicID)
+			item.Images = []cloth.Image{*item.PrimaryImage}
 		}
 	}
 	item.UpdatedAt = time.Now().UTC()
@@ -801,6 +815,15 @@ func routePrimaryImage(assetPublicID string) *cloth.Image {
 		AssetPublicID: assetPublicID,
 		ObjectKey:     fmt.Sprintf("users/12/clothes/%s.jpg", assetPublicID),
 	}
+}
+
+func routeImages(assetPublicIDs []string) []cloth.Image {
+	images := make([]cloth.Image, 0, len(assetPublicIDs))
+	for _, assetPublicID := range assetPublicIDs {
+		image := routePrimaryImage(assetPublicID)
+		images = append(images, *image)
+	}
+	return images
 }
 
 func (r *routeMemoryClothesRepo) SoftDeleteItem(_ context.Context, userID int64, publicID string) error {

@@ -21,6 +21,7 @@
     "condition": false,
     "swc": false,
     "disableSWC": true,
+    "ignoreDevUnusedFiles": false,
     "babelSetting": {
       "ignore": [],
       "disablePlugins": [],
