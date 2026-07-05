@@ -45,10 +45,10 @@
 
 - `pages/profile/profile`
 - `pages/collection/collection`
-- `pages/wardrobe/wardrobe`
-- `pages/hair/hair`
-- `pages/makeup/makeup`
-- `pages/references/references`
+- `pages/wardrobe/list`
+- `pages/hair/list`
+- `pages/makeup/list`
+- `pages/references/list`
 
 ### 详情页
 
@@ -61,10 +61,10 @@
 
 适用页面：
 
-- `pages/wardrobe-detail/wardrobe-detail`
-- `pages/hair-detail/hair-detail`
-- `pages/makeup-detail/makeup-detail`
-- `pages/reference-detail/reference-detail`
+- `pages/wardrobe/detail`
+- `pages/hair/detail`
+- `pages/makeup/detail`
+- `pages/references/detail`
 
 ### 编辑页
 
@@ -77,10 +77,10 @@
 
 适用页面：
 
-- `pages/wardrobe-edit/wardrobe-edit`
-- `pages/hair-edit/hair-edit`
-- `pages/makeup-edit/makeup-edit`
-- `pages/reference-edit/reference-edit`
+- `pages/wardrobe/edit`
+- `pages/hair/edit`
+- `pages/makeup/edit`
+- `pages/references/edit`
 - `pages/profile-edit/profile-edit`
 - `pages/preferences-edit/preferences-edit`
 - `pages/privacy/privacy`
@@ -107,10 +107,10 @@
 | 对象 | 列表/概览页 | 详情页 | 新增方式 | 编辑页 |
 |---|---|---|---|---|
 | 我的 | `profile` | 不做传统详情，使用只读摘要卡 | 不适用 | `profile-edit`、`preferences-edit`、`privacy` |
-| 衣服 | `wardrobe` | `wardrobe-detail` | `wardrobe` 列表页轻量弹层 | `wardrobe-edit?public_id=...` |
-| 发型 | `hair` | `hair-detail` | `hair` 列表页轻量弹层 | `hair-edit?public_id=...` |
-| 妆容 | `makeup` | `makeup-detail` | `makeup` 列表页轻量弹层 | `makeup-edit?public_id=...` |
-| 参考图 | `references` | `reference-detail` | `references` 列表页轻量弹层 | `reference-edit?public_id=...` |
+| 衣服 | `pages/wardrobe/list` | `pages/wardrobe/detail` | 列表页轻量弹层 | `pages/wardrobe/edit?public_id=...` |
+| 发型 | `pages/hair/list` | `pages/hair/detail` | 列表页轻量弹层 | `pages/hair/edit?public_id=...` |
+| 妆容 | `pages/makeup/list` | `pages/makeup/detail` | 列表页轻量弹层 | `pages/makeup/edit?public_id=...` |
+| 参考图 | `pages/references/list` | `pages/references/detail` | 列表页轻量弹层 | `pages/references/edit?public_id=...` |
 
 ## 小程序页面设计
 
@@ -182,16 +182,16 @@
 
 ### 衣服页
 
-`pages/wardrobe/wardrobe`
+`pages/wardrobe/list`
 
 调整：
 
 - 保留筛选、图库、建议补齐。
 - 保留列表页轻量新增弹层，因为衣服新增只需要上传图片并保存，复杂字段后续进入编辑页完善。
 - 新增弹层不得扩展为完整衣服编辑表单；如果新增字段增长，应重新评估是否需要独立新增页。
-- 卡片点击进入 `wardrobe-detail`。
+- 卡片点击进入 `pages/wardrobe/detail?public_id=...`。
 
-`pages/wardrobe-detail/wardrobe-detail`
+`pages/wardrobe/detail`
 
 要求：
 
@@ -199,7 +199,7 @@
 - 只保留编辑和删除入口。
 - 不承载任何字段编辑。
 
-`pages/wardrobe-edit/wardrobe-edit`
+`pages/wardrobe/edit`
 
 调整：
 
@@ -209,18 +209,18 @@
 
 新增页面：
 
-- `pages/hair-detail/hair-detail`
-- `pages/hair-edit/hair-edit`
+- `pages/hair/detail`
+- `pages/hair/edit`
 
-`pages/hair/hair`：
+`pages/hair/list`：
 
 - 展示发型卡片列表。
 - 空态引导新增。
 - 新增按钮打开轻量新增弹层。
 - 新增弹层只采集图片、名称和少量必要字段；完整字段进入编辑页完善。
-- 卡片点击进入 `hair-detail?public_id=...`。
+- 卡片点击进入 `pages/hair/detail?public_id=...`。
 
-`hair-detail` 只读展示：
+`pages/hair/detail` 只读展示：
 
 - 主图。
 - 名称、长度、轮廓/层次、刘海、发色、打理时间。
@@ -230,7 +230,7 @@
 - 用户备注。
 - 推荐状态。
 
-`hair-edit` 字段：
+`pages/hair/edit` 字段：
 
 - 图片。
 - 名称。
@@ -249,18 +249,18 @@
 
 新增页面：
 
-- `pages/makeup-detail/makeup-detail`
-- `pages/makeup-edit/makeup-edit`
+- `pages/makeup/detail`
+- `pages/makeup/edit`
 
-`pages/makeup/makeup`：
+`pages/makeup/list`：
 
 - 展示妆容卡片列表。
 - 空态引导新增。
 - 新增按钮打开轻量新增弹层。
 - 新增弹层只采集图片、名称和少量必要字段；完整字段进入编辑页完善。
-- 卡片点击进入 `makeup-detail?public_id=...`。
+- 卡片点击进入 `pages/makeup/detail?public_id=...`。
 
-`makeup-detail` 只读展示：
+`pages/makeup/detail` 只读展示：
 
 - 主图。
 - 名称、妆容类型、妆面重点、色彩方向、妆感。
@@ -270,7 +270,7 @@
 - 用户备注。
 - 推荐状态。
 
-`makeup-edit` 字段：
+`pages/makeup/edit` 字段：
 
 - 图片。
 - 名称。
@@ -288,18 +288,18 @@
 
 新增页面：
 
-- `pages/reference-detail/reference-detail`
-- `pages/reference-edit/reference-edit`
+- `pages/references/detail`
+- `pages/references/edit`
 
-`pages/references/references`：
+`pages/references/list`：
 
 - 展示参考图卡片列表。
 - 空态引导新增。
 - 新增按钮打开轻量新增弹层。
 - 新增弹层只采集图片、名称、参考类型和少量必要字段；完整字段进入编辑页完善。
-- 卡片点击进入 `reference-detail?public_id=...`。
+- 卡片点击进入 `pages/references/detail?public_id=...`。
 
-`reference-detail` 只读展示：
+`pages/references/detail` 只读展示：
 
 - 主图。
 - 名称。
@@ -312,7 +312,7 @@
 - 用户备注。
 - 推荐状态。
 
-`reference-edit` 字段：
+`pages/references/edit` 字段：
 
 - 图片。
 - 名称。
