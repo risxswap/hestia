@@ -422,7 +422,7 @@
 - 图片关系使用独立关联表，保持和 `wardrobe_item_assets` 一致。
 - 所有主表支持软删除。
 
-### hair_items
+### hair
 
 建议字段：
 
@@ -446,9 +446,9 @@
 
 关联表：
 
-- `hair_item_assets`
+- `hair_assets`
   - `id`
-  - `hair_item_id`
+  - `hair_id`
   - `asset_id`
   - `is_primary`
   - `sort_order`
@@ -456,14 +456,14 @@
 
 标签表：
 
-- `hair_item_scene_tags`
+- `hair_scene_tags`
   - `id`
-  - `hair_item_id`
+  - `hair_id`
   - `tag`
   - `sort_order`
   - `created_at`
 
-### makeup_items
+### makeup
 
 建议字段：
 
@@ -486,9 +486,9 @@
 
 关联表：
 
-- `makeup_item_assets`
+- `makeup_assets`
   - `id`
-  - `makeup_item_id`
+  - `makeup_id`
   - `asset_id`
   - `is_primary`
   - `sort_order`
@@ -496,14 +496,14 @@
 
 标签表：
 
-- `makeup_item_scene_tags`
+- `makeup_scene_tags`
   - `id`
-  - `makeup_item_id`
+  - `makeup_id`
   - `tag`
   - `sort_order`
   - `created_at`
 
-### reference_items
+### style_references
 
 建议字段：
 
@@ -524,9 +524,9 @@
 
 关联表：
 
-- `reference_item_assets`
+- `style_reference_assets`
   - `id`
-  - `reference_item_id`
+  - `style_reference_id`
   - `asset_id`
   - `is_primary`
   - `sort_order`
@@ -534,15 +534,15 @@
 
 标签表：
 
-- `reference_item_style_keywords`
+- `style_reference_keywords`
   - `id`
-  - `reference_item_id`
+  - `style_reference_id`
   - `keyword`
   - `sort_order`
   - `created_at`
-- `reference_item_scene_tags`
+- `style_reference_scene_tags`
   - `id`
-  - `reference_item_id`
+  - `style_reference_id`
   - `tag`
   - `sort_order`
   - `created_at`
