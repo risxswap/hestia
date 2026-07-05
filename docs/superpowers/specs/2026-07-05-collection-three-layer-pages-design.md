@@ -395,6 +395,17 @@
   - `sort_order`
   - `created_at`
 
+缺口表：
+
+- `clothes_gaps`
+
+命名迁移：
+
+- `wardrobe_items` 迁移为 `clothes`。
+- `wardrobe_item_assets` 迁移为 `clothes_assets`。
+- `wardrobe_gaps` 迁移为 `clothes_gaps`。
+- 代码里的衣服对象、接口和页面域统一使用 `clothes`；只有产品文案需要表达“衣服集合”时才使用“衣橱”。
+
 ### hair
 
 建议字段：
@@ -550,7 +561,7 @@
 
 ## 实施顺序建议
 
-1. 数据库 migration：新增发型、妆容主表、资产关联表和标签表。
+1. 数据库 migration：将衣服相关表迁移为 `clothes`、`clothes_assets`、`clothes_gaps`，并新增发型、妆容主表、资产关联表和标签表。
 2. 后端领域：为 hair、makeup 补齐 model、repo、service、handler、routes、tests。
 3. Collection 聚合：接入三类真实数量和最近项。
 4. 小程序 API：补齐 CRUD 客户端方法。
