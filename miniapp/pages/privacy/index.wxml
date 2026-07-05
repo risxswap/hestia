@@ -1,0 +1,11 @@
+<view class="page">
+  <view class="card memory-card">
+    <view class="section-head">
+      <text class="section-title">隐私与数据</text>
+      <text class="muted">自拍、衣服、发型、妆容、偏好和反馈都属于敏感个人数据。</text>
+    </view>
+    <button class="secondary-button action-button" loading="{{clearing}}" bind:tap="handleClearLocalSession">清除本地登录</button>
+    <button class="danger-button action-button" disabled="true">申请删除服务端照片与档案（即将开放）</button>
+    <button class="danger-button action-button" disabled="true">申请删除反馈和长期记忆（即将开放）</button>
+  </view>
+</view>

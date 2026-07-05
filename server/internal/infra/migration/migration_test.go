@@ -61,10 +61,10 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	if !containsStatement(exec.queries, "CREATE TABLE IF NOT EXISTS `jobs`") {
 		t.Fatalf("expected jobs table creation statement")
 	}
-	if !containsStatement(exec.queries, "ALTER TABLE wardrobe_items ADD COLUMN recommendation_status") {
+	if !containsStatement(exec.queries, "ALTER TABLE clothes ADD COLUMN recommendation_status") {
 		t.Fatalf("expected wardrobe recommendation status migration statement")
 	}
-	if !containsStatement(exec.queries, "wardrobe.item_options") {
+	if !containsStatement(exec.queries, "clothes.item_options") {
 		t.Fatalf("expected wardrobe item options system config migration statement")
 	}
 	if !containsStatement(exec.queries, "INSERT IGNORE INTO `system_configs`") {
@@ -142,7 +142,7 @@ func TestApplyMySQLSchemaIgnoresDuplicateColumnForIncrementalAddColumn(t *testin
 func TestDuplicateColumnIgnoreOnlyAppliesToWardrobeRecommendationStatusMigration(t *testing.T) {
 	duplicateErr := &mysql.MySQLError{Number: 1060, Message: "Duplicate column name 'recommendation_status'"}
 
-	if !isIgnorableDuplicateAddColumn("ALTER TABLE wardrobe_items ADD COLUMN recommendation_status varchar(32) NOT NULL DEFAULT 'normal' AFTER is_core", duplicateErr) {
+	if !isIgnorableDuplicateAddColumn("ALTER TABLE clothes ADD COLUMN recommendation_status varchar(32) NOT NULL DEFAULT 'normal' AFTER is_core", duplicateErr) {
 		t.Fatal("expected wardrobe recommendation_status duplicate add column to be ignored")
 	}
 	if isIgnorableDuplicateAddColumn("ALTER TABLE users ADD COLUMN recommendation_status varchar(32) NOT NULL DEFAULT 'normal'", duplicateErr) {
@@ -165,9 +165,9 @@ func TestInitialMySQLSchemaMatchesLogicalDesign(t *testing.T) {
 		"profile_inferences",
 		"profile_prefs",
 		"files",
-		"wardrobe_items",
-		"wardrobe_item_assets",
-		"wardrobe_gaps",
+		"clothes",
+		"clothes_assets",
+		"clothes_gaps",
 		"style_subjects",
 		"style_samples",
 		"style_tags",
@@ -299,7 +299,7 @@ type duplicateColumnSQLExecutor struct {
 }
 
 func (f *duplicateColumnSQLExecutor) ExecContext(_ context.Context, query string, _ ...any) (sql.Result, error) {
-	if strings.Contains(query, "ALTER TABLE wardrobe_items ADD COLUMN recommendation_status") {
+	if strings.Contains(query, "ALTER TABLE clothes ADD COLUMN recommendation_status") {
 		f.sawRecommendationStatusMigration = true
 		return nil, &mysql.MySQLError{Number: 1060, Message: "Duplicate column name 'recommendation_status'"}
 	}

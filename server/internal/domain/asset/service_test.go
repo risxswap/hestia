@@ -51,7 +51,7 @@ func TestRegisterOnboardingAssetsPersistsReferenceMetadata(t *testing.T) {
 func TestQiniuUploadSignerLimitsTokenToRequestedFileSize(t *testing.T) {
 	token, err := qiniuUploadSigner{credentials: qboxTestCredentials()}.SignUpload(context.Background(), UploadSignRequest{
 		Bucket:    "private-assets",
-		ObjectKey: "users/12/wardrobe/ast_test.jpg",
+		ObjectKey: "users/12/clothes/ast_test.jpg",
 		MimeType:  "image/jpeg",
 		FileSize:  2048,
 	})
@@ -88,7 +88,7 @@ func TestQiniuUploadSignerRejectsInvalidFileSize(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := qiniuUploadSigner{credentials: qboxTestCredentials()}.SignUpload(context.Background(), UploadSignRequest{
 				Bucket:    "private-assets",
-				ObjectKey: "users/12/wardrobe/ast_test.jpg",
+				ObjectKey: "users/12/clothes/ast_test.jpg",
 				MimeType:  "image/jpeg",
 				FileSize:  tt.fileSize,
 			})
@@ -136,16 +136,16 @@ func TestPrivateImageURLsSignsOriginalAndPreviewURLs(t *testing.T) {
 		}),
 	})
 
-	urls, err := service.PrivateImageURLs(context.Background(), []string{"users/12/wardrobe/ast_test.jpg"})
+	urls, err := service.PrivateImageURLs(context.Background(), []string{"users/12/clothes/ast_test.jpg"})
 	if err != nil {
 		t.Fatalf("private image urls: %v", err)
 	}
 
-	got := urls["users/12/wardrobe/ast_test.jpg"]
-	if got.OriginalURL != "https://private.example.test/users/12/wardrobe/ast_test.jpg?token=original" {
+	got := urls["users/12/clothes/ast_test.jpg"]
+	if got.OriginalURL != "https://private.example.test/users/12/clothes/ast_test.jpg?token=original" {
 		t.Fatalf("expected original url, got %#v", got)
 	}
-	if got.PreviewURL != "https://private.example.test/users/12/wardrobe/ast_test.jpg?imageView2/2/w/360/h/360/q/80/format/webp&token=preview" {
+	if got.PreviewURL != "https://private.example.test/users/12/clothes/ast_test.jpg?imageView2/2/w/360/h/360/q/80/format/webp&token=preview" {
 		t.Fatalf("expected preview url, got %#v", got)
 	}
 	if len(requests) != 2 || requests[0].Query != "" || requests[1].Query != qiniuPreviewQuery {

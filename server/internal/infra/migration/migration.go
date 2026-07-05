@@ -96,8 +96,8 @@ func isIgnorableDuplicateAddColumn(statement string, err error) bool {
 		return false
 	}
 	normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-	return strings.HasPrefix(normalized, "alter table wardrobe_items add column recommendation_status ") ||
-		strings.HasPrefix(normalized, "alter table wardrobe_items add column recognition_status ")
+	return strings.HasPrefix(normalized, "alter table clothes add column recommendation_status ") ||
+		strings.HasPrefix(normalized, "alter table clothes add column recognition_status ")
 }
 
 func splitSQLStatements(sqlText string) []string {

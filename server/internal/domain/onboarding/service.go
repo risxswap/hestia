@@ -14,12 +14,12 @@ import (
 	"hestia/server/internal/common/id"
 	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/domain/asset"
+	"hestia/server/internal/domain/clothes"
 	"hestia/server/internal/domain/generator"
 	"hestia/server/internal/domain/imageroute"
 	"hestia/server/internal/domain/job"
 	"hestia/server/internal/domain/profile"
 	"hestia/server/internal/domain/report"
-	"hestia/server/internal/domain/wardrobe"
 )
 
 var ErrValidation = errors.New("onboarding validation failed")
@@ -52,7 +52,7 @@ type SubmitDependencies struct {
 	Drafts      DraftRepository
 	Profiles    *profile.Service
 	Assets      *asset.Service
-	Wardrobe    *wardrobe.Service
+	Wardrobe    *clothes.Service
 	Jobs        *job.Service
 	Reports     *report.Service
 	ImageRoutes *imageroute.Service

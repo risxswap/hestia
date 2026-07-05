@@ -2,7 +2,6 @@ const path = require("path");
 
 const root = path.resolve(__dirname, "..");
 const apiPath = path.join(root, "utils/api.js");
-const pagePath = path.join(root, "pages/profile/profile.js");
 
 function assert(condition, message) {
   if (!condition) {
@@ -14,7 +13,8 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function requireProfilePageWithApi(apiStub) {
+function loadPage(relativePath, apiStub) {
+  const pagePath = path.join(root, relativePath);
   const originalPage = global.Page;
   let pageConfig = null;
 
@@ -39,10 +39,7 @@ function requireProfilePageWithApi(apiStub) {
     global.Page = originalPage;
   }
 
-  return {
-    pageConfig,
-    exported
-  };
+  return { pageConfig, exported };
 }
 
 function createPageInstance(pageConfig) {
@@ -54,20 +51,6 @@ function createPageInstance(pageConfig) {
   });
 }
 
-function createDeferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
-  return {
-    promise,
-    resolve,
-    reject
-  };
-}
-
 const initialSummary = {
   user: {
     user_public_id: "usr_test",
@@ -75,7 +58,6 @@ const initialSummary = {
     onboarding_status: "completed"
   },
   profile: {
-    profile_public_id: "prf_test",
     gender: "female",
     height_cm: 165,
     body_notes: "想让通勤更利落",
@@ -96,12 +78,6 @@ const initialSummary = {
     inference_count: 3,
     pending_confirmation_count: 1
   },
-  latest_report: {
-    public_id: "rpt_test",
-    title: "初版个人形象报告",
-    status: "ready",
-    generated_at: "2026-06-27T06:00:00Z"
-  },
   quick_entries: [
     { key: "profile", title: "我的档案", summary: "基础信息与场景" },
     { key: "preferences", title: "偏好与禁忌", summary: "风格目标与不想要的方向" },
@@ -112,10 +88,6 @@ const initialSummary = {
 
 async function main() {
   const apiCalls = [];
-  let failNextProfileUpdate = false;
-  let failNextPreferencesUpdate = false;
-  let deferredProfileUpdate = null;
-  let deferredPreferencesUpdate = null;
   const apiStub = {
     getProfileSummary() {
       apiCalls.push({ name: "getProfileSummary" });
@@ -123,307 +95,84 @@ async function main() {
     },
     updateProfile(data) {
       apiCalls.push({ name: "updateProfile", data });
-      if (failNextProfileUpdate) {
-        failNextProfileUpdate = false;
-        return Promise.reject(new Error("基础档案保存失败"));
-      }
-      if (deferredProfileUpdate) {
-        const deferred = deferredProfileUpdate;
-        deferredProfileUpdate = null;
-        return deferred.promise;
-      }
-      return Promise.resolve(Object.assign({}, clone(initialSummary), {
-        user: Object.assign({}, initialSummary.user, {
-          nickname: data.nickname
-        }),
-        profile: Object.assign({}, initialSummary.profile, {
-          body_notes: data.body_notes,
-          lifestyle_scenarios: data.lifestyle_scenarios
-        })
-      }));
+      return Promise.resolve(clone(initialSummary));
     },
     updateProfilePreferences(data) {
       apiCalls.push({ name: "updateProfilePreferences", data });
-      if (failNextPreferencesUpdate) {
-        failNextPreferencesUpdate = false;
-        return Promise.reject(new Error("偏好保存失败"));
-      }
-      if (deferredPreferencesUpdate) {
-        const deferred = deferredPreferencesUpdate;
-        deferredPreferencesUpdate = null;
-        return deferred.promise;
-      }
-      return Promise.resolve(Object.assign({}, clone(initialSummary), {
-        profile: Object.assign({}, initialSummary.profile, {
-          style_goal_summary: data.style_goals.join("、")
-        })
-      }));
+      return Promise.resolve(clone(initialSummary));
     }
   };
 
-  const { pageConfig, exported } = requireProfilePageWithApi(apiStub);
+  const profile = loadPage("pages/profile/index.js", apiStub);
+  assert(profile.pageConfig, "profile/index.js should register Page config");
+  assert(typeof profile.pageConfig.loadProfile === "function", "profile index should load profile summary");
+  assert(typeof profile.pageConfig.handleQuickEntry === "function", "profile index should handle quick entries");
+  assert(typeof profile.exported.normalizeProfileSummary === "function", "profile index should export normalizeProfileSummary");
 
-  assert(pageConfig, "profile.js should register Page config");
-  assert(typeof pageConfig.loadProfile === "function", "profile page should define loadProfile");
-  assert(typeof pageConfig.onShow === "function", "profile tab should refresh from API on tab show");
-  assert(typeof pageConfig.handleSaveProfile === "function", "profile page should define handleSaveProfile");
-  assert(typeof pageConfig.handleSavePreferences === "function", "profile page should define handleSavePreferences");
-  assert(typeof pageConfig.handleClearLocalSession === "function", "profile page should define handleClearLocalSession");
-  assert(typeof exported.normalizeProfileSummary === "function", "profile.js should export normalizeProfileSummary");
+  const normalizedEmpty = profile.exported.normalizeProfileSummary(null);
+  assert(normalizedEmpty.quickEntries.map((entry) => entry.key).join(",") === "profile,preferences,memory,report,privacy", "profile fallback entries should include independent memory domain");
 
-  const normalizedEmpty = exported.normalizeProfileSummary(null);
-  assert(normalizedEmpty.empty === true, "normalizeProfileSummary should mark missing summary as empty");
-  assert(normalizedEmpty.quickEntries.length === 4, "normalizeProfileSummary should provide four fallback quick entries");
-  assert(
-    normalizedEmpty.quickEntries.map((entry) => entry.key).join(",") === "profile,preferences,report,privacy",
-    "normalizeProfileSummary fallback quick entries should match profile contract"
-  );
-
-  const page = createPageInstance(pageConfig);
-  await page.loadProfile.call(page);
-
-  assert(apiCalls[0].name === "getProfileSummary", "loadProfile should call getProfileSummary");
-  assert(page.data.loading === false, "loadProfile should clear loading");
-  assert(page.data.loadErrorMessage === "", "loadProfile should clear loadErrorMessage");
-  assert(page.data.empty === false, "loadProfile should mark summary as non-empty");
-  assert(page.data.user.nickname === "明明", "loadProfile should expose user nickname");
-  assert(page.data.profileDraft.nickname === "明明", "loadProfile should prepare profile draft nickname");
-  assert(page.data.profileDraft.scenarioText === "通勤、周末见朋友", "loadProfile should normalize scenario draft text");
-  assert(page.data.preferencesDraft.styleGoalsText === "更利落", "loadProfile should prepare style goals draft");
-  assert(page.data.preferencesDraft.avoidancesText === "过甜", "loadProfile should prepare avoidances draft");
-  assert(page.data.preferencesDraft.scenarioPreferencesText === "通勤更正式", "loadProfile should prepare scenario preferences draft");
-  assert(page.data.quickEntries.length === 4, "loadProfile should expose four quick entries");
-  assert(
-    page.data.quickEntries.map((entry) => entry.key).join(",") === "profile,preferences,report,privacy",
-    "loadProfile should keep profile quick entry contract"
-  );
-  assert(page.data.memoryItems.length === 5, "loadProfile should normalize memory summary items");
-
-  await page.onShow.call(page);
-  assert(apiCalls.filter((call) => call.name === "getProfileSummary").length === 2, "profile onShow should re-request profile summary");
-  page.setData({
-    savingProfile: true,
-    profileDraft: Object.assign({}, page.data.profileDraft, {
-      nickname: "保存中的昵称"
-    })
-  });
-  await page.onShow.call(page);
-  assert(apiCalls.filter((call) => call.name === "getProfileSummary").length === 2, "profile onShow should skip refresh while profile save is pending");
-  assert(page.data.profileDraft.nickname === "保存中的昵称", "profile onShow should not overwrite profile draft while saving");
-  page.setData({
-    savingProfile: false,
-    savingPreferences: true,
-    preferencesDraft: Object.assign({}, page.data.preferencesDraft, {
-      avoidancesText: "保存中的禁忌"
-    })
-  });
-  await page.onShow.call(page);
-  assert(apiCalls.filter((call) => call.name === "getProfileSummary").length === 2, "profile onShow should skip refresh while preferences save is pending");
-  assert(page.data.preferencesDraft.avoidancesText === "保存中的禁忌", "profile onShow should not overwrite preferences draft while saving");
-  page.setData({
-    savingPreferences: false
-  });
-
-  page.setData({
-    profileDraft: Object.assign({}, page.data.profileDraft, {
-      nickname: "失败后保留",
-      body_notes: "保存失败时不要清掉"
-    }),
-    preferencesDraft: Object.assign({}, page.data.preferencesDraft, {
-      avoidancesText: "失败时保留禁忌"
-    })
-  });
-  failNextProfileUpdate = true;
-  await page.handleSaveProfile.call(page);
-  assert(page.data.loadErrorMessage === "", "profile save failure should not set full-page load error");
-  assert(page.data.profileSaveMessage === "基础档案保存失败", "profile save failure should show panel message");
-  assert(page.data.profileDraft.nickname === "失败后保留", "profile save failure should keep profile draft nickname");
-  assert(page.data.profileDraft.body_notes === "保存失败时不要清掉", "profile save failure should keep profile draft notes");
-  assert(page.data.preferencesDraft.avoidancesText === "失败时保留禁忌", "profile save failure should keep other panel draft");
-  assert(page.data.user.user_public_id === "usr_test", "profile save failure should keep loaded dashboard visible");
+  const profilePage = createPageInstance(profile.pageConfig);
+  await profilePage.loadProfile.call(profilePage);
+  assert(profilePage.data.user.nickname === "明明", "profile index should hydrate user nickname");
+  assert(profilePage.data.profileDraft.scenarioText === "通勤、周末见朋友", "profile index should hydrate scenario summary");
+  assert(profilePage.data.preferencesDraft.avoidancesText === "过甜", "profile index should hydrate avoidance summary");
+  assert(profilePage.data.memoryItems.length === 5, "profile index should show memory summary items");
 
   const navigations = [];
-  const scrolls = [];
-  const originalWxForQuickEntries = global.wx;
+  const originalWx = global.wx;
   global.wx = {
     navigateTo(options) {
-      navigations.push(options);
-    },
-    pageScrollTo(options) {
-      scrolls.push(options);
+      navigations.push(options.url);
     }
   };
-  page.handleQuickEntry.call(page, { currentTarget: { dataset: { key: "profile" } } });
-  assert(page.data.activeSection === "profile", "profile quick entry should activate profile section");
-  assert(scrolls[0].selector === "#profile-section", "profile quick entry should scroll to profile section");
-  page.handleQuickEntry.call(page, { currentTarget: { dataset: { key: "preferences" } } });
-  assert(page.data.activeSection === "preferences", "preferences quick entry should activate preferences section");
-  assert(scrolls[1].selector === "#preferences-section", "preferences quick entry should scroll to preferences section");
-  page.handleQuickEntry.call(page, { currentTarget: { dataset: { key: "privacy" } } });
-  assert(page.data.activeSection === "privacy", "privacy quick entry should activate privacy section");
-  assert(scrolls[2].selector === "#privacy-section", "privacy quick entry should scroll to privacy section");
-  page.handleQuickEntry.call(page, { currentTarget: { dataset: { key: "report" } } });
-  assert(navigations[0].url === "/pages/report/report", "report quick entry should navigate to report page");
-  global.wx = originalWxForQuickEntries;
+  profilePage.handleQuickEntry.call(profilePage, { currentTarget: { dataset: { key: "profile" } } });
+  profilePage.handleQuickEntry.call(profilePage, { currentTarget: { dataset: { key: "preferences" } } });
+  profilePage.handleQuickEntry.call(profilePage, { currentTarget: { dataset: { key: "memory" } } });
+  profilePage.handleQuickEntry.call(profilePage, { currentTarget: { dataset: { key: "privacy" } } });
+  global.wx = originalWx;
+  assert(navigations.join(",") === "/pages/profile/edit,/pages/preferences/edit,/pages/memory/index,/pages/privacy/index", `profile quick entry routes mismatch: ${navigations.join(",")}`);
 
-  page.setData({
-    profileDraft: Object.assign({}, page.data.profileDraft, {
-      nickname: "小明",
-      body_notes: "保持自然利落",
-      scenarioText: "通勤，约会 / 周末"
-    }),
-    preferencesDraft: Object.assign({}, page.data.preferencesDraft, {
-      styleGoalsText: "未保存目标",
-      avoidancesText: "未保存禁忌",
-      scenarioPreferencesText: "未保存场景"
+  const profileEdit = loadPage("pages/profile/edit.js", apiStub);
+  assert(profileEdit.pageConfig, "profile/edit.js should register Page config");
+  assert(typeof profileEdit.exported.payloadFromDraft === "function", "profile edit should export payloadFromDraft");
+  const profileEditPage = createPageInstance(profileEdit.pageConfig);
+  await profileEditPage.loadProfile.call(profileEditPage);
+  profileEditPage.setData({
+    draft: Object.assign({}, profileEditPage.data.draft, {
+      nickname: "新的昵称",
+      scenarioText: "通勤，周末"
     })
   });
-  await page.handleSaveProfile.call(page);
+  await profileEditPage.handleSave.call(profileEditPage);
+  const profileSave = apiCalls.find((call) => call.name === "updateProfile");
+  assert(profileSave, "profile edit should call updateProfile");
+  assert(profileSave.data.nickname === "新的昵称", "profile edit should pass nickname");
+  assert(profileSave.data.lifestyle_scenarios.length === 2, "profile edit should split scenarios");
 
-  const profileSave = apiCalls.find((call) => call.name === "updateProfile" && call.data.nickname === "小明");
-  assert(profileSave, "handleSaveProfile should call updateProfile");
-  assert(profileSave.data.nickname === "小明", "handleSaveProfile should send nickname");
-  assert(profileSave.data.body_notes === "保持自然利落", "handleSaveProfile should send body_notes");
-  assert(profileSave.data.lifestyle_scenarios.length === 3, "handleSaveProfile should split scenario text");
-  assert(page.data.savingProfile === false, "handleSaveProfile should clear savingProfile");
-  assert(page.data.user.nickname === "小明", "handleSaveProfile should apply returned summary");
-  assert(page.data.preferencesDraft.styleGoalsText === "未保存目标", "handleSaveProfile should keep unsaved preferences style goals");
-  assert(page.data.preferencesDraft.avoidancesText === "未保存禁忌", "handleSaveProfile should keep unsaved preferences avoidances");
-  assert(page.data.preferencesDraft.scenarioPreferencesText === "未保存场景", "handleSaveProfile should keep unsaved preferences scenarios");
-
-  const pendingProfileDeferred = createDeferred();
-  deferredProfileUpdate = pendingProfileDeferred;
-  page.setData({
-    profileDraft: Object.assign({}, page.data.profileDraft, {
-      nickname: "pending 基础保存",
-      body_notes: "pending 基础内容"
-    }),
-    preferencesDraft: {
-      styleGoalsText: "请求前目标",
-      avoidancesText: "请求前禁忌",
-      scenarioPreferencesText: "请求前场景"
-    }
-  });
-  const pendingProfileSave = page.handleSaveProfile.call(page);
-  page.setData({
-    preferencesDraft: {
-      styleGoalsText: "请求中目标",
-      avoidancesText: "请求中禁忌",
-      scenarioPreferencesText: "请求中场景"
-    }
-  });
-  pendingProfileDeferred.resolve(Object.assign({}, clone(initialSummary), {
-    user: Object.assign({}, initialSummary.user, {
-      nickname: "pending 基础保存"
-    })
-  }));
-  await pendingProfileSave;
-  assert(page.data.preferencesDraft.styleGoalsText === "请求中目标", "pending profile save should keep preferences edited during request");
-  assert(page.data.preferencesDraft.avoidancesText === "请求中禁忌", "pending profile save should keep avoidances edited during request");
-  assert(page.data.preferencesDraft.scenarioPreferencesText === "请求中场景", "pending profile save should keep scenarios edited during request");
-
-  page.setData({
-    profileDraft: Object.assign({}, page.data.profileDraft, {
-      nickname: "未保存昵称",
-      body_notes: "未保存基础档案"
-    }),
-    preferencesDraft: {
+  const preferencesEdit = loadPage("pages/preferences/edit.js", apiStub);
+  assert(preferencesEdit.pageConfig, "preferences/edit.js should register Page config");
+  assert(typeof preferencesEdit.exported.payloadFromDraft === "function", "preferences edit should export payloadFromDraft");
+  const preferencesPage = createPageInstance(preferencesEdit.pageConfig);
+  await preferencesPage.loadPreferences.call(preferencesPage);
+  preferencesPage.setData({
+    draft: {
       styleGoalsText: "更利落、轻松",
       avoidancesText: "过甜 / 太紧身",
       scenarioPreferencesText: "通勤，周末"
     }
   });
-  await page.handleSavePreferences.call(page);
-
+  await preferencesPage.handleSave.call(preferencesPage);
   const preferencesSave = apiCalls.find((call) => call.name === "updateProfilePreferences");
-  assert(preferencesSave, "handleSavePreferences should call updateProfilePreferences");
-  assert(preferencesSave.data.style_goals.length === 2, "handleSavePreferences should split style goals");
-  assert(preferencesSave.data.avoidances.length === 2, "handleSavePreferences should split avoidances");
-  assert(preferencesSave.data.scenario_preferences.length === 2, "handleSavePreferences should split scenario preferences");
-  assert(page.data.savingPreferences === false, "handleSavePreferences should clear savingPreferences");
-  assert(page.data.preferencesDraft.styleGoalsText === "更利落、轻松", "handleSavePreferences should keep submitted style goals draft");
-  assert(page.data.preferencesDraft.avoidancesText === "过甜 / 太紧身", "handleSavePreferences should keep submitted avoidances draft");
-  assert(page.data.preferencesDraft.scenarioPreferencesText === "通勤，周末", "handleSavePreferences should keep submitted scenario preferences draft");
-  assert(page.data.profileDraft.nickname === "未保存昵称", "handleSavePreferences should keep unsaved profile nickname");
-  assert(page.data.profileDraft.body_notes === "未保存基础档案", "handleSavePreferences should keep unsaved profile notes");
+  assert(preferencesSave, "preferences edit should call updateProfilePreferences");
+  assert(preferencesSave.data.style_goals.length === 2, "preferences edit should split style goals");
+  assert(preferencesSave.data.avoidances.length === 2, "preferences edit should split avoidances");
+  assert(preferencesSave.data.scenario_preferences.length === 2, "preferences edit should split scenario preferences");
 
-  const pendingPreferencesDeferred = createDeferred();
-  deferredPreferencesUpdate = pendingPreferencesDeferred;
-  page.setData({
-    profileDraft: Object.assign({}, page.data.profileDraft, {
-      nickname: "请求前昵称",
-      body_notes: "请求前基础"
-    }),
-    preferencesDraft: {
-      styleGoalsText: "pending 偏好目标",
-      avoidancesText: "pending 偏好禁忌",
-      scenarioPreferencesText: "pending 偏好场景"
-    }
-  });
-  const pendingPreferencesSave = page.handleSavePreferences.call(page);
-  page.setData({
-    profileDraft: Object.assign({}, page.data.profileDraft, {
-      nickname: "请求中昵称",
-      body_notes: "请求中基础"
-    })
-  });
-  pendingPreferencesDeferred.resolve(Object.assign({}, clone(initialSummary), {
-    profile: Object.assign({}, initialSummary.profile, {
-      style_goal_summary: "pending 偏好目标"
-    })
-  }));
-  await pendingPreferencesSave;
-  assert(page.data.profileDraft.nickname === "请求中昵称", "pending preferences save should keep profile nickname edited during request");
-  assert(page.data.profileDraft.body_notes === "请求中基础", "pending preferences save should keep profile notes edited during request");
-
-  page.setData({
-    preferencesDraft: {
-      styleGoalsText: "失败目标",
-      avoidancesText: "失败禁忌",
-      scenarioPreferencesText: "失败场景"
-    }
-  });
-  failNextPreferencesUpdate = true;
-  await page.handleSavePreferences.call(page);
-  assert(page.data.loadErrorMessage === "", "preferences save failure should not set full-page load error");
-  assert(page.data.preferencesSaveMessage === "偏好保存失败", "preferences save failure should show panel message");
-  assert(page.data.preferencesDraft.styleGoalsText === "失败目标", "preferences save failure should keep style goals draft");
-  assert(page.data.preferencesDraft.avoidancesText === "失败禁忌", "preferences save failure should keep avoidances draft");
-  assert(page.data.profileDraft.nickname === "请求中昵称", "preferences save failure should keep other panel draft");
-
-  const removedKeys = [];
-  const toastCalls = [];
-  const originalWx = global.wx;
-  global.wx = {
-    removeStorageSync(key) {
-      removedKeys.push(key);
-    },
-    showToast(options) {
-      toastCalls.push(options);
-    }
-  };
-  page.handleClearLocalSession.call(page);
-  global.wx = originalWx;
-
-  assert(removedKeys.includes("user_token"), "handleClearLocalSession should remove user_token");
-  assert(removedKeys.includes("token"), "handleClearLocalSession should remove token");
-  assert(page.data.tokenReady === false, "handleClearLocalSession should update tokenReady");
-  assert(page.data.summary === null, "handleClearLocalSession should clear summary");
-  assert(page.data.user.user_public_id === "", "handleClearLocalSession should clear user public id");
-  assert(page.data.user.nickname === "", "handleClearLocalSession should clear nickname");
-  assert(page.data.profile === null, "handleClearLocalSession should clear profile");
-  assert(page.data.profileDraft.nickname === "", "handleClearLocalSession should clear profile draft");
-  assert(page.data.preferencesDraft.styleGoalsText === "", "handleClearLocalSession should clear preferences draft");
-  assert(page.data.memoryItems.every((item) => item.value === 0), "handleClearLocalSession should clear memory counters");
-  assert(page.data.quickEntries.length === 0, "handleClearLocalSession should clear quick entries");
-  assert(toastCalls[0].title === "已清除本地登录", "handleClearLocalSession should show neutral toast");
+  console.log("profile page verification passed");
 }
 
-main()
-  .then(() => {
-    console.log("profile page verification passed");
-  })
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+main().catch((error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});

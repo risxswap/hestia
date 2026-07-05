@@ -1,0 +1,27 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="card state-card">
+    <text class="muted">正在读取妆容...</text>
+  </view>
+  <view wx:else class="card edit-panel">
+    <view class="section-head">
+      <text class="section-title">编辑妆容</text>
+      <text class="muted">详情页只读，完整字段在这里维护。</text>
+    </view>
+    <label class="field-group"><text class="field-label">名称</text><input class="field" value="{{draft.name}}" data-field="name" bindinput="handleInput" /></label>
+    <label class="field-group"><text class="field-label">妆容类型</text><input class="field" value="{{draft.makeup_type}}" data-field="makeup_type" bindinput="handleInput" /></label>
+    <label class="field-group"><text class="field-label">妆面重点</text><input class="field" value="{{draft.focus}}" data-field="focus" bindinput="handleInput" /></label>
+    <label class="field-group"><text class="field-label">色彩方向</text><input class="field" value="{{draft.color_palette}}" data-field="color_palette" bindinput="handleInput" /></label>
+    <label class="field-group"><text class="field-label">妆感</text><input class="field" value="{{draft.finish}}" data-field="finish" bindinput="handleInput" /></label>
+    <label class="field-group"><text class="field-label">适用场景</text><textarea class="textarea" value="{{draft.sceneText}}" data-field="sceneText" bindinput="handleInput" /></label>
+    <label class="field-group"><text class="field-label">适合原因</text><textarea class="textarea" value="{{draft.suitability_notes}}" data-field="suitability_notes" bindinput="handleInput" /></label>
+    <label class="field-group"><text class="field-label">不建议照做的点</text><textarea class="textarea" value="{{draft.avoidance_notes}}" data-field="avoidance_notes" bindinput="handleInput" /></label>
+    <label class="field-group"><text class="field-label">用户备注</text><textarea class="textarea" value="{{draft.user_notes}}" data-field="user_notes" bindinput="handleInput" /></label>
+    <view class="modal-actions">
+      <button class="secondary-button action-button {{draft.recommendation_status === 'preferred' ? 'quick-entry--active' : ''}}" data-status="preferred" bind:tap="handleRecommendationStatus">优先推荐</button>
+      <button class="secondary-button action-button {{draft.recommendation_status === 'normal' ? 'quick-entry--active' : ''}}" data-status="normal" bind:tap="handleRecommendationStatus">正常推荐</button>
+      <button class="secondary-button action-button {{draft.recommendation_status === 'paused' ? 'quick-entry--active' : ''}}" data-status="paused" bind:tap="handleRecommendationStatus">暂不推荐</button>
+    </view>
+    <text wx:if="{{errorMessage}}" class="error-text">{{errorMessage}}</text>
+    <button class="primary-button save-button" loading="{{saving}}" bind:tap="handleSave">保存</button>
+  </view>
+</view>

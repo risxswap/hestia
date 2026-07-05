@@ -1,0 +1,272 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.title {
+  color: #27231f;
+  font-size: 42rpx;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.section-title {
+  color: #27231f;
+  font-size: 30rpx;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.muted {
+  color: #71695d;
+  font-size: 25rpx;
+  line-height: 1.55;
+}
+
+.eyebrow {
+  color: #71695d;
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+.profile-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24rpx;
+  padding-top: 8rpx;
+}
+
+.identity-copy,
+.section-head,
+.edit-panel,
+.privacy-panel,
+.state-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.identity-copy {
+  min-width: 0;
+  flex: 1;
+  gap: 10rpx;
+}
+
+.section-head {
+  gap: 8rpx;
+}
+
+.state-card,
+.memory-card,
+.edit-panel,
+.privacy-panel {
+  padding: 28rpx;
+}
+
+.state-card,
+.edit-panel,
+.privacy-panel {
+  gap: 22rpx;
+}
+
+.memory-card {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.summary-line {
+  color: #27231f;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.memory-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10rpx;
+}
+
+.memory-item {
+  min-width: 0;
+  padding: 18rpx 10rpx;
+  border: 1rpx solid #e6ded0;
+  border-radius: 12rpx;
+  background: #fffaf2;
+  text-align: center;
+}
+
+.memory-value {
+  display: block;
+  color: #245d4f;
+  font-size: 32rpx;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.memory-label {
+  display: block;
+  margin-top: 6rpx;
+  color: #71695d;
+  font-size: 21rpx;
+  line-height: 1.25;
+}
+
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
+}
+
+.quick-entry,
+.primary-button,
+.secondary-button,
+.danger-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border-radius: 12rpx;
+  font-size: 25rpx;
+  line-height: 1.25;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.quick-entry::after,
+.primary-button::after,
+.secondary-button::after,
+.danger-button::after {
+  border: 0;
+}
+
+.quick-entry {
+  align-items: flex-start;
+  min-height: 180rpx;
+  padding: 24rpx;
+  border: 1rpx solid #e6ded0;
+  color: #27231f;
+  background: #fffdf8;
+  flex-direction: column;
+  gap: 10rpx;
+  text-align: left;
+}
+
+.quick-title {
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+.quick-summary {
+  color: #71695d;
+  font-size: 23rpx;
+  line-height: 1.45;
+}
+
+.quick-action {
+  margin-top: auto;
+  color: #245d4f;
+  font-size: 23rpx;
+  font-weight: 700;
+}
+
+.quick-entry--active {
+  border-color: #245d4f;
+  background: #eef4ef;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18rpx;
+}
+
+.field-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.field-label {
+  color: #71695d;
+  font-size: 23rpx;
+  font-weight: 650;
+}
+
+.field,
+.textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1rpx solid #e6ded0;
+  border-radius: 12rpx;
+  color: #27231f;
+  background: #fffaf2;
+  font-size: 26rpx;
+}
+
+.field {
+  height: 76rpx;
+  padding: 0 20rpx;
+}
+
+.textarea {
+  min-height: 136rpx;
+  padding: 18rpx 20rpx;
+  line-height: 1.5;
+}
+
+.primary-button {
+  min-height: 72rpx;
+  color: #fffdf8;
+  background: #245d4f;
+}
+
+.secondary-button {
+  min-height: 72rpx;
+  border: 1rpx solid #e6ded0;
+  color: #27231f;
+  background: #fffdf8;
+}
+
+.danger-button {
+  min-height: 72rpx;
+  color: #8a3b2f;
+  background: #f3e7df;
+}
+
+.danger-button[disabled] {
+  color: #9b8e80;
+  background: #eee6dc;
+}
+
+.save-message {
+  display: block;
+  color: #8a3b2f;
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+.edit-panel--active,
+.privacy-panel--active {
+  border-color: #245d4f;
+  box-shadow: 0 14rpx 36rpx rgba(36, 93, 79, 0.12);
+}
+
+.small-button {
+  flex: 0 0 auto;
+  min-width: 150rpx;
+  padding: 0 20rpx;
+}
+
+.action-button,
+.save-button {
+  width: 100%;
+}

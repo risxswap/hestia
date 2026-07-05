@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS `files` (
   KEY `idx_files_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS `wardrobe_items` (
+CREATE TABLE IF NOT EXISTS `clothes` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `public_id` varchar(32) NOT NULL,
   `user_id` bigint unsigned NOT NULL,
@@ -148,24 +148,24 @@ CREATE TABLE IF NOT EXISTS `wardrobe_items` (
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `deleted_at` datetime(3) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_wardrobe_items_public_id` (`public_id`),
-  KEY `idx_wardrobe_items_user_category` (`user_id`, `category`),
-  KEY `idx_wardrobe_items_user_status` (`user_id`, `status`)
+  UNIQUE KEY `uk_clothes_public_id` (`public_id`),
+  KEY `idx_clothes_user_category` (`user_id`, `category`),
+  KEY `idx_clothes_user_status` (`user_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS `wardrobe_item_assets` (
+CREATE TABLE IF NOT EXISTS `clothes_assets` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `wardrobe_item_id` bigint unsigned NOT NULL,
+  `clothes_id` bigint unsigned NOT NULL,
   `asset_id` bigint unsigned NOT NULL,
   `is_primary` tinyint(1) NOT NULL DEFAULT 0,
   `sort_order` int NOT NULL DEFAULT 0,
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  KEY `idx_wardrobe_item_assets_item` (`wardrobe_item_id`),
-  KEY `idx_wardrobe_item_assets_asset` (`asset_id`)
+  KEY `idx_clothes_assets_item` (`clothes_id`),
+  KEY `idx_clothes_assets_asset` (`asset_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS `wardrobe_gaps` (
+CREATE TABLE IF NOT EXISTS `clothes_gaps` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `public_id` varchar(32) NOT NULL,
   `user_id` bigint unsigned NOT NULL,
@@ -181,10 +181,101 @@ CREATE TABLE IF NOT EXISTS `wardrobe_gaps` (
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `deleted_at` datetime(3) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_wardrobe_gaps_public_id` (`public_id`),
-  KEY `idx_wardrobe_gaps_user_status` (`user_id`, `status`),
-  KEY `idx_wardrobe_gaps_source_report` (`source_report_id`),
-  KEY `idx_wardrobe_gaps_source_advice` (`source_advice_id`)
+  UNIQUE KEY `uk_clothes_gaps_public_id` (`public_id`),
+  KEY `idx_clothes_gaps_user_status` (`user_id`, `status`),
+  KEY `idx_clothes_gaps_source_report` (`source_report_id`),
+  KEY `idx_clothes_gaps_source_advice` (`source_advice_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `hair` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(32) NOT NULL,
+  `user_id` bigint unsigned NOT NULL,
+  `name` varchar(128) NOT NULL,
+  `length` varchar(64) DEFAULT NULL,
+  `shape` varchar(128) DEFAULT NULL,
+  `bangs` varchar(128) DEFAULT NULL,
+  `color` varchar(128) DEFAULT NULL,
+  `care_time` varchar(64) DEFAULT NULL,
+  `suitability_notes` text,
+  `avoidance_notes` text,
+  `user_notes` text,
+  `recommendation_status` varchar(32) NOT NULL DEFAULT 'normal',
+  `status` varchar(32) NOT NULL DEFAULT 'active',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_hair_public_id` (`public_id`),
+  KEY `idx_hair_user_status` (`user_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `hair_assets` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `hair_id` bigint unsigned NOT NULL,
+  `asset_id` bigint unsigned NOT NULL,
+  `is_primary` tinyint(1) NOT NULL DEFAULT 0,
+  `sort_order` int NOT NULL DEFAULT 0,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  KEY `idx_hair_assets_hair` (`hair_id`),
+  KEY `idx_hair_assets_asset` (`asset_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `hair_scene_tags` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `hair_id` bigint unsigned NOT NULL,
+  `tag` varchar(64) NOT NULL,
+  `sort_order` int NOT NULL DEFAULT 0,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  KEY `idx_hair_scene_tags_hair` (`hair_id`),
+  KEY `idx_hair_scene_tags_tag` (`tag`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `makeup` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(32) NOT NULL,
+  `user_id` bigint unsigned NOT NULL,
+  `name` varchar(128) NOT NULL,
+  `makeup_type` varchar(64) DEFAULT NULL,
+  `focus` varchar(128) DEFAULT NULL,
+  `color_palette` varchar(128) DEFAULT NULL,
+  `finish` varchar(128) DEFAULT NULL,
+  `suitability_notes` text,
+  `avoidance_notes` text,
+  `user_notes` text,
+  `recommendation_status` varchar(32) NOT NULL DEFAULT 'normal',
+  `status` varchar(32) NOT NULL DEFAULT 'active',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_makeup_public_id` (`public_id`),
+  KEY `idx_makeup_user_status` (`user_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `makeup_assets` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `makeup_id` bigint unsigned NOT NULL,
+  `asset_id` bigint unsigned NOT NULL,
+  `is_primary` tinyint(1) NOT NULL DEFAULT 0,
+  `sort_order` int NOT NULL DEFAULT 0,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  KEY `idx_makeup_assets_makeup` (`makeup_id`),
+  KEY `idx_makeup_assets_asset` (`asset_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `makeup_scene_tags` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `makeup_id` bigint unsigned NOT NULL,
+  `tag` varchar(64) NOT NULL,
+  `sort_order` int NOT NULL DEFAULT 0,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  KEY `idx_makeup_scene_tags_makeup` (`makeup_id`),
+  KEY `idx_makeup_scene_tags_tag` (`tag`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `style_subjects` (

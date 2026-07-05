@@ -2,14 +2,14 @@ const api = require("../../utils/api");
 
 const DEFAULT_TYPES = [
   {
-    type: "wardrobe",
-    label: "衣橱",
-    icon: "wardrobe",
-    iconSrc: "/assets/collection/wardrobe.webp",
+    type: "clothes",
+    label: "衣服",
+    icon: "clothes",
+    iconSrc: "/assets/collection/clothes.webp",
     count: 0,
     hint: "常穿单品",
     enabled: true,
-    entry_path: "/pages/wardrobe/wardrobe"
+    entry_path: "/pages/clothes/list"
   },
   {
     type: "hair",
@@ -19,7 +19,7 @@ const DEFAULT_TYPES = [
     count: 0,
     hint: "常用发型",
     enabled: true,
-    entry_path: "/pages/hair/hair"
+    entry_path: "/pages/hair/list"
   },
   {
     type: "makeup",
@@ -29,17 +29,7 @@ const DEFAULT_TYPES = [
     count: 0,
     hint: "妆容方向",
     enabled: true,
-    entry_path: "/pages/makeup/makeup"
-  },
-  {
-    type: "references",
-    label: "参考",
-    icon: "references",
-    iconSrc: "/assets/collection/references.webp",
-    count: 0,
-    hint: "参考图",
-    enabled: true,
-    entry_path: "/pages/references/references"
+    entry_path: "/pages/makeup/list"
   }
 ];
 
@@ -53,10 +43,10 @@ function normalizeType(rawType) {
   const fallback = DEFAULT_TYPES.find((item) => item.type === type) || {};
   const count = Number(source.count || 0);
   return Object.assign({}, fallback, {
-    type: type || fallback.type || "wardrobe",
-    label: source.label || fallback.label || "衣橱",
-    icon: source.icon || fallback.icon || "wardrobe",
-    iconSrc: source.iconSrc || source.icon_src || fallback.iconSrc || "/assets/collection/wardrobe.webp",
+    type: type || fallback.type || "clothes",
+    label: source.label || fallback.label || "衣服",
+    icon: source.icon || fallback.icon || "clothes",
+    iconSrc: source.iconSrc || source.icon_src || fallback.iconSrc || "/assets/collection/clothes.webp",
     count: Number.isFinite(count) ? count : 0,
     hint: source.hint || fallback.hint || "",
     enabled: source.enabled !== false,
@@ -82,7 +72,7 @@ function normalizeRecentItem(rawItem) {
     ? image.preview_url || image.previewUrl || image.url || ""
     : image;
   return {
-    type: source.type || "wardrobe",
+    type: source.type || "clothes",
     public_id: source.public_id || source.publicID || "",
     title: source.title || source.name || "未命名",
     subtitle: source.subtitle || source.category || "",

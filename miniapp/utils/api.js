@@ -170,19 +170,71 @@ function getHairItems() {
   });
 }
 
+function getHairItem(publicID) {
+  return authorizedRequest({
+    path: `/api/user/hair/${publicID}`
+  });
+}
+
+function createHairItem(data) {
+  return authorizedRequest({
+    path: "/api/user/hair",
+    method: "POST",
+    data
+  });
+}
+
+function updateHairItem(publicID, data) {
+  return authorizedRequest({
+    path: `/api/user/hair/${publicID}`,
+    method: "PATCH",
+    data
+  });
+}
+
+function deleteHairItem(publicID) {
+  return authorizedRequest({
+    path: `/api/user/hair/${publicID}`,
+    method: "DELETE"
+  });
+}
+
 function getMakeupItems() {
   return authorizedRequest({
     path: "/api/user/makeup"
   });
 }
 
-function getReferenceItems() {
+function getMakeupItem(publicID) {
   return authorizedRequest({
-    path: "/api/user/references"
+    path: `/api/user/makeup/${publicID}`
   });
 }
 
-function getWardrobeItems(filters) {
+function createMakeupItem(data) {
+  return authorizedRequest({
+    path: "/api/user/makeup",
+    method: "POST",
+    data
+  });
+}
+
+function updateMakeupItem(publicID, data) {
+  return authorizedRequest({
+    path: `/api/user/makeup/${publicID}`,
+    method: "PATCH",
+    data
+  });
+}
+
+function deleteMakeupItem(publicID) {
+  return authorizedRequest({
+    path: `/api/user/makeup/${publicID}`,
+    method: "DELETE"
+  });
+}
+
+function getClothesItems(filters) {
   const params = filters || {};
   const query = Object.keys(params)
     .filter((key) => params[key] !== undefined && params[key] !== null && params[key] !== "")
@@ -190,43 +242,49 @@ function getWardrobeItems(filters) {
     .join("&");
 
   return authorizedRequest({
-    path: `/api/user/wardrobe/items${query ? `?${query}` : ""}`
+    path: `/api/user/clothes/items${query ? `?${query}` : ""}`
   });
 }
 
-function getWardrobeOptions() {
+function getClothesItem(publicID) {
   return authorizedRequest({
-    path: "/api/user/wardrobe/options"
+    path: `/api/user/clothes/items/${publicID}`
   });
 }
 
-function createWardrobeItem(data) {
+function getClothesOptions() {
   return authorizedRequest({
-    path: "/api/user/wardrobe/items",
+    path: "/api/user/clothes/options"
+  });
+}
+
+function createClothesItem(data) {
+  return authorizedRequest({
+    path: "/api/user/clothes/items",
     method: "POST",
     data
   });
 }
 
-function updateWardrobeItem(publicID, data) {
+function updateClothesItem(publicID, data) {
   return authorizedRequest({
-    path: `/api/user/wardrobe/items/${publicID}`,
+    path: `/api/user/clothes/items/${publicID}`,
     method: "PATCH",
     data
   });
 }
 
-function deleteWardrobeItem(publicID) {
+function deleteClothesItem(publicID) {
   return authorizedRequest({
-    path: `/api/user/wardrobe/items/${publicID}`,
+    path: `/api/user/clothes/items/${publicID}`,
     method: "DELETE"
   });
 }
 
-function recognizeWardrobeItemImage(assetPublicID, options) {
+function recognizeClothesItemImage(assetPublicID, options) {
   const config = options || {};
   return authorizedRequest({
-    path: "/api/user/wardrobe/items/recognize",
+    path: "/api/user/clothes/items/recognize",
     method: "POST",
     data: {
       asset_public_id: assetPublicID,
@@ -555,14 +613,22 @@ module.exports = {
   updateProfilePreferences,
   getCollectionSummary,
   getHairItems,
+  getHairItem,
+  createHairItem,
+  updateHairItem,
+  deleteHairItem,
   getMakeupItems,
-  getReferenceItems,
-  getWardrobeItems,
-  getWardrobeOptions,
-  createWardrobeItem,
-  updateWardrobeItem,
-  deleteWardrobeItem,
-  recognizeWardrobeItemImage,
+  getMakeupItem,
+  createMakeupItem,
+  updateMakeupItem,
+  deleteMakeupItem,
+  getClothesItems,
+  getClothesItem,
+  getClothesOptions,
+  createClothesItem,
+  updateClothesItem,
+  deleteClothesItem,
+  recognizeClothesItemImage,
   createFileUploadToken,
   confirmFileUpload,
   uploadFileToQiniu,

@@ -112,8 +112,11 @@ func TestApplyDataCorrectionsStopsAndDoesNotRecordFailedCorrection(t *testing.T)
 	}
 }
 
-func TestDefaultDataCorrectionsNormalizeWardrobeItemOptions(t *testing.T) {
+func TestDefaultDataCorrectionsNormalizeClothesItemOptionsAndMigratesLegacyTables(t *testing.T) {
 	exec := newFakeCorrectionExecutor()
+	exec.tables["wardrobe_items"] = true
+	exec.tables["wardrobe_item_assets"] = true
+	exec.tables["wardrobe_gaps"] = true
 
 	err := ApplyDataCorrections(context.Background(), exec, defaultDataCorrections)
 	if err != nil {
@@ -125,21 +128,32 @@ func TestDefaultDataCorrectionsNormalizeWardrobeItemOptions(t *testing.T) {
 		!containsStatement(exec.queries, `["棉","亚麻"`) ||
 		containsStatement(exec.queries, `"value"`) ||
 		containsStatement(exec.queries, `"label"`) {
-		t.Fatalf("expected wardrobe option configs to be rewritten as string-array json, queries=%#v", exec.queries)
+		t.Fatalf("expected clothes option configs to be rewritten as string-array json, queries=%#v", exec.queries)
 	}
-	if !exec.executed["wardrobe_item_options_string_array_20260704"] {
-		t.Fatalf("expected wardrobe item options correction to be recorded, executed=%#v", exec.executed)
+	if !containsStatement(exec.queries, "information_schema.tables") ||
+		!containsStatement(exec.queries, "INSERT IGNORE INTO clothes") ||
+		!containsStatement(exec.queries, "INSERT IGNORE INTO clothes_assets") ||
+		!containsStatement(exec.queries, "INSERT IGNORE INTO clothes_gaps") {
+		t.Fatalf("expected legacy wardrobe tables to be copied through guarded correction, queries=%#v", exec.queries)
+	}
+	if containsStatement(exec.queries, "RENAME TABLE") {
+		t.Fatalf("legacy table migration must not use non-idempotent rename, queries=%#v", exec.queries)
+	}
+	if !exec.executed["clothes_item_options_string_array_20260704"] ||
+		!exec.executed["legacy_wardrobe_tables_to_clothes_20260705"] {
+		t.Fatalf("expected clothes corrections to be recorded, executed=%#v", exec.executed)
 	}
 }
 
 type fakeCorrectionExecutor struct {
 	queries  []string
 	executed map[string]bool
+	tables   map[string]bool
 	failOn   string
 }
 
 func newFakeCorrectionExecutor() *fakeCorrectionExecutor {
-	return &fakeCorrectionExecutor{executed: map[string]bool{}}
+	return &fakeCorrectionExecutor{executed: map[string]bool{}, tables: map[string]bool{}}
 }
 
 func (f *fakeCorrectionExecutor) ExecContext(_ context.Context, query string, args ...any) (sql.Result, error) {
@@ -165,6 +179,14 @@ func (f *fakeCorrectionExecutor) GetContext(_ context.Context, dest any, query s
 		}
 		value, ok := dest.(*int)
 		if ok {
+			*value = 1
+		}
+		return nil
+	}
+	if strings.Contains(query, "information_schema.tables") {
+		table := args[0].(string)
+		value, ok := dest.(*int)
+		if ok && f.tables[table] {
 			*value = 1
 		}
 		return nil

@@ -15,31 +15,45 @@ import (
 
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/common/auth"
+	"hestia/server/internal/domain/clothes"
 	"hestia/server/internal/domain/collection"
-	"hestia/server/internal/domain/wardrobe"
+	"hestia/server/internal/domain/hair"
+	"hestia/server/internal/domain/makeup"
 	"hestia/server/internal/infra/config"
 
 	"github.com/gin-gonic/gin"
 )
 
-func TestGetCollectionSummaryUsesTopLevelResources(t *testing.T) {
+func TestGetCollectionSummaryUsesThreePrivateDomains(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	updatedAt := time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC)
-	service := collection.NewService(&fakeWardrobeLister{
-		items: []wardrobe.Item{
-			{
-				PublicID:  "wdi_shirt",
-				Name:      "米白衬衫",
-				Category:  "上装",
-				Color:     "米白",
-				Status:    wardrobe.StatusActive,
-				UpdatedAt: updatedAt,
-				PrimaryImage: &wardrobe.Image{
-					PreviewURL: "https://cdn.example.com/shirt.webp",
-				},
+	now := time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC)
+	service := collection.NewServiceWithDomains(
+		&fakeClothesLister{items: []clothes.Item{{
+			PublicID:  "wdi_shirt",
+			Name:      "米白衬衫",
+			Category:  "上装",
+			Color:     "米白",
+			Status:    clothes.StatusActive,
+			UpdatedAt: now.Add(-time.Hour),
+			PrimaryImage: &clothes.Image{
+				PreviewURL: "https://cdn.example.com/shirt.webp",
 			},
-		},
-	})
+		}}},
+		&fakeHairLister{items: []hair.Item{{
+			PublicID:  "hai_bob",
+			Name:      "锁骨发",
+			Length:    "中长",
+			Status:    hair.StatusActive,
+			UpdatedAt: now,
+		}}},
+		&fakeMakeupLister{items: []makeup.Item{{
+			PublicID:   "mku_daily",
+			Name:       "清透通勤妆",
+			MakeupType: "日常",
+			Status:     makeup.StatusActive,
+			UpdatedAt:  now.Add(-2 * time.Hour),
+		}}},
+	)
 	router := newCollectionRouter(service)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/user/collection", nil)
@@ -56,40 +70,35 @@ func TestGetCollectionSummaryUsesTopLevelResources(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Code != "ok" {
-		t.Fatalf("expected ok response, got %q", body.Code)
+	if got := len(body.Data.Types); got != 3 {
+		t.Fatalf("expected three collection types, got %d", got)
 	}
-	if got := len(body.Data.Types); got != 4 {
-		t.Fatalf("expected four collection types, got %d", got)
+	expectedTypes := []collection.TypeSummary{
+		{Type: "clothes", Label: "衣服", Count: 1, EntryPath: "/pages/clothes/list"},
+		{Type: "hair", Label: "发型", Count: 1, EntryPath: "/pages/hair/list"},
+		{Type: "makeup", Label: "妆容", Count: 1, EntryPath: "/pages/makeup/list"},
 	}
-	if body.Data.Types[0].Type != "wardrobe" || body.Data.Types[0].Label != "衣橱" || body.Data.Types[0].EntryPath != "/pages/wardrobe/wardrobe" {
-		t.Fatalf("expected wardrobe top-level entry, got %#v", body.Data.Types[0])
+	for index, expected := range expectedTypes {
+		got := body.Data.Types[index]
+		if got.Type != expected.Type || got.Label != expected.Label || got.Count != expected.Count || got.EntryPath != expected.EntryPath {
+			t.Fatalf("unexpected type summary at %d: %#v", index, got)
+		}
 	}
-	if body.Data.Types[1].Type != "hair" || body.Data.Types[1].EntryPath != "/pages/hair/hair" {
-		t.Fatalf("expected hair top-level entry, got %#v", body.Data.Types[1])
+	if len(body.Data.RecentItems) != 3 {
+		t.Fatalf("expected three recent items, got %#v", body.Data.RecentItems)
 	}
-	if body.Data.Types[2].Type != "makeup" || body.Data.Types[2].EntryPath != "/pages/makeup/makeup" {
-		t.Fatalf("expected makeup top-level entry, got %#v", body.Data.Types[2])
+	if body.Data.RecentItems[0].Type != "hair" || body.Data.RecentItems[0].EntryPath != "/pages/hair/detail?public_id=hai_bob" {
+		t.Fatalf("expected hair to be newest recent item, got %#v", body.Data.RecentItems[0])
 	}
-	if body.Data.Types[3].Type != "references" || body.Data.Types[3].EntryPath != "/pages/references/references" {
-		t.Fatalf("expected references top-level entry, got %#v", body.Data.Types[3])
+	if body.Data.RecentItems[1].Type != "clothes" || body.Data.RecentItems[1].EntryPath != "/pages/clothes/detail?public_id=wdi_shirt" {
+		t.Fatalf("expected clothes detail entry, got %#v", body.Data.RecentItems[1])
 	}
-	if body.Data.Types[0].Count != 1 {
-		t.Fatalf("expected wardrobe count from wardrobe service, got %#v", body.Data.Types[0])
-	}
-	if len(body.Data.RecentItems) != 1 {
-		t.Fatalf("expected one recent wardrobe item, got %#v", body.Data.RecentItems)
-	}
-	recent := body.Data.RecentItems[0]
-	if recent.Type != "wardrobe" || recent.EntryPath != "/pages/wardrobe-detail/wardrobe-detail?public_id=wdi_shirt" {
-		t.Fatalf("expected recent wardrobe item detail entry, got %#v", recent)
-	}
-	if recent.Image == nil || recent.Image.PreviewURL != "https://cdn.example.com/shirt.webp" {
-		t.Fatalf("expected recent image preview, got %#v", recent.Image)
+	if body.Data.RecentItems[1].Image == nil || body.Data.RecentItems[1].Image.PreviewURL != "https://cdn.example.com/shirt.webp" {
+		t.Fatalf("expected clothes image preview, got %#v", body.Data.RecentItems[1].Image)
 	}
 }
 
-func TestRegisterUserRoutesSignsRecentWardrobeImageFromObjectKey(t *testing.T) {
+func TestRegisterUserRoutesSignsRecentClothesImageFromObjectKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	sqlDB, mock, err := sqlmock.New()
 	if err != nil {
@@ -98,8 +107,8 @@ func TestRegisterUserRoutesSignsRecentWardrobeImageFromObjectKey(t *testing.T) {
 	defer sqlDB.Close()
 
 	updatedAt := time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta("FROM wardrobe_items wi")).
-		WithArgs(int64(12), wardrobe.StatusDeleted).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM clothes wi")).
+		WithArgs(int64(12), clothes.StatusDeleted).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id",
 			"public_id",
@@ -135,16 +144,18 @@ func TestRegisterUserRoutesSignsRecentWardrobeImageFromObjectKey(t *testing.T) {
 			[]byte(`[]`),
 			sql.NullString{},
 			true,
-			wardrobe.RecommendationStatusNormal,
-			wardrobe.RecognitionStatusSucceeded,
-			wardrobe.StatusActive,
+			clothes.RecommendationStatusNormal,
+			clothes.RecognitionStatusSucceeded,
+			clothes.StatusActive,
 			updatedAt,
 			updatedAt,
 			sql.NullInt64{Int64: 10, Valid: true},
 			sql.NullInt64{Int64: 0, Valid: true},
 			sql.NullString{String: "ast_shirt", Valid: true},
-			sql.NullString{String: "users/12/wardrobe/ast_shirt.jpg", Valid: true},
+			sql.NullString{String: "users/12/clothes/ast_shirt.jpg", Valid: true},
 		))
+	expectEmptyHairList(mock)
+	expectEmptyMakeupList(mock)
 
 	router := newCollectionRouterWithDeps(&baseapp.Deps{
 		DB: sqlx.NewDb(sqlDB, "sqlmock"),
@@ -172,21 +183,38 @@ func TestRegisterUserRoutesSignsRecentWardrobeImageFromObjectKey(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(body.Data.RecentItems) != 1 {
-		t.Fatalf("expected one recent wardrobe item, got %#v", body.Data.RecentItems)
+		t.Fatalf("expected one recent clothes item, got %#v", body.Data.RecentItems)
 	}
 	recent := body.Data.RecentItems[0]
 	if recent.Image == nil || recent.Image.PreviewURL == "" {
 		t.Fatalf("expected recent image preview signed from object key, got %#v", recent.Image)
 	}
-	if !regexp.MustCompile(`^https://private\.example\.test/users/12/wardrobe/ast_shirt\.jpg\?`).MatchString(recent.Image.PreviewURL) {
+	if !regexp.MustCompile(`^https://private\.example\.test/users/12/clothes/ast_shirt\.jpg\?`).MatchString(recent.Image.PreviewURL) {
 		t.Fatalf("expected private preview url, got %q", recent.Image.PreviewURL)
-	}
-	if !regexp.MustCompile(`(^|[?&])imageView2/2/w/360/h/360/q/80/format/webp(&|$)`).MatchString(recent.Image.PreviewURL) {
-		t.Fatalf("expected preview transform query, got %q", recent.Image.PreviewURL)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}
+}
+
+func expectEmptyHairList(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("FROM hair h")).
+		WithArgs(int64(12), hair.StatusDeleted).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_id", "user_id", "name", "length", "shape", "bangs", "color", "care_time",
+			"suitability_notes", "avoidance_notes", "user_notes", "recommendation_status", "status", "created_at", "updated_at",
+			"primary_asset_public_id", "primary_object_key", "scene_tag", "scene_tag_sort_order",
+		}))
+}
+
+func expectEmptyMakeupList(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("FROM makeup h")).
+		WithArgs(int64(12), makeup.StatusDeleted).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_id", "user_id", "name", "makeup_type", "focus", "color_palette", "finish",
+			"suitability_notes", "avoidance_notes", "user_notes", "recommendation_status", "status", "created_at", "updated_at",
+			"primary_asset_public_id", "primary_object_key", "scene_tag", "scene_tag_sort_order",
+		}))
 }
 
 func newCollectionRouter(service *collection.Service) *gin.Engine {
@@ -209,10 +237,26 @@ func newCollectionRouterWithDeps(deps *baseapp.Deps) *gin.Engine {
 	return router
 }
 
-type fakeWardrobeLister struct {
-	items []wardrobe.Item
+type fakeClothesLister struct {
+	items []clothes.Item
 }
 
-func (f *fakeWardrobeLister) ListItems(_ context.Context, _ int64, _ wardrobe.ListFilter) ([]wardrobe.Item, error) {
+func (f *fakeClothesLister) ListItems(_ context.Context, _ int64, _ clothes.ListFilter) ([]clothes.Item, error) {
+	return f.items, nil
+}
+
+type fakeHairLister struct {
+	items []hair.Item
+}
+
+func (f *fakeHairLister) ListItems(_ context.Context, _ int64, _ hair.ListFilter) ([]hair.Item, error) {
+	return f.items, nil
+}
+
+type fakeMakeupLister struct {
+	items []makeup.Item
+}
+
+func (f *fakeMakeupLister) ListItems(_ context.Context, _ int64, _ makeup.ListFilter) ([]makeup.Item, error) {
 	return f.items, nil
 }

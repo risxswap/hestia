@@ -4,33 +4,33 @@ import (
 	"context"
 	"strings"
 
-	"hestia/server/internal/domain/wardrobe"
+	"hestia/server/internal/domain/clothes"
 )
 
 const defaultStreamStatusText = "agent stream ready"
 
-type WardrobeAdviceService interface {
-	AdviceContextItems(ctx context.Context, userID int64, filter wardrobe.AdviceContextFilter) ([]wardrobe.Item, error)
+type ClothesAdviceService interface {
+	AdviceContextItems(ctx context.Context, userID int64, filter clothes.AdviceContextFilter) ([]clothes.Item, error)
 }
 
 type Service struct {
-	wardrobe WardrobeAdviceService
+	clothes ClothesAdviceService
 }
 
 func NewService() *Service {
 	return &Service{}
 }
 
-func NewServiceWithWardrobe(wardrobeService WardrobeAdviceService) *Service {
-	return &Service{wardrobe: wardrobeService}
+func NewServiceWithClothes(clothesService ClothesAdviceService) *Service {
+	return &Service{clothes: clothesService}
 }
 
 func (s *Service) StreamStatus(ctx context.Context, userID int64) StreamStatus {
 	text := defaultStreamStatusText
-	if s == nil || s.wardrobe == nil || userID == 0 {
+	if s == nil || s.clothes == nil || userID == 0 {
 		return StreamStatus{Text: text}
 	}
-	items, err := s.wardrobe.AdviceContextItems(ctx, userID, wardrobe.AdviceContextFilter{Limit: 5})
+	items, err := s.clothes.AdviceContextItems(ctx, userID, clothes.AdviceContextFilter{Limit: 5})
 	if err != nil || len(items) == 0 {
 		return StreamStatus{Text: text}
 	}
@@ -44,5 +44,5 @@ func (s *Service) StreamStatus(ctx context.Context, userID int64) StreamStatus {
 	if len(names) == 0 {
 		return StreamStatus{Text: text}
 	}
-	return StreamStatus{Text: text + "；核心衣橱：" + strings.Join(names, "、")}
+	return StreamStatus{Text: text + "；核心衣服：" + strings.Join(names, "、")}
 }

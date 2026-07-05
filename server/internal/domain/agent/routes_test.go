@@ -10,7 +10,7 @@ import (
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/common/auth"
 	"hestia/server/internal/domain/agent"
-	"hestia/server/internal/domain/wardrobe"
+	"hestia/server/internal/domain/clothes"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,20 +41,20 @@ func TestStreamReturnsSSEEvents(t *testing.T) {
 	}
 }
 
-func TestStreamStatusIncludesActiveWardrobeAdviceContext(t *testing.T) {
+func TestStreamStatusIncludesActiveClothesAdviceContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
 		c.Next()
 	})
-	repo := &routeWardrobeRepo{items: []wardrobe.Item{
-		{PublicID: "wdi_shirt", UserID: 12, Name: "米白衬衫", Category: "top", IsCore: true, RecommendationStatus: wardrobe.RecommendationStatusPreferred, Status: wardrobe.StatusActive},
-		{PublicID: "wdi_paused", UserID: 12, Name: "黑色长裙", Category: "bottom", IsCore: true, RecommendationStatus: wardrobe.RecommendationStatusPaused, Status: wardrobe.StatusActive},
-		{PublicID: "wdi_deleted", UserID: 12, Name: "灰色外套", Category: "outerwear", IsCore: true, RecommendationStatus: wardrobe.RecommendationStatusPreferred, Status: wardrobe.StatusDeleted},
-		{PublicID: "wdi_other", UserID: 99, Name: "其他用户西装", Category: "outerwear", IsCore: true, RecommendationStatus: wardrobe.RecommendationStatusPreferred, Status: wardrobe.StatusActive},
+	repo := &routeClothesRepo{items: []clothes.Item{
+		{PublicID: "wdi_shirt", UserID: 12, Name: "米白衬衫", Category: "top", IsCore: true, RecommendationStatus: clothes.RecommendationStatusPreferred, Status: clothes.StatusActive},
+		{PublicID: "wdi_paused", UserID: 12, Name: "黑色长裙", Category: "bottom", IsCore: true, RecommendationStatus: clothes.RecommendationStatusPaused, Status: clothes.StatusActive},
+		{PublicID: "wdi_deleted", UserID: 12, Name: "灰色外套", Category: "outerwear", IsCore: true, RecommendationStatus: clothes.RecommendationStatusPreferred, Status: clothes.StatusDeleted},
+		{PublicID: "wdi_other", UserID: 99, Name: "其他用户西装", Category: "outerwear", IsCore: true, RecommendationStatus: clothes.RecommendationStatusPreferred, Status: clothes.StatusActive},
 	}}
-	service := agent.NewServiceWithWardrobe(wardrobe.NewService(repo))
+	service := agent.NewServiceWithClothes(clothes.NewService(repo))
 	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
 	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/stream", strings.NewReader(`{"text":"今天怎么穿"}`))
 	request.Header.Set("Accept", "text/event-stream")
@@ -67,7 +67,7 @@ func TestStreamStatusIncludesActiveWardrobeAdviceContext(t *testing.T) {
 	}
 	body := recorder.Body.String()
 	if !strings.Contains(body, "米白衬衫") {
-		t.Fatalf("expected status to include active wardrobe item name, got %q", body)
+		t.Fatalf("expected status to include active clothes item name, got %q", body)
 	}
 	for _, excluded := range []string{"黑色长裙", "灰色外套", "其他用户西装"} {
 		if strings.Contains(body, excluded) {
@@ -76,41 +76,41 @@ func TestStreamStatusIncludesActiveWardrobeAdviceContext(t *testing.T) {
 	}
 }
 
-type routeWardrobeRepo struct {
-	items []wardrobe.Item
+type routeClothesRepo struct {
+	items []clothes.Item
 }
 
-func (r *routeWardrobeRepo) CreateCoreItems(_ context.Context, items []wardrobe.Item) ([]wardrobe.Item, error) {
+func (r *routeClothesRepo) CreateCoreItems(_ context.Context, items []clothes.Item) ([]clothes.Item, error) {
 	return items, nil
 }
 
-func (r *routeWardrobeRepo) ListItems(_ context.Context, userID int64, _ wardrobe.ListFilter) ([]wardrobe.Item, error) {
-	result := make([]wardrobe.Item, 0, len(r.items))
+func (r *routeClothesRepo) ListItems(_ context.Context, userID int64, _ clothes.ListFilter) ([]clothes.Item, error) {
+	result := make([]clothes.Item, 0, len(r.items))
 	for _, item := range r.items {
-		if item.UserID == userID && item.Status != wardrobe.StatusDeleted {
+		if item.UserID == userID && item.Status != clothes.StatusDeleted {
 			result = append(result, item)
 		}
 	}
 	return result, nil
 }
 
-func (r *routeWardrobeRepo) FindItemForUser(_ context.Context, userID int64, publicID string) (wardrobe.Item, error) {
+func (r *routeClothesRepo) FindItemForUser(_ context.Context, userID int64, publicID string) (clothes.Item, error) {
 	for _, item := range r.items {
-		if item.UserID == userID && item.PublicID == publicID && item.Status != wardrobe.StatusDeleted {
+		if item.UserID == userID && item.PublicID == publicID && item.Status != clothes.StatusDeleted {
 			return item, nil
 		}
 	}
-	return wardrobe.Item{}, wardrobe.ErrItemNotFound
+	return clothes.Item{}, clothes.ErrItemNotFound
 }
 
-func (r *routeWardrobeRepo) CreateItem(_ context.Context, item wardrobe.Item, _ string) (wardrobe.Item, error) {
+func (r *routeClothesRepo) CreateItem(_ context.Context, item clothes.Item, _ string) (clothes.Item, error) {
 	return item, nil
 }
 
-func (r *routeWardrobeRepo) UpdateItem(_ context.Context, _ int64, _ string, _ wardrobe.UpdateInput) (wardrobe.Item, error) {
-	return wardrobe.Item{}, wardrobe.ErrItemNotFound
+func (r *routeClothesRepo) UpdateItem(_ context.Context, _ int64, _ string, _ clothes.UpdateInput) (clothes.Item, error) {
+	return clothes.Item{}, clothes.ErrItemNotFound
 }
 
-func (r *routeWardrobeRepo) SoftDeleteItem(_ context.Context, _ int64, _ string) error {
-	return wardrobe.ErrItemNotFound
+func (r *routeClothesRepo) SoftDeleteItem(_ context.Context, _ int64, _ string) error {
+	return clothes.ErrItemNotFound
 }

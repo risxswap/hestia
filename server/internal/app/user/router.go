@@ -7,6 +7,7 @@ import (
 	"hestia/server/internal/domain/account"
 	"hestia/server/internal/domain/agent"
 	"hestia/server/internal/domain/asset"
+	"hestia/server/internal/domain/clothes"
 	"hestia/server/internal/domain/collection"
 	"hestia/server/internal/domain/hair"
 	"hestia/server/internal/domain/imageroute"
@@ -14,9 +15,7 @@ import (
 	"hestia/server/internal/domain/makeup"
 	"hestia/server/internal/domain/onboarding"
 	"hestia/server/internal/domain/profile"
-	"hestia/server/internal/domain/reference"
 	"hestia/server/internal/domain/report"
-	"hestia/server/internal/domain/wardrobe"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,10 +40,9 @@ func NewRouter(deps *baseapp.Deps) *gin.Engine {
 	report.RegisterUserRoutes(protected.Group("/reports"), deps)
 	imageroute.RegisterUserRoutes(protected.Group("/image-routes"), deps)
 	collection.RegisterUserRoutes(protected.Group("/collection"), deps)
+	clothes.RegisterUserRoutes(protected.Group("/clothes"), deps)
 	hair.RegisterUserRoutes(protected.Group("/hair"), deps)
 	makeup.RegisterUserRoutes(protected.Group("/makeup"), deps)
-	reference.RegisterUserRoutes(protected.Group("/references"), deps)
-	wardrobe.RegisterUserRoutes(protected.Group("/wardrobe"), deps)
 	return router
 }
 

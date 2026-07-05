@@ -82,10 +82,10 @@ func TestUploadTokenGeneratesServerOwnedObjectKeyForSupportedAssetTypes(t *testi
 	router := newAuthenticatedFileRouter(t, newMemoryRepo())
 
 	tests := map[string]string{
-		"wardrobe_item_photo": "wardrobe",
-		"onboarding_photo":    "onboarding",
-		"style_reference":     "style-reference",
-		"chat_image":          "chat",
+		"clothes_item_photo": "clothes",
+		"onboarding_photo":   "onboarding",
+		"style_reference":    "style-reference",
+		"chat_image":         "chat",
 	}
 	for assetType, scope := range tests {
 		t.Run(assetType, func(t *testing.T) {
@@ -132,7 +132,7 @@ func TestFileRoutesCreateUploadTokenAndConfirmWithoutRecognition(t *testing.T) {
 	router := newAuthenticatedFileRouterWithOptions(t, repo, options)
 
 	tokenRecorder := postJSON(t, router, "/api/user/files/upload-token", map[string]any{
-		"asset_type": "wardrobe_item_photo",
+		"asset_type": "clothes_item_photo",
 		"mime_type":  "image/jpeg",
 		"file_size":  2048,
 	})
@@ -147,16 +147,16 @@ func TestFileRoutesCreateUploadTokenAndConfirmWithoutRecognition(t *testing.T) {
 	confirmRecorder := postJSON(t, router, "/api/user/files/confirm", map[string]any{
 		"asset_public_id": testAssetPublicID,
 		"bucket":          "private-assets",
-		"object_key":      "users/12/wardrobe/" + testAssetPublicID + ".jpg",
+		"object_key":      "users/12/clothes/" + testAssetPublicID + ".jpg",
 		"mime_type":       "image/jpeg",
 		"file_size":       2048,
-		"asset_type":      "wardrobe_item_photo",
+		"asset_type":      "clothes_item_photo",
 	})
 	if confirmRecorder.Code != http.StatusOK {
 		t.Fatalf("expected confirm status 200, got %d body=%s", confirmRecorder.Code, confirmRecorder.Body.String())
 	}
 	confirmData := responseData(t, confirmRecorder)
-	if confirmData["file_public_id"] != testAssetPublicID || confirmData["file_type"] != "wardrobe_item_photo" {
+	if confirmData["file_public_id"] != testAssetPublicID || confirmData["file_type"] != "clothes_item_photo" {
 		t.Fatalf("expected file fields in confirm response: %#v", confirmData)
 	}
 	if _, ok := confirmData["url"]; ok {
@@ -177,7 +177,7 @@ func TestUploadTokenRequiresAuthentication(t *testing.T) {
 	})
 
 	recorder := postJSON(t, router, "/api/user/files/upload-token", map[string]any{
-		"asset_type": "wardrobe_item_photo",
+		"asset_type": "clothes_item_photo",
 		"mime_type":  "image/jpeg",
 		"file_size":  1024,
 	})
@@ -208,7 +208,7 @@ func TestUploadTokenRejectsInvalidRequests(t *testing.T) {
 		{
 			name: "invalid mime",
 			body: map[string]any{
-				"asset_type": "wardrobe_item_photo",
+				"asset_type": "clothes_item_photo",
 				"mime_type":  "text/plain",
 				"file_size":  1024,
 			},
@@ -218,7 +218,7 @@ func TestUploadTokenRejectsInvalidRequests(t *testing.T) {
 		{
 			name: "invalid file size",
 			body: map[string]any{
-				"asset_type": "wardrobe_item_photo",
+				"asset_type": "clothes_item_photo",
 				"mime_type":  "image/jpeg",
 				"file_size":  10*1024*1024 + 1,
 			},
@@ -231,7 +231,7 @@ func TestUploadTokenRejectsInvalidRequests(t *testing.T) {
 				Bucket: "private-assets",
 			},
 			body: map[string]any{
-				"asset_type": "wardrobe_item_photo",
+				"asset_type": "clothes_item_photo",
 				"mime_type":  "image/jpeg",
 				"file_size":  1024,
 			},

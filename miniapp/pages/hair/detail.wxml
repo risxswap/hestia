@@ -1,0 +1,35 @@
+<view class="page">
+  <view class="detail-nav">
+    <button class="secondary-button nav-button" bind:tap="handleDelete">删除</button>
+    <button class="primary-button nav-button" bind:tap="handleOpenEdit">编辑</button>
+  </view>
+  <view wx:if="{{loading}}" class="card state-card">
+    <text class="muted">正在读取发型详情...</text>
+  </view>
+  <view wx:elif="{{errorMessage && !item}}" class="card state-card">
+    <text class="error-text">{{errorMessage}}</text>
+  </view>
+  <block wx:if="{{item}}">
+    <view class="card memory-card">
+      <image wx:if="{{item.primaryImageSrc}}" class="detail-image" src="{{item.primaryImageSrc}}" mode="aspectFill" />
+      <text class="title">{{item.name}}</text>
+      <text class="muted">{{item.metaText}}</text>
+      <text class="muted">推荐状态：{{item.recommendationLabel}}</text>
+    </view>
+    <view class="card memory-card">
+      <text class="section-title">结构化档案</text>
+      <text class="summary-line">长度：{{item.length || "未记录"}}</text>
+      <text class="summary-line">轮廓/层次：{{item.shape || "未记录"}}</text>
+      <text class="summary-line">刘海：{{item.bangs || "未记录"}}</text>
+      <text class="summary-line">发色：{{item.color || "未记录"}}</text>
+      <text class="summary-line">打理时间：{{item.care_time || "未记录"}}</text>
+      <text class="summary-line">适用场景：{{item.sceneDisplayText}}</text>
+    </view>
+    <view class="card memory-card">
+      <text class="section-title">建议逻辑</text>
+      <text class="summary-line">适合原因：{{item.suitability_notes || "未记录"}}</text>
+      <text class="summary-line">不建议照做：{{item.avoidance_notes || "未记录"}}</text>
+      <text class="summary-line">用户备注：{{item.user_notes || "未记录"}}</text>
+    </view>
+  </block>
+</view>

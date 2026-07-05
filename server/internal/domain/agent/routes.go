@@ -2,17 +2,17 @@ package agent
 
 import (
 	baseapp "hestia/server/internal/app"
-	"hestia/server/internal/domain/wardrobe"
+	"hestia/server/internal/domain/clothes"
 
 	"github.com/gin-gonic/gin"
 )
 
 func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
-	var wardrobeService WardrobeAdviceService
+	var clothesService ClothesAdviceService
 	if deps != nil {
-		wardrobeService = wardrobe.NewService(wardrobe.NewMySQLRepository(deps.DB))
+		clothesService = clothes.NewService(clothes.NewMySQLRepository(deps.DB))
 	}
-	RegisterUserRoutesWithService(group, NewServiceWithWardrobe(wardrobeService))
+	RegisterUserRoutesWithService(group, NewServiceWithClothes(clothesService))
 }
 
 func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service) {

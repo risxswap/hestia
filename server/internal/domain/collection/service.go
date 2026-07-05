@@ -5,47 +5,122 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
-	"hestia/server/internal/domain/wardrobe"
+	"hestia/server/internal/domain/clothes"
+	"hestia/server/internal/domain/hair"
+	"hestia/server/internal/domain/makeup"
 )
 
-type WardrobeLister interface {
-	ListItems(ctx context.Context, userID int64, filter wardrobe.ListFilter) ([]wardrobe.Item, error)
+type ClothesLister interface {
+	ListItems(ctx context.Context, userID int64, filter clothes.ListFilter) ([]clothes.Item, error)
 }
 
 type Service struct {
-	wardrobe WardrobeLister
+	clothes ClothesLister
+	hair    HairLister
+	makeup  MakeupLister
 }
 
-func NewService(wardrobeLister WardrobeLister) *Service {
-	return &Service{wardrobe: wardrobeLister}
+type HairLister interface {
+	ListItems(ctx context.Context, userID int64, filter hair.ListFilter) ([]hair.Item, error)
+}
+
+type MakeupLister interface {
+	ListItems(ctx context.Context, userID int64, filter makeup.ListFilter) ([]makeup.Item, error)
+}
+
+func NewService(clothesLister ClothesLister, hairLister ...HairLister) *Service {
+	service := &Service{clothes: clothesLister}
+	if len(hairLister) > 0 {
+		service.hair = hairLister[0]
+	}
+	return service
+}
+
+func NewServiceWithDomains(clothesLister ClothesLister, hairLister HairLister, makeupLister MakeupLister) *Service {
+	return &Service{clothes: clothesLister, hair: hairLister, makeup: makeupLister}
 }
 
 func (s *Service) Summary(ctx context.Context, userID int64) (Summary, error) {
-	wardrobeItems := []wardrobe.Item{}
-	if s != nil && s.wardrobe != nil {
-		items, err := s.wardrobe.ListItems(ctx, userID, wardrobe.ListFilter{})
+	clothesItems := []clothes.Item{}
+	if s != nil && s.clothes != nil {
+		items, err := s.clothes.ListItems(ctx, userID, clothes.ListFilter{})
 		if err != nil {
 			return Summary{}, err
 		}
-		wardrobeItems = items
+		clothesItems = items
+	}
+	hairItems := []hair.Item{}
+	if s != nil && s.hair != nil {
+		items, err := s.hair.ListItems(ctx, userID, hair.ListFilter{})
+		if err != nil {
+			return Summary{}, err
+		}
+		hairItems = items
+	}
+	makeupItems := []makeup.Item{}
+	if s != nil && s.makeup != nil {
+		items, err := s.makeup.ListItems(ctx, userID, makeup.ListFilter{})
+		if err != nil {
+			return Summary{}, err
+		}
+		makeupItems = items
 	}
 
 	return Summary{
 		Types: []TypeSummary{
-			{Type: "wardrobe", Label: "衣橱", Count: len(wardrobeItems), Hint: "常穿单品", Enabled: true, EntryPath: "/pages/wardrobe/wardrobe"},
-			{Type: "hair", Label: "发型", Count: 0, Hint: "常用发型", Enabled: true, EntryPath: "/pages/hair/hair"},
-			{Type: "makeup", Label: "妆容", Count: 0, Hint: "妆容方向", Enabled: true, EntryPath: "/pages/makeup/makeup"},
-			{Type: "references", Label: "参考", Count: 0, Hint: "参考图", Enabled: true, EntryPath: "/pages/references/references"},
+			{Type: "clothes", Label: "衣服", Count: len(clothesItems), Hint: "常穿单品", Enabled: true, EntryPath: "/pages/clothes/list"},
+			{Type: "hair", Label: "发型", Count: len(hairItems), Hint: "常用发型", Enabled: true, EntryPath: "/pages/hair/list"},
+			{Type: "makeup", Label: "妆容", Count: len(makeupItems), Hint: "妆容方向", Enabled: true, EntryPath: "/pages/makeup/list"},
 		},
-		RecentItems: recentWardrobeItems(wardrobeItems, 6),
+		RecentItems: recentItems(clothesItems, hairItems, makeupItems, 6),
 	}, nil
 }
 
-func recentWardrobeItems(items []wardrobe.Item, limit int) []RecentItem {
-	source := append([]wardrobe.Item{}, items...)
+func recentItems(clothesItems []clothes.Item, hairItems []hair.Item, makeupItems []makeup.Item, limit int) []RecentItem {
+	source := make([]recentSource, 0, len(clothesItems)+len(hairItems)+len(makeupItems))
+	for _, item := range clothesItems {
+		recent := RecentItem{
+			Type:      "clothes",
+			PublicID:  item.PublicID,
+			Title:     item.Name,
+			Subtitle:  strings.Trim(strings.Join([]string{item.Category, item.Color}, " · "), " ·"),
+			EntryPath: fmt.Sprintf("/pages/clothes/detail?public_id=%s", item.PublicID),
+		}
+		if item.PrimaryImage != nil && item.PrimaryImage.PreviewURL != "" {
+			recent.Image = &RecentImage{PreviewURL: item.PrimaryImage.PreviewURL}
+		}
+		source = append(source, recentSource{item: recent, updatedAt: item.UpdatedAt})
+	}
+	for _, item := range hairItems {
+		recent := RecentItem{
+			Type:      "hair",
+			PublicID:  item.PublicID,
+			Title:     item.Name,
+			Subtitle:  strings.Trim(strings.Join([]string{item.Length, item.Color}, " · "), " ·"),
+			EntryPath: fmt.Sprintf("/pages/hair/detail?public_id=%s", item.PublicID),
+		}
+		if item.PrimaryImage != nil && item.PrimaryImage.PreviewURL != "" {
+			recent.Image = &RecentImage{PreviewURL: item.PrimaryImage.PreviewURL}
+		}
+		source = append(source, recentSource{item: recent, updatedAt: item.UpdatedAt})
+	}
+	for _, item := range makeupItems {
+		recent := RecentItem{
+			Type:      "makeup",
+			PublicID:  item.PublicID,
+			Title:     item.Name,
+			Subtitle:  strings.Trim(strings.Join([]string{item.MakeupType, item.Finish}, " · "), " ·"),
+			EntryPath: fmt.Sprintf("/pages/makeup/detail?public_id=%s", item.PublicID),
+		}
+		if item.PrimaryImage != nil && item.PrimaryImage.PreviewURL != "" {
+			recent.Image = &RecentImage{PreviewURL: item.PrimaryImage.PreviewURL}
+		}
+		source = append(source, recentSource{item: recent, updatedAt: item.UpdatedAt})
+	}
 	sort.SliceStable(source, func(i, j int) bool {
-		return source[i].UpdatedAt.After(source[j].UpdatedAt)
+		return source[i].updatedAt.After(source[j].updatedAt)
 	})
 	max := limit
 	if max <= 0 || max > len(source) {
@@ -53,17 +128,12 @@ func recentWardrobeItems(items []wardrobe.Item, limit int) []RecentItem {
 	}
 	result := make([]RecentItem, 0, max)
 	for _, item := range source[:max] {
-		recent := RecentItem{
-			Type:      "wardrobe",
-			PublicID:  item.PublicID,
-			Title:     item.Name,
-			Subtitle:  strings.Trim(strings.Join([]string{item.Category, item.Color}, " · "), " ·"),
-			EntryPath: fmt.Sprintf("/pages/wardrobe-detail/wardrobe-detail?public_id=%s", item.PublicID),
-		}
-		if item.PrimaryImage != nil && item.PrimaryImage.PreviewURL != "" {
-			recent.Image = &RecentImage{PreviewURL: item.PrimaryImage.PreviewURL}
-		}
-		result = append(result, recent)
+		result = append(result, item.item)
 	}
 	return result
+}
+
+type recentSource struct {
+	item      RecentItem
+	updatedAt time.Time
 }

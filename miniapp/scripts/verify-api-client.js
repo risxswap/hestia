@@ -51,14 +51,22 @@ async function main() {
     "parseSSEEvents",
     "getCollectionSummary",
     "getHairItems",
+    "getHairItem",
+    "createHairItem",
+    "updateHairItem",
+    "deleteHairItem",
     "getMakeupItems",
-    "getReferenceItems",
-    "getWardrobeItems",
-    "getWardrobeOptions",
-    "createWardrobeItem",
-    "updateWardrobeItem",
-    "deleteWardrobeItem",
-    "recognizeWardrobeItemImage",
+    "getMakeupItem",
+    "createMakeupItem",
+    "updateMakeupItem",
+    "deleteMakeupItem",
+    "getClothesItems",
+    "getClothesItem",
+    "getClothesOptions",
+    "createClothesItem",
+    "updateClothesItem",
+    "deleteClothesItem",
+    "recognizeClothesItemImage",
     "createFileUploadToken",
     "confirmFileUpload",
     "uploadFileToQiniu",
@@ -174,7 +182,6 @@ async function main() {
     await api.getCollectionSummary();
     await api.getHairItems();
     await api.getMakeupItems();
-    await api.getReferenceItems();
   });
 
   const collectionPaths = collectionCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
@@ -182,21 +189,21 @@ async function main() {
   assert(collectionPaths[0] === "/api/user/collection", `collection path mismatch: ${collectionPaths[0]}`);
   assert(collectionPaths[1] === "/api/user/hair", `hair path mismatch: ${collectionPaths[1]}`);
   assert(collectionPaths[2] === "/api/user/makeup", `makeup path mismatch: ${collectionPaths[2]}`);
-  assert(collectionPaths[3] === "/api/user/references", `references path mismatch: ${collectionPaths[3]}`);
+  assert(collectionPaths.length === 3, `references API should be removed, got ${collectionPaths.join(",")}`);
   assert(
     collectionPaths.every((apiPath) => !apiPath.includes("/private") && !apiPath.includes("/collection/")),
     `collection-related APIs should not use private prefix or nested collection routes: ${collectionPaths.join(",")}`
   );
 
-  const wardrobeCalls = [];
+  const clothesCalls = [];
   await withGlobals({
     getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
     wx: {
       getStorageSync() {
-        return "wardrobe_token";
+        return "clothes_token";
       },
       request(options) {
-        wardrobeCalls.push(options);
+        clothesCalls.push(options);
         options.success({
           statusCode: 200,
           data: {
@@ -211,36 +218,87 @@ async function main() {
   }, async () => {
     const createPayload = { name: "米白衬衫", category: "上装" };
     const updatePayload = { color: "米白" };
-    await api.getWardrobeItems();
-    await api.getWardrobeItems({ category: "上装" });
-    await api.getWardrobeOptions();
-    await api.createWardrobeItem(createPayload);
-    await api.updateWardrobeItem("wdi_test", updatePayload);
-    await api.deleteWardrobeItem("wdi_test");
-    await api.recognizeWardrobeItemImage("ast_test", { itemPublicID: "wdi_test", overwrite: true });
+    await api.getClothesItems();
+    await api.getClothesItems({ category: "上装" });
+    await api.getClothesItem("wdi_test");
+    await api.getClothesOptions();
+    await api.createClothesItem(createPayload);
+    await api.updateClothesItem("wdi_test", updatePayload);
+    await api.deleteClothesItem("wdi_test");
+    await api.recognizeClothesItemImage("ast_test", { itemPublicID: "wdi_test", overwrite: true });
   });
 
-  const wardrobePaths = wardrobeCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
-  assert(wardrobeCalls[0].method === "GET", "getWardrobeItems should use GET");
-  assert(wardrobePaths[0] === "/api/user/wardrobe/items", `wardrobe list path mismatch: ${wardrobePaths[0]}`);
-  assert(wardrobeCalls[1].method === "GET", "filtered getWardrobeItems should use GET");
-  assert(wardrobePaths[1] === `/api/user/wardrobe/items?category=${encodeURIComponent("上装")}`, `wardrobe filtered path mismatch: ${wardrobePaths[1]}`);
-  assert(wardrobeCalls[2].method === "GET", "getWardrobeOptions should use GET");
-  assert(wardrobePaths[2] === "/api/user/wardrobe/options", `wardrobe options path mismatch: ${wardrobePaths[2]}`);
-  assert(wardrobeCalls[3].method === "POST", "createWardrobeItem should use POST");
-  assert(wardrobePaths[3] === "/api/user/wardrobe/items", `wardrobe create path mismatch: ${wardrobePaths[3]}`);
-  assert(wardrobeCalls[3].data.name === "米白衬衫", "createWardrobeItem should pass create payload name");
-  assert(wardrobeCalls[3].data.category === "上装", "createWardrobeItem should pass create payload category");
-  assert(wardrobeCalls[4].method === "PATCH", "updateWardrobeItem should use PATCH");
-  assert(wardrobePaths[4] === "/api/user/wardrobe/items/wdi_test", `wardrobe update path mismatch: ${wardrobePaths[4]}`);
-  assert(wardrobeCalls[4].data.color === "米白", "updateWardrobeItem should pass update payload");
-  assert(wardrobeCalls[5].method === "DELETE", "deleteWardrobeItem should use DELETE");
-  assert(wardrobePaths[5] === "/api/user/wardrobe/items/wdi_test", `wardrobe delete path mismatch: ${wardrobePaths[5]}`);
-  assert(wardrobeCalls[6].method === "POST", "recognizeWardrobeItemImage should use POST");
-  assert(wardrobePaths[6] === "/api/user/wardrobe/items/recognize", `wardrobe recognize path mismatch: ${wardrobePaths[6]}`);
-  assert(wardrobeCalls[6].data.asset_public_id === "ast_test", "recognizeWardrobeItemImage should pass asset_public_id");
-  assert(wardrobeCalls[6].data.item_public_id === "wdi_test", "recognizeWardrobeItemImage should pass item_public_id");
-  assert(wardrobeCalls[6].data.overwrite === true, "recognizeWardrobeItemImage should pass overwrite");
+  const clothesPaths = clothesCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
+  assert(clothesCalls[0].method === "GET", "getClothesItems should use GET");
+  assert(clothesPaths[0] === "/api/user/clothes/items", `clothes list path mismatch: ${clothesPaths[0]}`);
+  assert(clothesCalls[1].method === "GET", "filtered getClothesItems should use GET");
+  assert(clothesPaths[1] === `/api/user/clothes/items?category=${encodeURIComponent("上装")}`, `clothes filtered path mismatch: ${clothesPaths[1]}`);
+  assert(clothesCalls[2].method === "GET", "getClothesItem should use GET");
+  assert(clothesPaths[2] === "/api/user/clothes/items/wdi_test", `clothes item path mismatch: ${clothesPaths[2]}`);
+  assert(clothesCalls[3].method === "GET", "getClothesOptions should use GET");
+  assert(clothesPaths[3] === "/api/user/clothes/options", `clothes options path mismatch: ${clothesPaths[3]}`);
+  assert(clothesCalls[4].method === "POST", "createClothesItem should use POST");
+  assert(clothesPaths[4] === "/api/user/clothes/items", `clothes create path mismatch: ${clothesPaths[4]}`);
+  assert(clothesCalls[4].data.name === "米白衬衫", "createClothesItem should pass create payload name");
+  assert(clothesCalls[4].data.category === "上装", "createClothesItem should pass create payload category");
+  assert(clothesCalls[5].method === "PATCH", "updateClothesItem should use PATCH");
+  assert(clothesPaths[5] === "/api/user/clothes/items/wdi_test", `clothes update path mismatch: ${clothesPaths[5]}`);
+  assert(clothesCalls[5].data.color === "米白", "updateClothesItem should pass update payload");
+  assert(clothesCalls[6].method === "DELETE", "deleteClothesItem should use DELETE");
+  assert(clothesPaths[6] === "/api/user/clothes/items/wdi_test", `clothes delete path mismatch: ${clothesPaths[6]}`);
+  assert(clothesCalls[7].method === "POST", "recognizeClothesItemImage should use POST");
+  assert(clothesPaths[7] === "/api/user/clothes/items/recognize", `clothes recognize path mismatch: ${clothesPaths[7]}`);
+  assert(clothesCalls[7].data.asset_public_id === "ast_test", "recognizeClothesItemImage should pass asset_public_id");
+  assert(clothesCalls[7].data.item_public_id === "wdi_test", "recognizeClothesItemImage should pass item_public_id");
+  assert(clothesCalls[7].data.overwrite === true, "recognizeClothesItemImage should pass overwrite");
+
+  const typedCalls = [];
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "typed_token";
+      },
+      request(options) {
+        typedCalls.push(options);
+        options.success({
+          statusCode: 200,
+          data: {
+            code: "ok",
+            data: {
+              ok: true
+            }
+          }
+        });
+      }
+    }
+  }, async () => {
+    await api.getHairItem("hai_test");
+    await api.createHairItem({ name: "锁骨发" });
+    await api.updateHairItem("hai_test", { color: "深棕" });
+    await api.deleteHairItem("hai_test");
+    await api.getMakeupItem("mkp_test");
+    await api.createMakeupItem({ name: "通勤淡妆" });
+    await api.updateMakeupItem("mkp_test", { finish: "自然" });
+    await api.deleteMakeupItem("mkp_test");
+  });
+  const typedPaths = typedCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
+  assert(typedPaths.join(",") === [
+    "/api/user/hair/hai_test",
+    "/api/user/hair",
+    "/api/user/hair/hai_test",
+    "/api/user/hair/hai_test",
+    "/api/user/makeup/mkp_test",
+    "/api/user/makeup",
+    "/api/user/makeup/mkp_test",
+    "/api/user/makeup/mkp_test"
+  ].join(","), `hair/makeup CRUD paths mismatch: ${typedPaths.join(",")}`);
+  assert(typedCalls[1].method === "POST", "createHairItem should use POST");
+  assert(typedCalls[2].method === "PATCH", "updateHairItem should use PATCH");
+  assert(typedCalls[3].method === "DELETE", "deleteHairItem should use DELETE");
+  assert(typedCalls[5].method === "POST", "createMakeupItem should use POST");
+  assert(typedCalls[6].method === "PATCH", "updateMakeupItem should use PATCH");
+  assert(typedCalls[7].method === "DELETE", "deleteMakeupItem should use DELETE");
 
   const profileCalls = [];
   await withGlobals({
@@ -327,7 +385,7 @@ async function main() {
     }
   }, async () => {
     await api.createFileUploadToken({
-      asset_type: "wardrobe_item_photo",
+      asset_type: "clothes_item_photo",
       mime_type: "image/png",
       file_size: 1024,
       file_ext: "png"
@@ -338,14 +396,14 @@ async function main() {
       object_key: "users/u1/assets/ast_1.png",
       mime_type: "image/png",
       file_size: 1024,
-      asset_type: "wardrobe_item_photo"
+      asset_type: "clothes_item_photo"
     });
   });
 
   const assetPaths = assetCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
   assert(assetCalls[0].method === "POST", "createFileUploadToken should use POST");
   assert(assetPaths[0] === "/api/user/files/upload-token", `file upload-token path mismatch: ${assetPaths[0]}`);
-  assert(assetCalls[0].data.asset_type === "wardrobe_item_photo", "createFileUploadToken should pass asset_type");
+  assert(assetCalls[0].data.asset_type === "clothes_item_photo", "createFileUploadToken should pass asset_type");
   assert(assetCalls[1].method === "POST", "confirmFileUpload should use POST");
   assert(assetPaths[1] === "/api/user/files/confirm", `file confirm path mismatch: ${assetPaths[1]}`);
   assert(assetCalls[1].data.object_key === "users/u1/assets/ast_1.png", "confirmFileUpload should pass object_key");
@@ -384,7 +442,7 @@ async function main() {
             data: {
               asset_public_id: "ast_upload",
               object_key: "users/u1/assets/ast_upload.webp",
-              asset_type: "wardrobe_item_photo"
+              asset_type: "clothes_item_photo"
             }
           }
         });
@@ -400,12 +458,12 @@ async function main() {
   }, async () => {
     const uploaded = await api.uploadFileToQiniu(
       {
-        tempFilePath: "/tmp/wardrobe.webp",
+        tempFilePath: "/tmp/clothes.webp",
         size: 2048,
         type: "image/webp"
       },
       {
-        assetType: "wardrobe_item_photo",
+        assetType: "clothes_item_photo",
         width: 640,
         height: 960
       }
@@ -414,18 +472,18 @@ async function main() {
     assert(uploaded.asset_public_id === "ast_upload", "uploadFileToQiniu should return confirmed asset_public_id");
     assert(uploaded.object_key === "users/u1/assets/ast_upload.webp", "uploadFileToQiniu should return confirmed object_key");
     assert(!Object.prototype.hasOwnProperty.call(uploaded, "url"), "uploadFileToQiniu confirm result should not include expiring url");
-    assert(uploaded.asset_type === "wardrobe_item_photo", "uploadFileToQiniu should return confirmed asset_type");
+    assert(uploaded.asset_type === "clothes_item_photo", "uploadFileToQiniu should return confirmed asset_type");
   });
 
   assert(uploadFiles.length === 1, `expected 1 wx.uploadFile call, got ${uploadFiles.length}`);
   assert(uploadFiles[0].url === "https://upload.qiniup.com", `upload url mismatch: ${uploadFiles[0].url}`);
-  assert(uploadFiles[0].filePath === "/tmp/wardrobe.webp", `upload filePath mismatch: ${uploadFiles[0].filePath}`);
+  assert(uploadFiles[0].filePath === "/tmp/clothes.webp", `upload filePath mismatch: ${uploadFiles[0].filePath}`);
   assert(uploadFiles[0].name === "file", "uploadFileToQiniu should use file field name");
   assert(uploadFiles[0].formData.token === "qiniu_token", "wx.uploadFile formData should include upload token");
   assert(uploadFiles[0].formData.key === "users/u1/assets/ast_upload.webp", "wx.uploadFile formData should include object key");
   assert(uploadRequests.length === 2, `expected token and confirm requests, got ${uploadRequests.length}`);
   assert(uploadRequests[0].url.endsWith("/api/user/files/upload-token"), "uploadFileToQiniu should request file token endpoint");
-  assert(uploadRequests[0].data.asset_type === "wardrobe_item_photo", "uploadFileToQiniu should request token with asset_type");
+  assert(uploadRequests[0].data.asset_type === "clothes_item_photo", "uploadFileToQiniu should request token with asset_type");
   assert(uploadRequests[0].data.mime_type === "image/webp", "uploadFileToQiniu should request token with inferred mime_type");
   assert(uploadRequests[0].data.file_size === 2048, "uploadFileToQiniu should request token with file size");
   assert(uploadRequests[0].data.file_ext === "webp", "uploadFileToQiniu should request token with inferred file_ext");
@@ -437,7 +495,7 @@ async function main() {
   assert(uploadRequests[1].data.file_size === 2048, "uploadFileToQiniu should confirm file_size");
   assert(uploadRequests[1].data.width === 640, "uploadFileToQiniu should confirm width");
   assert(uploadRequests[1].data.height === 960, "uploadFileToQiniu should confirm height");
-  assert(uploadRequests[1].data.asset_type === "wardrobe_item_photo", "uploadFileToQiniu should confirm asset_type");
+  assert(uploadRequests[1].data.asset_type === "clothes_item_photo", "uploadFileToQiniu should confirm asset_type");
 
   const tdesignUploadRequests = [];
   const tdesignUploadFiles = [];
@@ -473,7 +531,7 @@ async function main() {
             data: {
               asset_public_id: "ast_tdesign",
               object_key: "users/u1/assets/ast_tdesign.jpg",
-              asset_type: "wardrobe_item_photo"
+              asset_type: "clothes_item_photo"
             }
           }
         });
@@ -494,7 +552,7 @@ async function main() {
         type: "image"
       },
       {
-        assetType: "wardrobe_item_photo"
+        assetType: "clothes_item_photo"
       }
     );
   });
@@ -505,7 +563,7 @@ async function main() {
 
   let missingAssetTypeRejected = false;
   try {
-    await api.uploadFileToQiniu({ tempFilePath: "/tmp/wardrobe.png", size: 1 }, {});
+    await api.uploadFileToQiniu({ tempFilePath: "/tmp/clothes.png", size: 1 }, {});
   } catch (error) {
     missingAssetTypeRejected = error instanceof api.ApiError && error.code === "asset.asset_type_required";
   }
@@ -513,7 +571,7 @@ async function main() {
 
   let missingFilePathRejected = false;
   try {
-    await api.uploadFileToQiniu({ size: 1, type: "image" }, { assetType: "wardrobe_item_photo" });
+    await api.uploadFileToQiniu({ size: 1, type: "image" }, { assetType: "clothes_item_photo" });
   } catch (error) {
     missingFilePathRejected = error instanceof api.ApiError && error.code === "asset.file_path_required";
   }
@@ -521,7 +579,7 @@ async function main() {
 
   let invalidImageRejected = false;
   try {
-    await api.uploadFileToQiniu({ tempFilePath: "/tmp/file", size: 1, type: "video" }, { assetType: "wardrobe_item_photo" });
+    await api.uploadFileToQiniu({ tempFilePath: "/tmp/file", size: 1, type: "video" }, { assetType: "clothes_item_photo" });
   } catch (error) {
     invalidImageRejected = error instanceof api.ApiError && error.code === "asset.invalid_image_type";
   }
@@ -558,7 +616,7 @@ async function main() {
     }
   }, async () => {
     try {
-      await api.uploadFileToQiniu({ tempFilePath: "/tmp/wardrobe.jpg", size: 1 }, { assetType: "wardrobe_item_photo" });
+      await api.uploadFileToQiniu({ tempFilePath: "/tmp/clothes.jpg", size: 1 }, { assetType: "clothes_item_photo" });
     } catch (error) {
       uploadStatusRejected = error instanceof api.ApiError && error.code === "asset.upload_failed" && error.statusCode === 500;
     }
@@ -595,7 +653,7 @@ async function main() {
     }
   }, async () => {
     try {
-      await api.uploadFileToQiniu({ path: "/tmp/wardrobe.jpg", size: 1 }, { assetType: "wardrobe_item_photo" });
+      await api.uploadFileToQiniu({ path: "/tmp/clothes.jpg", size: 1 }, { assetType: "clothes_item_photo" });
     } catch (error) {
       uploadFailRejected = error instanceof api.ApiError && error.code === "asset.upload_failed";
     }

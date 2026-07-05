@@ -62,6 +62,25 @@ func (s *Service) CreateWardrobeRecognitionJob(ctx context.Context, userID int64
 	return s.repo.Create(ctx, item)
 }
 
+func (s *Service) CreateClothesRecognitionJob(ctx context.Context, userID int64, clothesID int64, clothesPublicID string, assetPublicIDs []string, overwrite bool) (Job, error) {
+	relatedID := clothesID
+	item := Job{
+		PublicID:    id.NewPublicID("job"),
+		JobType:     TypeClothesItemImageRecognition,
+		Status:      StatusPending,
+		QueueName:   QueueInline,
+		RelatedType: "clothes",
+		RelatedID:   &relatedID,
+		UserID:      userID,
+		InputSummary: map[string]any{
+			"clothes_public_id": clothesPublicID,
+			"asset_public_ids":  assetPublicIDs,
+			"overwrite":         overwrite,
+		},
+	}
+	return s.repo.Create(ctx, item)
+}
+
 func (s *Service) MarkSucceeded(ctx context.Context, item Job, output map[string]any) error {
 	return s.repo.UpdateStatus(ctx, item.ID, StatusSucceeded, output, "")
 }

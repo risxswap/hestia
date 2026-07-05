@@ -24,10 +24,10 @@ func TestMySQLRepositoryCreateWritesFilesTable(t *testing.T) {
 		PublicID:     "ast_abcdefghijklmnopqrstuvwxyz",
 		OwnerUserID:  12,
 		Bucket:       "hestia-dev",
-		ObjectKey:    "users/12/wardrobe/ast_abcdefghijklmnopqrstuvwxyz.jpg",
+		ObjectKey:    "users/12/clothes/ast_abcdefghijklmnopqrstuvwxyz.jpg",
 		MimeType:     "image/jpeg",
 		FileSize:     2048,
-		AssetType:    "wardrobe_item_photo",
+		AssetType:    "clothes_item_photo",
 		Source:       SourceMiniappUpload,
 		Status:       StatusActive,
 		ReviewStatus: ReviewStatusPending,
@@ -59,8 +59,8 @@ func TestMySQLRepositoryFindByPublicIDReadsFilesTable(t *testing.T) {
 			"width", "height", "asset_type", "source", "status", "review_status", "metadata_json",
 		}).AddRow(
 			42, "ast_abcdefghijklmnopqrstuvwxyz", 12, "hestia-dev",
-			"users/12/wardrobe/ast_abcdefghijklmnopqrstuvwxyz.jpg", "image/jpeg", 2048,
-			nil, nil, "wardrobe_item_photo", SourceMiniappUpload, StatusActive, ReviewStatusPending, `{}`,
+			"users/12/clothes/ast_abcdefghijklmnopqrstuvwxyz.jpg", "image/jpeg", 2048,
+			nil, nil, "clothes_item_photo", SourceMiniappUpload, StatusActive, ReviewStatusPending, `{}`,
 		))
 
 	item, err := repo.FindByPublicID(context.Background(), "ast_abcdefghijklmnopqrstuvwxyz")

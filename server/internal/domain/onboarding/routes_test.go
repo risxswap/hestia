@@ -13,13 +13,13 @@ import (
 	"hestia/server/internal/common/auth"
 	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/domain/asset"
+	"hestia/server/internal/domain/clothes"
 	"hestia/server/internal/domain/generator"
 	"hestia/server/internal/domain/imageroute"
 	"hestia/server/internal/domain/job"
 	"hestia/server/internal/domain/onboarding"
 	"hestia/server/internal/domain/profile"
 	"hestia/server/internal/domain/report"
-	"hestia/server/internal/domain/wardrobe"
 
 	"github.com/gin-gonic/gin"
 )
@@ -497,7 +497,7 @@ type submitTestEnv struct {
 	jobs       *memoryJobRepo
 	assets     *memoryAssetRepo
 	profiles   *memoryProfileRepo
-	wardrobes  *memoryWardrobeRepo
+	wardrobes  *memoryClothesRepo
 	reports    *memoryReportRepo
 	transactor *memoryTransactor
 	lock       *memoryBusinessLock
@@ -517,7 +517,7 @@ func newSubmitTestEnv(reportGenerator generator.ReportGenerator) submitTestEnv {
 	drafts := newMemoryDraftRepo()
 	profiles := newMemoryProfileRepo()
 	assets := newMemoryAssetRepo()
-	wardrobes := newMemoryWardrobeRepo()
+	wardrobes := newMemoryClothesRepo()
 	jobs := newMemoryJobRepo()
 	reports := newMemoryReportRepo()
 	routes := newMemoryImageRouteRepo()
@@ -525,7 +525,7 @@ func newSubmitTestEnv(reportGenerator generator.ReportGenerator) submitTestEnv {
 
 	profileService := profile.NewService(profiles)
 	assetService := asset.NewService(assets)
-	wardrobeService := wardrobe.NewService(wardrobes)
+	wardrobeService := clothes.NewService(wardrobes)
 	jobService := job.NewService(jobs)
 	reportService := report.NewService(reports)
 	routeService := imageroute.NewService(routes)
@@ -839,16 +839,16 @@ func (r *memoryAssetRepo) CreateMany(_ context.Context, items []asset.Asset) ([]
 	return items, nil
 }
 
-type memoryWardrobeRepo struct {
+type memoryClothesRepo struct {
 	nextID  int64
-	created []wardrobe.Item
+	created []clothes.Item
 }
 
-func newMemoryWardrobeRepo() *memoryWardrobeRepo {
-	return &memoryWardrobeRepo{nextID: 1}
+func newMemoryClothesRepo() *memoryClothesRepo {
+	return &memoryClothesRepo{nextID: 1}
 }
 
-func (r *memoryWardrobeRepo) CreateCoreItems(_ context.Context, items []wardrobe.Item) ([]wardrobe.Item, error) {
+func (r *memoryClothesRepo) CreateCoreItems(_ context.Context, items []clothes.Item) ([]clothes.Item, error) {
 	for i := range items {
 		items[i].ID = r.nextID
 		r.nextID++
@@ -982,7 +982,7 @@ type memoryTransactor struct {
 	drafts    *memoryDraftRepo
 	profiles  *memoryProfileRepo
 	assets    *memoryAssetRepo
-	wardrobes *memoryWardrobeRepo
+	wardrobes *memoryClothesRepo
 	jobs      *memoryJobRepo
 	reports   *memoryReportRepo
 	routes    *memoryImageRouteRepo
@@ -1024,7 +1024,7 @@ type memorySnapshot struct {
 	drafts    memoryDraftSnapshot
 	profiles  memoryProfileSnapshot
 	assets    memoryAssetSnapshot
-	wardrobes memoryWardrobeSnapshot
+	wardrobes memoryClothesSnapshot
 	jobs      memoryJobSnapshot
 	reports   memoryReportSnapshot
 	routes    memoryImageRouteSnapshot
@@ -1102,16 +1102,16 @@ func (r *memoryAssetRepo) restore(snapshot memoryAssetSnapshot) {
 	r.created = snapshot.created
 }
 
-type memoryWardrobeSnapshot struct {
+type memoryClothesSnapshot struct {
 	nextID  int64
-	created []wardrobe.Item
+	created []clothes.Item
 }
 
-func (r *memoryWardrobeRepo) snapshot() memoryWardrobeSnapshot {
-	return memoryWardrobeSnapshot{nextID: r.nextID, created: append([]wardrobe.Item(nil), r.created...)}
+func (r *memoryClothesRepo) snapshot() memoryClothesSnapshot {
+	return memoryClothesSnapshot{nextID: r.nextID, created: append([]clothes.Item(nil), r.created...)}
 }
 
-func (r *memoryWardrobeRepo) restore(snapshot memoryWardrobeSnapshot) {
+func (r *memoryClothesRepo) restore(snapshot memoryClothesSnapshot) {
 	r.nextID = snapshot.nextID
 	r.created = snapshot.created
 }

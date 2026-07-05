@@ -5,16 +5,16 @@ import (
 	"strings"
 
 	"hestia/server/internal/domain/asset"
+	"hestia/server/internal/domain/clothes"
 	"hestia/server/internal/domain/generator"
 	"hestia/server/internal/domain/profile"
-	"hestia/server/internal/domain/wardrobe"
 )
 
 type parsedSubmitDraft struct {
 	basic             map[string]any
 	profile           profile.OnboardingInput
 	assets            []asset.Input
-	wardrobe          []wardrobe.Input
+	wardrobe          []clothes.Input
 	generatorWardrobe []generator.WardrobeItemInput
 	referenceStyles   []string
 }
@@ -48,13 +48,13 @@ func parseSubmitDraft(data DraftData) (parsedSubmitDraft, error) {
 	if len(scenarios) == 0 {
 		scenarios = []string{"日常出门"}
 	}
-	wardrobeInputs := make([]wardrobe.Input, 0, len(wardrobeData.Items))
+	wardrobeInputs := make([]clothes.Input, 0, len(wardrobeData.Items))
 	generatorInputs := make([]generator.WardrobeItemInput, 0, len(wardrobeData.Items))
 	for _, item := range wardrobeData.Items {
 		if strings.TrimSpace(item.Name) == "" {
 			continue
 		}
-		wardrobeInputs = append(wardrobeInputs, wardrobe.Input{
+		wardrobeInputs = append(wardrobeInputs, clothes.Input{
 			Name:       item.Name,
 			Category:   item.Category,
 			Color:      item.Color,

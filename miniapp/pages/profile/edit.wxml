@@ -1,0 +1,49 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="card state-card">
+    <text class="muted">正在读取档案...</text>
+  </view>
+  <view wx:elif="{{errorMessage && !draft.nickname}}" class="card state-card">
+    <text class="error-text">{{errorMessage}}</text>
+    <button class="primary-button action-button" bind:tap="loadProfile">重新读取</button>
+  </view>
+  <block wx:else>
+    <view class="card edit-panel">
+      <view class="section-head">
+        <text class="section-title">基础档案</text>
+        <text class="muted">只记录会影响穿搭、发型和场景建议的信息。</text>
+      </view>
+      <view class="form-grid">
+        <label class="field-group">
+          <text class="field-label">昵称</text>
+          <input class="field" value="{{draft.nickname}}" data-field="nickname" bindinput="handleInput" placeholder="例如：明明" />
+        </label>
+        <label class="field-group">
+          <text class="field-label">性别表达</text>
+          <input class="field" value="{{draft.gender}}" data-field="gender" bindinput="handleInput" placeholder="可留空或自定义" />
+        </label>
+        <label class="field-group">
+          <text class="field-label">身高 cm</text>
+          <input class="field" type="number" value="{{draft.height_cm}}" data-field="height_cm" bindinput="handleInput" placeholder="例如：165" />
+        </label>
+        <label class="field-group">
+          <text class="field-label">常见场景</text>
+          <input class="field" value="{{draft.scenarioText}}" data-field="scenarioText" bindinput="handleInput" placeholder="通勤、周末、约会" />
+        </label>
+      </view>
+      <label class="field-group">
+        <text class="field-label">身形/比例备注</text>
+        <textarea class="textarea" maxlength="220" value="{{draft.body_notes}}" data-field="body_notes" bindinput="handleInput" placeholder="中性描述，例如：希望通勤更利落" />
+      </label>
+      <label class="field-group">
+        <text class="field-label">肤色/妆发备注</text>
+        <textarea class="textarea" maxlength="220" value="{{draft.skin_notes}}" data-field="skin_notes" bindinput="handleInput" placeholder="例如：偏好低饱和、自然气色" />
+      </label>
+      <label class="field-group">
+        <text class="field-label">发型备注</text>
+        <textarea class="textarea" maxlength="220" value="{{draft.hair_notes}}" data-field="hair_notes" bindinput="handleInput" placeholder="例如：希望好打理、适合通勤" />
+      </label>
+      <text wx:if="{{errorMessage}}" class="save-message">{{errorMessage}}</text>
+      <button class="primary-button save-button" loading="{{saving}}" bind:tap="handleSave">保存基础档案</button>
+    </view>
+  </block>
+</view>

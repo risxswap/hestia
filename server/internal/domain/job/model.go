@@ -5,6 +5,7 @@ import "time"
 const (
 	TypeInitialReportGeneration      = "initial_report_generation"
 	TypeWardrobeItemImageRecognition = "wardrobe_item_image_recognition"
+	TypeClothesItemImageRecognition  = "clothes_item_image_recognition"
 	StatusPending                    = "pending"
 	StatusRunning                    = "running"
 	StatusSucceeded                  = "succeeded"

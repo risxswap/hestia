@@ -1,19 +1,30 @@
 package makeup
 
 import (
+	"log/slog"
+
 	baseapp "hestia/server/internal/app"
-	"hestia/server/internal/common/response"
 
 	"github.com/gin-gonic/gin"
 )
 
-type ListResponse struct {
-	Items   []any `json:"items"`
-	Enabled bool  `json:"enabled"`
+func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
+	var service *Service
+	var logger *slog.Logger
+	if deps != nil {
+		service = NewService(NewMySQLRepository(deps.DB))
+		logger = deps.Logger
+	} else {
+		service = NewService(nil)
+	}
+	RegisterUserRoutesWithService(group, service, logger)
 }
 
-func RegisterUserRoutes(group *gin.RouterGroup, _ *baseapp.Deps) {
-	group.GET("", func(c *gin.Context) {
-		response.OK(c, ListResponse{Items: []any{}, Enabled: true})
-	})
+func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service, logger *slog.Logger) {
+	handler := NewHandler(service, logger)
+	group.GET("", handler.ListItems)
+	group.GET("/:public_id", handler.GetItem)
+	group.POST("", handler.CreateItem)
+	group.PATCH("/:public_id", handler.UpdateItem)
+	group.DELETE("/:public_id", handler.DeleteItem)
 }

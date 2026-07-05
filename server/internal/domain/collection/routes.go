@@ -6,26 +6,32 @@ import (
 
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/domain/asset"
-	"hestia/server/internal/domain/wardrobe"
+	"hestia/server/internal/domain/clothes"
+	"hestia/server/internal/domain/hair"
+	"hestia/server/internal/domain/makeup"
 
 	"github.com/gin-gonic/gin"
 )
 
 func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 	var logger *slog.Logger
-	var wardrobeLister WardrobeLister
+	var clothesLister ClothesLister
+	var hairLister HairLister
+	var makeupLister MakeupLister
 	if deps != nil {
 		logger = deps.Logger
-		wardrobeService := wardrobe.NewService(wardrobe.NewMySQLRepository(deps.DB))
-		wardrobeService.SetImageURLSigner(asset.NewServiceFromConfig(asset.NewMySQLRepository(deps.DB), deps.Config))
+		clothesService := clothes.NewService(clothes.NewMySQLRepository(deps.DB))
+		clothesService.SetImageURLSigner(asset.NewServiceFromConfig(asset.NewMySQLRepository(deps.DB), deps.Config))
 		if logger != nil {
-			wardrobeService.SetImageURLSignErrorHandler(func(_ context.Context, objectKey string, err error) {
-				logger.Warn("collection wardrobe image url signing failed", "object_key", objectKey, "error", err)
+			clothesService.SetImageURLSignErrorHandler(func(_ context.Context, objectKey string, err error) {
+				logger.Warn("collection clothes image url signing failed", "object_key", objectKey, "error", err)
 			})
 		}
-		wardrobeLister = wardrobeService
+		clothesLister = clothesService
+		hairLister = hair.NewService(hair.NewMySQLRepository(deps.DB))
+		makeupLister = makeup.NewService(makeup.NewMySQLRepository(deps.DB))
 	}
-	RegisterUserRoutesWithService(group, NewService(wardrobeLister), logger)
+	RegisterUserRoutesWithService(group, NewServiceWithDomains(clothesLister, hairLister, makeupLister), logger)
 }
 
 func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service, logger ...*slog.Logger) {

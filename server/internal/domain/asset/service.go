@@ -475,8 +475,12 @@ func (c qiniuObjectStatChecker) StatObject(ctx context.Context, bucket string, o
 
 func normalizeAssetType(value string) (assetType string, scope string, err error) {
 	switch strings.TrimSpace(value) {
-	case "wardrobe_item_photo":
-		return "wardrobe_item_photo", "wardrobe", nil
+	case "clothes_item_photo":
+		return "clothes_item_photo", "clothes", nil
+	case "hair_photo":
+		return "hair_photo", "hair", nil
+	case "makeup_photo":
+		return "makeup_photo", "makeup", nil
 	case "onboarding_photo":
 		return "onboarding_photo", "onboarding", nil
 	case "style_reference":

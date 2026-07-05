@@ -175,9 +175,9 @@ const homePageConfig = {
     try {
       const report = await api.getLatestReport();
       const nextState = normalizeTodayFromReport(report);
-      if (report && typeof api.getWardrobeItems === "function") {
+      if (report && typeof api.getClothesItems === "function") {
         try {
-          const wardrobeItems = await api.getWardrobeItems();
+          const wardrobeItems = await api.getClothesItems();
           const section = coreWardrobeSection(wardrobeItems);
           if (section) {
             nextState.todayPlanSections = nextState.todayPlanSections.concat(section);

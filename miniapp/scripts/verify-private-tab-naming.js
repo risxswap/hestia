@@ -7,6 +7,12 @@ function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
 }
 
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
 function assertWebp(relativePath, maxBytes) {
   const filePath = path.join(root, relativePath);
   assert(fs.existsSync(filePath), `${relativePath} should exist`);
@@ -27,91 +33,107 @@ function assertTabIcon(relativePath) {
   assert(buffer.length <= 20000, `${relativePath} should be <= 20000 bytes, got ${buffer.length}`);
 }
 
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(message);
-  }
-}
-
 const appJson = JSON.parse(read("app.json"));
 const collectionJson = JSON.parse(read("pages/collection/collection.json"));
-const wardrobeJson = JSON.parse(read("pages/wardrobe/wardrobe.json"));
-const wardrobeDetailJson = JSON.parse(read("pages/wardrobe-detail/wardrobe-detail.json"));
+const clothesJson = JSON.parse(read("pages/clothes/list.json"));
+const clothesDetailJson = JSON.parse(read("pages/clothes/detail.json"));
+const clothesEditJson = JSON.parse(read("pages/clothes/edit.json"));
+const profileJson = JSON.parse(read("pages/profile/index.json"));
 const collectionMarkup = read("pages/collection/collection.wxml");
 const collectionScript = read("pages/collection/collection.js");
 const collectionStyles = read("pages/collection/collection.wxss");
-const wardrobeMarkup = read("pages/wardrobe/wardrobe.wxml");
-const wardrobeScript = read("pages/wardrobe/wardrobe.js");
-const wardrobeDetailMarkup = read("pages/wardrobe-detail/wardrobe-detail.wxml");
-const wardrobeDetailScript = read("pages/wardrobe-detail/wardrobe-detail.js");
+const clothesMarkup = read("pages/clothes/list.wxml");
+const clothesScript = read("pages/clothes/list.js");
+const clothesDetailMarkup = read("pages/clothes/detail.wxml");
+const clothesDetailScript = read("pages/clothes/detail.js");
+const clothesEditMarkup = read("pages/clothes/edit.wxml");
+const profileMarkup = read("pages/profile/index.wxml");
 
 const privateTab = appJson.tabBar && appJson.tabBar.list && appJson.tabBar.list[2];
 assert(privateTab && privateTab.pagePath === "pages/collection/collection", "third tab should point to the independent collection page");
-assert(privateTab.text === "私藏", "third tab should be renamed to 私藏");
-assert(Array.isArray(appJson.tabBar.list), "app should define tabBar list");
+assert(privateTab.text === "私藏", "third tab should be 私藏");
+assert(appJson.tabBar.list[3].pagePath === "pages/profile/index", "profile tab should point to pages/profile/index");
 appJson.tabBar.list.forEach((item) => {
   assertTabIcon(item.iconPath);
   assertTabIcon(item.selectedIconPath);
 });
+
 [
   "pages/collection/collection",
-  "pages/wardrobe/wardrobe",
-  "pages/hair/hair",
-  "pages/makeup/makeup",
-  "pages/references/references"
+  "pages/clothes/list",
+  "pages/clothes/detail",
+  "pages/clothes/edit",
+  "pages/hair/list",
+  "pages/hair/detail",
+  "pages/hair/edit",
+  "pages/makeup/list",
+  "pages/makeup/detail",
+  "pages/makeup/edit",
+  "pages/profile/index",
+  "pages/profile/edit",
+  "pages/preferences/edit",
+  "pages/memory/index",
+  "pages/privacy/index"
 ].forEach((pagePath) => {
   assert(appJson.pages.includes(pagePath), `app.json should register ${pagePath}`);
 });
 
-assert(collectionJson.navigationBarTitleText === "我的私藏", "collection page navigation title should be 我的私藏");
-assert(wardrobeJson.navigationBarTitleText === "衣服", "wardrobe page navigation title should be 衣服");
-assert(wardrobeDetailJson.navigationBarTitleText === "私藏详情", "wardrobe detail navigation title should be 私藏详情");
-
-assert(!collectionMarkup.includes("个人长期记忆"), "collection page should remove the long-term memory eyebrow copy");
-assert(!collectionMarkup.includes(">我的私藏<"), "collection page should not duplicate 我的私藏 as an in-page title");
-assert(
-  collectionMarkup.includes("保存衣服、发型、妆容和参考图，作为 Hestia 给你建议的依据。"),
-  "collection page should explain the saved material purpose"
-);
-assert(collectionMarkup.includes("private-type-grid"), "collection page should render the type entry grid");
-assert(collectionMarkup.includes("private-type-card"), "collection page should render private type cards");
-assert(collectionMarkup.includes("recent-private-section"), "collection page should render a recent private section");
-assert(collectionMarkup.includes("recent-private-grid"), "collection page should render recent private items in a grid");
-assert(collectionMarkup.includes("最近收录"), "collection page should show 最近收录 heading");
-["衣橱", "发型", "妆容", "参考"].forEach((label) => {
-  assert(collectionScript.includes(label) || collectionMarkup.includes(label), `collection page should show ${label} type entry copy`);
+[
+  "pages/wardrobe/wardrobe",
+  "pages/wardrobe-detail/wardrobe-detail",
+  "pages/wardrobe-edit/wardrobe-edit",
+  "pages/references/references",
+  "pages/profile/profile"
+].forEach((pagePath) => {
+  assert(!appJson.pages.includes(pagePath), `app.json should not register old page ${pagePath}`);
 });
-["wardrobe", "hair", "makeup", "references"].forEach((icon) => {
-  assert(collectionScript.includes(`icon: "${icon}"`), `collection page should define ${icon} type icon`);
-  assert(collectionScript.includes(`assets/collection/${icon}.webp`), `collection page should define ${icon} webp image asset`);
+
+assert(collectionJson.navigationBarTitleText === "我的私藏", "collection navigation title should be 我的私藏");
+assert(clothesJson.navigationBarTitleText === "衣服", "clothes list title should be 衣服");
+assert(clothesDetailJson.navigationBarTitleText === "私藏详情", "clothes detail title should be 私藏详情");
+assert(clothesEditJson.navigationBarTitleText === "编辑衣服", "clothes edit title should be 编辑衣服");
+assert(profileJson.navigationBarTitleText === "我的", "profile index title should be 我的");
+
+assert(collectionMarkup.includes("保存衣服、发型和妆容"), "collection page should describe clothes/hair/makeup only");
+["衣服", "发型", "妆容"].forEach((label) => {
+  assert(collectionScript.includes(label) || collectionMarkup.includes(label), `collection page should show ${label}`);
+});
+["clothes", "hair", "makeup"].forEach((icon) => {
+  assert(collectionScript.includes(`icon: "${icon}"`), `collection page should define ${icon} icon`);
+  assert(collectionScript.includes(`assets/collection/${icon}.webp`), `collection page should define ${icon} webp asset`);
   assertWebp(`assets/collection/${icon}.webp`, 90000);
 });
-assert(collectionMarkup.includes("private-type-image-icon"), "collection page should render image icons");
-assert(collectionMarkup.includes('src="{{item.iconSrc}}"'), "collection page should bind icon image src from data");
-assert(!collectionMarkup.includes("icon-line"), "collection page should not render CSS line icon pieces");
-assert(!collectionStyles.includes(".icon-line"), "collection styles should not draw icons with CSS lines");
-assert(collectionStyles.includes("min-height: 184rpx"), "collection type cards should reserve a full-height row");
-assert(collectionStyles.includes("flex: 0 0 132rpx"), "collection type icon column should be wider");
-assert(collectionStyles.includes("height: 132rpx"), "collection type icon should occupy the row height");
-assert(collectionStyles.includes("align-self: center"), "collection type icon should stay vertically centered in the row");
-assert(collectionStyles.includes("flex: 1"), "collection type copy should remain the right-side flexible column");
-assert(collectionScript.includes("getCollectionSummary"), "collection page should load collection summary through its own API");
-assert(collectionScript.includes("handleOpenType"), "collection page should own type navigation");
-assert(collectionScript.includes("handleOpenRecent"), "collection page should own recent item navigation");
-assert(!collectionMarkup.includes("category-scroll"), "collection home should not render the clothing category strip");
+assert(!collectionScript.includes("references"), "collection should remove references type");
+assert(!collectionMarkup.includes("参考图"), "collection should remove reference copy");
+assert(!fs.existsSync(path.join(root, "assets/collection/references.webp")), "references asset should be removed");
+assert(collectionMarkup.includes("private-type-grid"), "collection page should render type grid");
+assert(collectionMarkup.includes("recent-private-section"), "collection page should render recent section");
+assert(!collectionStyles.includes(".icon-line"), "collection styles should not draw CSS line icons");
 
-assert(wardrobeMarkup.includes("衣服"), "wardrobe page should use 衣服 as page title");
-assert(wardrobeMarkup.includes("新增衣服"), "wardrobe page should use 新增衣服 for add entry");
-assert(!wardrobeMarkup.includes("我的衣服"), "private page should not keep old 我的衣服 title");
-assert(!wardrobeMarkup.includes("正在读取衣橱"), "private page should not expose old 衣橱 loading copy");
-assert(!wardrobeMarkup.includes("private-type-grid"), "wardrobe page should not render collection type grid");
-assert(!wardrobeScript.includes("handleOpenPrivateType"), "wardrobe page should not own collection type navigation");
+assert(clothesMarkup.includes("新增衣服"), "clothes list should keep lightweight create entry");
+assert(clothesMarkup.includes("modal-sheet"), "clothes list should use create modal");
+assert(clothesScript.includes("createClothesItem"), "clothes list should create through clothes API");
+assert(clothesScript.includes("/pages/clothes/detail"), "clothes list should navigate to detail route");
+assert(clothesScript.includes("source=clothes"), "clothes list should pass source when navigating to detail");
+assert(clothesDetailMarkup.includes("编辑"), "clothes detail should expose edit action");
+assert(clothesDetailMarkup.includes("{{backLabel}}"), "clothes detail should bind back label from source state");
+assert(clothesDetailScript.includes('backLabel: "返回私藏"'), "clothes detail should default back label to 私藏");
+assert(clothesDetailScript.includes('backUrl: "/pages/collection/collection"'), "clothes detail should default back url to collection");
+assert(clothesDetailScript.includes('backMode: "switchTab"'), "clothes detail should default back mode to tab switching");
+assert(clothesDetailScript.includes('source === "clothes"'), "clothes detail should detect clothes source");
+assert(clothesDetailScript.includes('"返回衣服"'), "clothes detail should support returning to clothes");
+assert(clothesDetailScript.includes('"/pages/clothes/list"'), "clothes detail should support clothes back url");
+assert(clothesDetailScript.includes('"navigateBack"'), "clothes detail should navigate back for non-tab clothes source");
+assert(clothesDetailScript.includes("/pages/clothes/edit"), "clothes detail should navigate to edit route");
+assert(!clothesDetailMarkup.includes("<input"), "clothes detail should not include inputs");
+assert(!clothesDetailMarkup.includes("<textarea"), "clothes detail should not include textareas");
+assert(!clothesDetailMarkup.includes("保存"), "clothes detail should not include save action");
+assert(clothesEditMarkup.includes("<input"), "clothes edit should include form inputs");
+assert(clothesEditMarkup.includes("保存"), "clothes edit should include save action");
 
-assert(collectionScript.includes("读取私藏失败"), "collection page script should use collection failure copy");
-assert(wardrobeScript.includes("读取衣服失败"), "wardrobe page script should use clothes failure copy");
-assert(wardrobeScript.includes("读取补齐建议失败"), "wardrobe page script should use gap failure copy");
-assert(wardrobeDetailMarkup.includes("返回私藏"), "detail page should return to 私藏");
-assert(!wardrobeDetailMarkup.includes("返回衣橱"), "detail page should not return to 衣橱");
-assert(wardrobeDetailScript.includes("读取私藏详情失败"), "detail page script should use private detail failure copy");
+assert(!profileMarkup.includes("<input"), "profile index should not include profile form inputs");
+assert(!profileMarkup.includes("<textarea"), "profile index should not include textareas");
+assert(profileMarkup.includes("档案摘要"), "profile index should show summary");
+assert(profileMarkup.includes("概览页不承载表单"), "profile index should explain no inline form");
 
 console.log("private tab naming verification passed");

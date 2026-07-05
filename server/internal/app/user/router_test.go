@@ -81,7 +81,7 @@ func TestLegacyAssetsUploadRoutesAreNotRegistered(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/user/assets/upload-token",
-		strings.NewReader(`{"asset_type":"wardrobe_item_photo","mime_type":"image/jpeg","file_size":1024}`),
+		strings.NewReader(`{"asset_type":"clothes_item_photo","mime_type":"image/jpeg","file_size":1024}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -90,5 +90,23 @@ func TestLegacyAssetsUploadRoutesAreNotRegistered(t *testing.T) {
 
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("expected legacy assets upload route to be removed, got status %d", response.Code)
+	}
+}
+
+func TestClothesRoutesReplaceWardrobeRoutes(t *testing.T) {
+	router := NewRouter(nil)
+
+	legacyRequest := httptest.NewRequest(http.MethodGet, "/api/user/wardrobe/items", nil)
+	legacyResponse := httptest.NewRecorder()
+	router.ServeHTTP(legacyResponse, legacyRequest)
+	if legacyResponse.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy wardrobe route to be removed, got status %d", legacyResponse.Code)
+	}
+
+	clothesRequest := httptest.NewRequest(http.MethodGet, "/api/user/clothes/items", nil)
+	clothesResponse := httptest.NewRecorder()
+	router.ServeHTTP(clothesResponse, clothesRequest)
+	if clothesResponse.Code == http.StatusNotFound {
+		t.Fatalf("expected clothes route to be registered")
 	}
 }

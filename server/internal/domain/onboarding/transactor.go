@@ -5,12 +5,12 @@ import (
 
 	businesslock "hestia/server/internal/common/lock"
 	"hestia/server/internal/domain/asset"
+	"hestia/server/internal/domain/clothes"
 	"hestia/server/internal/domain/generator"
 	"hestia/server/internal/domain/imageroute"
 	"hestia/server/internal/domain/job"
 	"hestia/server/internal/domain/profile"
 	"hestia/server/internal/domain/report"
-	"hestia/server/internal/domain/wardrobe"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -51,7 +51,7 @@ func NewMySQLSubmitDependencies(ext sqlx.ExtContext, generator generator.ReportG
 		Drafts:      NewMySQLDraftRepositoryWithExt(ext),
 		Profiles:    profile.NewService(profile.NewMySQLRepositoryWithExt(ext)),
 		Assets:      asset.NewService(asset.NewMySQLRepositoryWithExt(ext)),
-		Wardrobe:    wardrobe.NewService(wardrobe.NewMySQLRepositoryWithExt(ext)),
+		Wardrobe:    clothes.NewService(clothes.NewMySQLRepositoryWithExt(ext)),
 		Jobs:        job.NewService(job.NewMySQLRepositoryWithExt(ext)),
 		Reports:     report.NewService(report.NewMySQLRepositoryWithExt(ext)),
 		ImageRoutes: imageroute.NewService(imageroute.NewMySQLRepositoryWithExt(ext)),

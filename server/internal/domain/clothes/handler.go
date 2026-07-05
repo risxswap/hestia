@@ -1,0 +1,192 @@
+package clothes
+
+import (
+	"errors"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"hestia/server/internal/common/auth"
+	"hestia/server/internal/common/response"
+
+	"github.com/gin-gonic/gin"
+)
+
+type Handler struct {
+	service *Service
+	logger  *slog.Logger
+}
+
+func NewHandler(service *Service, logger *slog.Logger) *Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Handler{service: service, logger: logger}
+}
+
+func (h *Handler) ListItems(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	filter, ok := clothesListFilter(c)
+	if !ok {
+		response.Error(c, http.StatusBadRequest, "clothes.invalid_request", "请求参数不正确")
+		return
+	}
+	items, err := h.service.ListItems(c.Request.Context(), user.UserID, filter)
+	if err != nil {
+		h.writeError(c, err, "list clothes items failed", user.UserID, "")
+		return
+	}
+	response.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) GetItem(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	publicID := c.Param("public_id")
+	item, err := h.service.GetItem(c.Request.Context(), user.UserID, publicID)
+	if err != nil {
+		h.writeError(c, err, "get clothes item failed", user.UserID, publicID)
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *Handler) GetOptions(c *gin.Context) {
+	if _, ok := auth.UserFromContext(c); !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	options, err := h.service.ListClothesOptions(c.Request.Context())
+	if err != nil {
+		h.writeError(c, err, "list clothes options failed", 0, "")
+		return
+	}
+	response.OK(c, options)
+}
+
+func (h *Handler) CreateItem(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	var input CreateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, "clothes.invalid_request", "请求参数不正确")
+		return
+	}
+	item, err := h.service.CreateItem(c.Request.Context(), user.UserID, input)
+	if err != nil {
+		h.writeError(c, err, "create clothes item failed", user.UserID, "")
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *Handler) UpdateItem(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	var input UpdateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, "clothes.invalid_request", "请求参数不正确")
+		return
+	}
+	publicID := c.Param("public_id")
+	item, err := h.service.UpdateItem(c.Request.Context(), user.UserID, publicID, input)
+	if err != nil {
+		h.writeError(c, err, "update clothes item failed", user.UserID, publicID)
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *Handler) DeleteItem(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	publicID := c.Param("public_id")
+	if err := h.service.SoftDeleteItem(c.Request.Context(), user.UserID, publicID); err != nil {
+		h.writeError(c, err, "delete clothes item failed", user.UserID, publicID)
+		return
+	}
+	response.OK(c, gin.H{"public_id": strings.TrimSpace(publicID)})
+}
+
+func (h *Handler) RecognizeItemImage(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	var input RecognizeImageInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, "clothes.invalid_request", "请求参数不正确")
+		return
+	}
+	if strings.TrimSpace(input.ItemPublicID) != "" {
+		result, err := h.service.ScheduleItemImageRecognition(c.Request.Context(), user.UserID, input)
+		if err != nil {
+			h.writeError(c, err, "schedule clothes item image recognition failed", user.UserID, input.ItemPublicID)
+			return
+		}
+		response.OK(c, result)
+		return
+	}
+	result, err := h.service.RecognizeItemImage(c.Request.Context(), user.UserID, input)
+	if err != nil {
+		h.writeError(c, err, "recognize clothes item image failed", user.UserID, "")
+		return
+	}
+	response.OK(c, result)
+}
+
+func clothesListFilter(c *gin.Context) (ListFilter, bool) {
+	filter := ListFilter{
+		Category:             strings.TrimSpace(c.Query("category")),
+		RecommendationStatus: strings.TrimSpace(c.Query("recommendation_status")),
+	}
+	if raw := strings.TrimSpace(c.Query("is_core")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return ListFilter{}, false
+		}
+		filter.IsCore = &value
+	}
+	return filter, true
+}
+
+func (h *Handler) writeError(c *gin.Context, err error, logMessage string, userID int64, publicID string) {
+	switch {
+	case errors.Is(err, ErrInvalidRecommendationStatus):
+		response.Error(c, http.StatusBadRequest, "clothes.invalid_recommendation_status", "不支持的推荐状态")
+	case errors.Is(err, ErrInvalidItemName):
+		response.Error(c, http.StatusBadRequest, "clothes.invalid_item", "单品名称不能为空")
+	case errors.Is(err, ErrInvalidPrimaryAsset):
+		response.Error(c, http.StatusBadRequest, "clothes.invalid_primary_asset", "主图资产不可用于衣服")
+	case errors.Is(err, ErrImageRecognizerUnavailable):
+		response.Error(c, http.StatusInternalServerError, "clothes.image_recognizer_unavailable", "图片识别暂不可用")
+	case errors.Is(err, ErrItemNotFound):
+		response.Error(c, http.StatusNotFound, "clothes.item_not_found", "单品不存在")
+	case errors.Is(err, ErrRecognitionPending):
+		response.Error(c, http.StatusConflict, "clothes.recognition_pending", "图片识别完成前不能编辑")
+	case errors.Is(err, ErrRepositoryUnsupported):
+		h.logger.Error(logMessage, "error", err, "user_id", userID, "item_public_id", publicID)
+		response.Error(c, http.StatusInternalServerError, "clothes.request_failed", "衣服请求失败")
+	default:
+		h.logger.Error(logMessage, "error", err, "user_id", userID, "item_public_id", publicID)
+		response.Error(c, http.StatusInternalServerError, "clothes.request_failed", "衣服请求失败")
+	}
+}

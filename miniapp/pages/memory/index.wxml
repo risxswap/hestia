@@ -1,0 +1,26 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="card state-card">
+    <text class="muted">正在读取长期记忆...</text>
+  </view>
+  <view wx:elif="{{errorMessage}}" class="card state-card">
+    <text class="error-text">{{errorMessage}}</text>
+    <button class="primary-button action-button" bind:tap="loadMemory">重新读取</button>
+  </view>
+  <block wx:else>
+    <view class="card memory-card">
+      <view class="section-head">
+        <text class="section-title">长期记忆</text>
+        <text class="muted">区分明确事实、偏好、禁忌和 AI 推断。推断类信息后续需要支持纠错和确认。</text>
+      </view>
+      <block wx:for="{{items}}" wx:key="key">
+        <view class="memory-row">
+          <view>
+            <text class="quick-title">{{item.title}}</text>
+            <text class="muted">{{item.hint}}</text>
+          </view>
+          <text class="memory-value">{{item.count}}</text>
+        </view>
+      </block>
+    </view>
+  </block>
+</view>

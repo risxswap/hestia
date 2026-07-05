@@ -1,0 +1,25 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="card state-card">
+    <text class="muted">正在读取偏好...</text>
+  </view>
+  <view wx:else class="card edit-panel">
+    <view class="section-head">
+      <text class="section-title">偏好与禁忌</text>
+      <text class="muted">用顿号、逗号或换行分隔。真实反馈会优先更新长期记忆。</text>
+    </view>
+    <label class="field-group">
+      <text class="field-label">风格目标</text>
+      <textarea class="textarea" maxlength="220" value="{{draft.styleGoalsText}}" data-field="styleGoalsText" bindinput="handleInput" placeholder="例如：更利落、自然、有亲和力" />
+    </label>
+    <label class="field-group">
+      <text class="field-label">不想要的方向</text>
+      <textarea class="textarea" maxlength="220" value="{{draft.avoidancesText}}" data-field="avoidancesText" bindinput="handleInput" placeholder="例如：过甜、太紧身、难打理" />
+    </label>
+    <label class="field-group">
+      <text class="field-label">场景偏好</text>
+      <textarea class="textarea" maxlength="220" value="{{draft.scenarioPreferencesText}}" data-field="scenarioPreferencesText" bindinput="handleInput" placeholder="例如：通勤更正式，周末更轻松" />
+    </label>
+    <text wx:if="{{errorMessage}}" class="save-message">{{errorMessage}}</text>
+    <button class="primary-button save-button" loading="{{saving}}" bind:tap="handleSave">保存偏好</button>
+  </view>
+</view>

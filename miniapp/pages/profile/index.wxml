@@ -1,0 +1,60 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="card state-card">
+    <text class="muted">正在读取形象档案...</text>
+  </view>
+
+  <view wx:elif="{{loadErrorMessage}}" class="card state-card">
+    <text class="section-title">档案读取失败</text>
+    <text class="muted">{{loadErrorMessage}}</text>
+    <button class="primary-button action-button" bind:tap="loadProfile">重新读取</button>
+  </view>
+
+  <block wx:else>
+    <view class="profile-head">
+      <view class="identity-copy">
+        <text class="eyebrow">我的形象档案</text>
+        <text class="title">{{user.nickname}}</text>
+        <text class="muted">用户：{{user.user_public_id || "本地开发用户"}} · onboarding：{{user.onboarding_status || "未知"}}</text>
+      </view>
+      <button class="secondary-button small-button" bind:tap="handleStartOnboarding">补充档案</button>
+    </view>
+
+    <view class="card memory-card">
+      <view class="section-head">
+        <text class="section-title">长期记忆摘要</text>
+        <text class="muted">完整记忆已拆到独立页面，这里只展示当前沉淀进度。</text>
+      </view>
+      <view class="memory-grid">
+        <block wx:for="{{memoryItems}}" wx:key="label">
+          <view class="memory-item">
+            <text class="memory-value">{{item.value}}</text>
+            <text class="memory-label">{{item.label}}</text>
+          </view>
+        </block>
+      </view>
+    </view>
+
+    <view class="quick-grid">
+      <block wx:for="{{quickEntries}}" wx:key="key">
+        <button class="quick-entry" data-key="{{item.key}}" bind:tap="handleQuickEntry">
+          <text class="quick-title">{{item.title}}</text>
+          <text class="quick-summary">{{item.summary}}</text>
+          <text class="quick-action">{{item.action || "进入"}}</text>
+        </button>
+      </block>
+    </view>
+
+    <view class="card memory-card">
+      <view class="section-head">
+        <text class="section-title">档案摘要</text>
+        <text class="muted">基础档案和偏好禁忌在独立页面维护，概览页不承载表单。</text>
+      </view>
+      <view class="summary-list">
+        <text class="summary-line">身高：{{profileDraft.height_cm || "未记录"}}</text>
+        <text class="summary-line">常见场景：{{profileDraft.scenarioText || "未记录"}}</text>
+        <text class="summary-line">风格目标：{{preferencesDraft.styleGoalsText || "未记录"}}</text>
+        <text class="summary-line">不想要的方向：{{preferencesDraft.avoidancesText || "未记录"}}</text>
+      </view>
+    </view>
+  </block>
+</view>
