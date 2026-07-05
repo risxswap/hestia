@@ -45,7 +45,7 @@
 
 - `pages/profile/index`
 - `pages/collection/collection`
-- `pages/wardrobe/list`
+- `pages/clothes/list`
 - `pages/hair/list`
 - `pages/makeup/list`
 
@@ -60,7 +60,7 @@
 
 适用页面：
 
-- `pages/wardrobe/detail`
+- `pages/clothes/detail`
 - `pages/hair/detail`
 - `pages/makeup/detail`
 
@@ -75,7 +75,7 @@
 
 适用页面：
 
-- `pages/wardrobe/edit`
+- `pages/clothes/edit`
 - `pages/hair/edit`
 - `pages/makeup/edit`
 - `pages/profile/edit`
@@ -115,7 +115,7 @@
 | 对象 | 列表/概览页 | 详情页 | 新增方式 | 编辑/管理页 |
 |---|---|---|---|---|
 | 我的 | `pages/profile/index` | 不做传统详情，使用只读摘要卡 | 不适用 | `pages/profile/edit`、`pages/preferences/edit`、`pages/memory/index`、`pages/privacy/index` |
-| 衣服 | `pages/wardrobe/list` | `pages/wardrobe/detail` | 列表页轻量弹层 | `pages/wardrobe/edit?public_id=...` |
+| 衣服 | `pages/clothes/list` | `pages/clothes/detail` | 列表页轻量弹层 | `pages/clothes/edit?public_id=...` |
 | 发型 | `pages/hair/list` | `pages/hair/detail` | 列表页轻量弹层 | `pages/hair/edit?public_id=...` |
 | 妆容 | `pages/makeup/list` | `pages/makeup/detail` | 列表页轻量弹层 | `pages/makeup/edit?public_id=...` |
 
@@ -202,16 +202,16 @@
 
 ### 衣服页
 
-`pages/wardrobe/list`
+`pages/clothes/list`
 
 调整：
 
 - 保留筛选、图库、建议补齐。
 - 保留列表页轻量新增弹层，因为衣服新增只需要上传图片并保存，复杂字段后续进入编辑页完善。
 - 新增弹层不得扩展为完整衣服编辑表单；如果新增字段增长，应重新评估是否需要独立新增页。
-- 卡片点击进入 `pages/wardrobe/detail?public_id=...`。
+- 卡片点击进入 `pages/clothes/detail?public_id=...`。
 
-`pages/wardrobe/detail`
+`pages/clothes/detail`
 
 要求：
 
@@ -219,7 +219,7 @@
 - 只保留编辑和删除入口。
 - 不承载任何字段编辑。
 
-`pages/wardrobe/edit`
+`pages/clothes/edit`
 
 调整：
 
@@ -308,18 +308,18 @@
 
 ### 衣服
 
-保留现有接口：
+接口：
 
-- `GET /api/user/wardrobe/options`
-- `GET /api/user/wardrobe/items`
-- `POST /api/user/wardrobe/items`
-- `POST /api/user/wardrobe/items/recognize`
-- `PATCH /api/user/wardrobe/items/:public_id`
-- `DELETE /api/user/wardrobe/items/:public_id`
+- `GET /api/user/clothes/options`
+- `GET /api/user/clothes/items`
+- `POST /api/user/clothes/items`
+- `POST /api/user/clothes/items/recognize`
+- `PATCH /api/user/clothes/items/:public_id`
+- `DELETE /api/user/clothes/items/:public_id`
 
 补充：
 
-- 新增 `GET /api/user/wardrobe/items/:public_id`，避免详情页从列表中过滤。
+- 新增 `GET /api/user/clothes/items/:public_id`，避免详情页从列表中过滤。
 
 ### 发型
 
@@ -358,8 +358,42 @@
 - `发型`、`妆容` 分别使用独立表。
 - 核心业务字段使用显式列。
 - 多值标签使用独立子表，不在主表里使用 JSON 数组。
-- 图片关系使用独立关联表，保持和 `wardrobe_item_assets` 一致。
+- 图片关系使用独立关联表。
 - 所有主表支持软删除。
+
+### clothes
+
+衣服是具体对象，衣服集合才是衣橱。数据表、接口和页面域统一使用 `clothes`，不使用 `wardrobe` 表达具体衣服。
+
+建议字段沿用当前衣服字段：
+
+- `id`
+- `public_id`
+- `user_id`
+- `name`
+- `category`
+- `color`
+- `silhouette`
+- `material`
+- `season`
+- `user_notes`
+- `is_core`
+- `recommendation_status`
+- `recognition_status`
+- `status`
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+关联表：
+
+- `clothes_assets`
+  - `id`
+  - `clothes_id`
+  - `asset_id`
+  - `is_primary`
+  - `sort_order`
+  - `created_at`
 
 ### hair
 
@@ -469,15 +503,10 @@
 - `createMakeupItem`
 - `updateMakeupItem`
 - `deleteMakeupItem`
-- `getReferenceItems`
-- `getReferenceItem`
-- `createReferenceItem`
-- `updateReferenceItem`
-- `deleteReferenceItem`
 
 衣服补充：
 
-- `getWardrobeItem`
+- `getClothesItem`
 
 ## 错误与空态
 
@@ -490,7 +519,7 @@
 
 ## 隐私与安全
 
-- 自拍、衣橱、发型、妆容、偏好和反馈都视为敏感个人数据。
+- 自拍、衣服、发型、妆容、偏好和反馈都视为敏感个人数据。
 - 图片资产必须归属当前用户，跨用户资产不可关联。
 - 删除对象默认软删除；服务端删除资产能力后续独立设计。
 - 危险操作必须二次确认。
