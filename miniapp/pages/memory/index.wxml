@@ -2,25 +2,60 @@
   <view wx:if="{{loading}}" class="card state-card">
     <text class="muted">正在读取长期记忆...</text>
   </view>
-  <view wx:elif="{{errorMessage}}" class="card state-card">
+  <view wx:elif="{{errorMessage && !editVisible}}" class="card state-card">
     <text class="error-text">{{errorMessage}}</text>
     <button class="primary-button action-button" bind:tap="loadMemory">重新读取</button>
   </view>
   <block wx:else>
-    <view class="card memory-card">
+    <view class="card memory-card memory-intro">
       <view class="section-head">
         <text class="section-title">长期记忆</text>
-        <text class="muted">区分明确事实、偏好、禁忌和 AI 推断。推断类信息后续需要支持纠错和确认。</text>
+        <text class="muted">逐条管理会影响建议的事实、偏好、禁忌和 AI 推断。你可以删除不希望继续使用的记忆，也可以编辑修正。</text>
       </view>
-      <block wx:for="{{items}}" wx:key="key">
-        <view class="memory-row">
-          <view>
-            <text class="quick-title">{{item.title}}</text>
-            <text class="muted">{{item.hint}}</text>
+    </view>
+
+    <view wx:if="{{!items.length}}" class="card empty-card">
+      <text class="section-title">还没有可管理的记忆</text>
+      <text class="muted">完成 onboarding 或对建议进行反馈后，系统会逐步沉淀可修正的长期记忆。</text>
+    </view>
+
+    <view wx:else class="memory-list">
+      <block wx:for="{{items}}" wx:key="public_id">
+        <view class="card memory-item">
+          <view class="memory-item-head">
+            <text class="memory-tag">{{item.type_label}}</text>
+            <text wx:if="{{item.updatedText}}" class="memory-date">{{item.updatedText}}</text>
           </view>
-          <text class="memory-value">{{item.count}}</text>
+          <text class="memory-text">{{item.display_text}}</text>
+          <view class="memory-meta">
+            <text>{{item.source_label}}</text>
+            <text wx:if="{{item.confidenceText}}">{{item.confidenceText}}</text>
+          </view>
+          <view class="memory-actions">
+            <button class="secondary-button memory-action" data-public-id="{{item.public_id}}" bind:tap="handleOpenEdit">编辑</button>
+            <button class="danger-button memory-action" data-public-id="{{item.public_id}}" bind:tap="handleDelete">删除</button>
+          </view>
         </view>
       </block>
     </view>
   </block>
+
+  <view wx:if="{{editVisible}}" class="modal-layer">
+    <view class="modal-backdrop" catchtap="handleCloseEdit"></view>
+    <view class="modal-sheet">
+      <view class="section-head">
+        <text class="section-title">编辑记忆</text>
+        <text class="muted">请只修正你确认不准确或需要补充的内容。</text>
+      </view>
+      <label class="field-group">
+        <text class="field-label">记忆内容</text>
+        <textarea class="textarea" value="{{draft.memory_value}}" data-field="memory_value" bindinput="handleInput" placeholder="输入修正后的记忆" />
+      </label>
+      <text wx:if="{{errorMessage}}" class="error-text">{{errorMessage}}</text>
+      <view class="modal-actions">
+        <button class="secondary-button action-button" bind:tap="handleCloseEdit">取消</button>
+        <button class="primary-button action-button" loading="{{saving}}" bind:tap="handleSaveEdit">保存</button>
+      </view>
+    </view>
+  </view>
 </view>

@@ -1,10 +1,109 @@
 @import "../profile/index.wxss";
 
-.memory-row {
+.memory-intro {
+  gap: 0;
+}
+
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.memory-item {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+  padding: 26rpx;
+}
+
+.memory-item-head,
+.memory-meta,
+.memory-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20rpx;
-  padding: 20rpx 0;
-  border-top: 1rpx solid #e6ded0;
+}
+
+.memory-item-head,
+.memory-meta {
+  gap: 16rpx;
+}
+
+.memory-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42rpx;
+  padding: 0 16rpx;
+  border-radius: 999rpx;
+  color: #245d4f;
+  background: #eef4ef;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+.memory-date,
+.memory-meta {
+  color: #71695d;
+  font-size: 22rpx;
+  line-height: 1.45;
+}
+
+.memory-text {
+  color: #27231f;
+  font-size: 30rpx;
+  font-weight: 650;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.memory-actions {
+  gap: 16rpx;
+}
+
+.memory-action {
+  flex: 1;
+  min-height: 68rpx;
+}
+
+.empty-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  padding: 28rpx;
+}
+
+.modal-layer {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(39, 35, 31, 0.42);
+}
+
+.modal-sheet {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  gap: 22rpx;
+  padding: 30rpx 32rpx 48rpx;
+  border-radius: 24rpx 24rpx 0 0;
+  background: #fffdf8;
+  box-shadow: 0 -18rpx 48rpx rgba(39, 35, 31, 0.16);
+}
+
+.modal-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
 }

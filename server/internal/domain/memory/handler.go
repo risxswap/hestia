@@ -1,0 +1,85 @@
+package memory
+
+import (
+	"errors"
+	"log/slog"
+	"net/http"
+	"strings"
+
+	"hestia/server/internal/common/auth"
+	"hestia/server/internal/common/response"
+
+	"github.com/gin-gonic/gin"
+)
+
+type Handler struct {
+	service *Service
+	logger  *slog.Logger
+}
+
+func NewHandler(service *Service, logger *slog.Logger) *Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Handler{service: service, logger: logger}
+}
+
+func (h *Handler) ListItems(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	items, err := h.service.ListItems(c.Request.Context(), user.UserID)
+	if err != nil {
+		h.writeError(c, err, "list memory items failed", user.UserID, "")
+		return
+	}
+	response.OK(c, gin.H{"items": items})
+}
+
+func (h *Handler) UpdateItem(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	var request UpdateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		response.Error(c, http.StatusBadRequest, "memory.invalid_request", "请求参数不正确")
+		return
+	}
+	publicID := c.Param("public_id")
+	item, err := h.service.UpdateItem(c.Request.Context(), user.UserID, publicID, request)
+	if err != nil {
+		h.writeError(c, err, "update memory item failed", user.UserID, publicID)
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *Handler) DeleteItem(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	publicID := c.Param("public_id")
+	if err := h.service.SoftDeleteItem(c.Request.Context(), user.UserID, publicID); err != nil {
+		h.writeError(c, err, "delete memory item failed", user.UserID, publicID)
+		return
+	}
+	response.OK(c, gin.H{"public_id": strings.TrimSpace(publicID)})
+}
+
+func (h *Handler) writeError(c *gin.Context, err error, logMessage string, userID int64, publicID string) {
+	switch {
+	case errors.Is(err, ErrInvalidMemoryValue):
+		response.Error(c, http.StatusBadRequest, "memory.invalid_value", "记忆内容不能为空")
+	case errors.Is(err, ErrItemNotFound):
+		response.Error(c, http.StatusNotFound, "memory.item_not_found", "记忆不存在")
+	default:
+		h.logger.Error(logMessage, "error", err, "user_id", userID, "memory_public_id", publicID)
+		response.Error(c, http.StatusInternalServerError, "memory.request_failed", "记忆请求失败")
+	}
+}

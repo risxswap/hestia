@@ -481,6 +481,8 @@ func normalizeAssetType(value string) (assetType string, scope string, err error
 		return "hair_photo", "hair", nil
 	case "makeup_photo":
 		return "makeup_photo", "makeup", nil
+	case "profile_photo":
+		return "profile_photo", "profile", nil
 	case "onboarding_photo":
 		return "onboarding_photo", "onboarding", nil
 	case "style_reference":

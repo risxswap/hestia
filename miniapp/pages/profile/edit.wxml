@@ -26,9 +26,83 @@
           <input class="field" type="number" value="{{draft.height_cm}}" data-field="height_cm" bindinput="handleInput" placeholder="例如：165" />
         </label>
         <label class="field-group">
+          <text class="field-label">体重 kg</text>
+          <input class="field" type="digit" value="{{draft.weight_kg}}" data-field="weight_kg" bindinput="handleInput" placeholder="可留空" />
+        </label>
+        <label class="field-group">
           <text class="field-label">常见场景</text>
           <input class="field" value="{{draft.scenarioText}}" data-field="scenarioText" bindinput="handleInput" placeholder="通勤、周末、约会" />
         </label>
+      </view>
+
+      <view class="archive-section">
+        <view class="section-head">
+          <text class="section-title">照片档案</text>
+          <text class="muted">上传本人多角度照片，用于后续形象建议。</text>
+        </view>
+        <view class="photo-groups">
+          <view class="photo-group">
+            <view class="photo-group-head">
+              <text class="field-label">自拍/头肩照</text>
+              <button class="secondary-button photo-add-button" data-type="headshot" bind:tap="handleChoosePhoto">添加</button>
+            </view>
+            <view class="photo-list">
+              <view wx:for="{{photoGroups.headshot.photos}}" wx:key="public_id" class="photo-item">
+                <image wx:if="{{item.url}}" class="photo-thumb" src="{{item.url}}" mode="aspectFill" />
+                <view wx:else class="photo-thumb photo-thumb--empty"><text>图片</text></view>
+                <text class="photo-meta">{{item.angle}}</text>
+                <button class="photo-delete" data-public-id="{{item.public_id}}" bind:tap="handleDeletePhoto">删除</button>
+              </view>
+            </view>
+          </view>
+          <view class="photo-group">
+            <view class="photo-group-head">
+              <text class="field-label">半身照</text>
+              <button class="secondary-button photo-add-button" data-type="half_body" bind:tap="handleChoosePhoto">添加</button>
+            </view>
+            <view class="photo-list">
+              <view wx:for="{{photoGroups.half_body.photos}}" wx:key="public_id" class="photo-item">
+                <image wx:if="{{item.url}}" class="photo-thumb" src="{{item.url}}" mode="aspectFill" />
+                <view wx:else class="photo-thumb photo-thumb--empty"><text>图片</text></view>
+                <text class="photo-meta">{{item.angle}}</text>
+                <button class="photo-delete" data-public-id="{{item.public_id}}" bind:tap="handleDeletePhoto">删除</button>
+              </view>
+            </view>
+          </view>
+          <view class="photo-group">
+            <view class="photo-group-head">
+              <text class="field-label">全身照</text>
+              <button class="secondary-button photo-add-button" data-type="full_body" bind:tap="handleChoosePhoto">添加</button>
+            </view>
+            <view class="photo-list">
+              <view wx:for="{{photoGroups.full_body.photos}}" wx:key="public_id" class="photo-item">
+                <image wx:if="{{item.url}}" class="photo-thumb" src="{{item.url}}" mode="aspectFill" />
+                <view wx:else class="photo-thumb photo-thumb--empty"><text>图片</text></view>
+                <text class="photo-meta">{{item.angle}}</text>
+                <button class="photo-delete" data-public-id="{{item.public_id}}" bind:tap="handleDeletePhoto">删除</button>
+              </view>
+            </view>
+          </view>
+        </view>
+        <text wx:if="{{imageUploading}}" class="muted">照片上传中...</text>
+        <text wx:if="{{imageUploadError}}" class="save-message">{{imageUploadError}}</text>
+      </view>
+
+      <view class="archive-section">
+        <view class="section-head">
+          <text class="section-title">形象要素</text>
+          <text class="muted">使用中性描述，方便之后修正。</text>
+        </view>
+        <view class="form-grid">
+          <label class="field-group">
+            <text class="field-label">脸型</text>
+            <input class="field" value="{{draft.face_shape}}" data-field="face_shape" bindinput="handleInput" placeholder="例如：方圆脸，可留空" />
+          </label>
+          <label class="field-group">
+            <text class="field-label">尺码备注</text>
+            <input class="field" value="{{draft.size_notes}}" data-field="size_notes" bindinput="handleInput" placeholder="例如：上衣 M，鞋码 37" />
+          </label>
+        </view>
       </view>
       <label class="field-group">
         <text class="field-label">身形/比例备注</text>
@@ -41,6 +115,14 @@
       <label class="field-group">
         <text class="field-label">发型备注</text>
         <textarea class="textarea" maxlength="220" value="{{draft.hair_notes}}" data-field="hair_notes" bindinput="handleInput" placeholder="例如：希望好打理、适合通勤" />
+      </label>
+      <label class="field-group">
+        <text class="field-label">肩颈/上半身特点</text>
+        <textarea class="textarea" maxlength="220" value="{{draft.upper_body_notes}}" data-field="upper_body_notes" bindinput="handleInput" placeholder="例如：希望肩线更清晰" />
+      </label>
+      <label class="field-group">
+        <text class="field-label">腿型/下半身特点</text>
+        <textarea class="textarea" maxlength="220" value="{{draft.lower_body_notes}}" data-field="lower_body_notes" bindinput="handleInput" placeholder="例如：偏好利落裤装" />
       </label>
       <text wx:if="{{errorMessage}}" class="save-message">{{errorMessage}}</text>
       <button class="primary-button save-button" loading="{{saving}}" bind:tap="handleSave">保存基础档案</button>

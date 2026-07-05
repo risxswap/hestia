@@ -13,6 +13,7 @@ import (
 	"hestia/server/internal/domain/imageroute"
 	"hestia/server/internal/domain/job"
 	"hestia/server/internal/domain/makeup"
+	"hestia/server/internal/domain/memory"
 	"hestia/server/internal/domain/onboarding"
 	"hestia/server/internal/domain/profile"
 	"hestia/server/internal/domain/report"
@@ -40,6 +41,7 @@ func NewRouter(deps *baseapp.Deps) *gin.Engine {
 	report.RegisterUserRoutes(protected.Group("/reports"), deps)
 	imageroute.RegisterUserRoutes(protected.Group("/image-routes"), deps)
 	collection.RegisterUserRoutes(protected.Group("/collection"), deps)
+	memory.RegisterUserRoutes(protected.Group("/memories"), deps)
 	clothes.RegisterUserRoutes(protected.Group("/clothes"), deps)
 	hair.RegisterUserRoutes(protected.Group("/hair"), deps)
 	makeup.RegisterUserRoutes(protected.Group("/makeup"), deps)

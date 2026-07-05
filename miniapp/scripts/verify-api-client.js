@@ -72,7 +72,10 @@ async function main() {
     "uploadFileToQiniu",
     "getProfileSummary",
     "updateProfile",
-    "updateProfilePreferences"
+    "updateProfilePreferences",
+    "createProfilePhoto",
+    "updateProfilePhoto",
+    "deleteProfilePhoto"
   ].forEach((name) => {
     assert(typeof api[name] === "function", `api.js should export ${name}`);
   });
@@ -324,6 +327,9 @@ async function main() {
     await api.getProfileSummary();
     await api.updateProfile({ nickname: "明明" });
     await api.updateProfilePreferences({ style_goals: ["更利落"] });
+    await api.createProfilePhoto({ asset_public_id: "ast_profile", photo_type: "full_body", angle: "front" });
+    await api.updateProfilePhoto("pph_test", { angle: "side" });
+    await api.deleteProfilePhoto("pph_test");
   });
 
   const profilePaths = profileCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
@@ -335,6 +341,14 @@ async function main() {
   assert(profileCalls[2].method === "PATCH", "updateProfilePreferences should use PATCH");
   assert(profilePaths[2] === "/api/user/profile/preferences", `update preferences path mismatch: ${profilePaths[2]}`);
   assert(profileCalls[2].data.style_goals[0] === "更利落", "updateProfilePreferences should pass preferences payload");
+  assert(profileCalls[3].method === "POST", "createProfilePhoto should use POST");
+  assert(profilePaths[3] === "/api/user/profile/photos", `create profile photo path mismatch: ${profilePaths[3]}`);
+  assert(profileCalls[3].data.asset_public_id === "ast_profile", "createProfilePhoto should pass asset id");
+  assert(profileCalls[4].method === "PATCH", "updateProfilePhoto should use PATCH");
+  assert(profilePaths[4] === "/api/user/profile/photos/pph_test", `update profile photo path mismatch: ${profilePaths[4]}`);
+  assert(profileCalls[4].data.angle === "side", "updateProfilePhoto should pass patch payload");
+  assert(profileCalls[5].method === "DELETE", "deleteProfilePhoto should use DELETE");
+  assert(profilePaths[5] === "/api/user/profile/photos/pph_test", `delete profile photo path mismatch: ${profilePaths[5]}`);
 
   let rejected = false;
   await withGlobals({

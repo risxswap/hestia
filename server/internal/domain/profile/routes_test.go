@@ -54,9 +54,23 @@ func TestSummaryReturnsDashboardData(t *testing.T) {
 				Status:      "ready",
 				GeneratedAt: &generatedAt,
 			},
+			ProfilePhotos: []profile.ProfilePhoto{
+				{
+					PublicID:      "pph_test",
+					AssetPublicID: "ast_test",
+					PhotoType:     "full_body",
+					Angle:         "front",
+					Image:         &profile.ProfilePhotoImage{ObjectKey: "users/12/profile/ast_test.jpg"},
+				},
+			},
 		},
 	}
-	router := newProfileRouteTestRouter(repo)
+	signer := &routeProfileImageSigner{
+		urls: map[string]profile.SignedImageURLs{
+			"users/12/profile/ast_test.jpg": {PreviewURL: "https://private.example.test/preview.jpg"},
+		},
+	}
+	router := newProfileRouteTestRouterWithSigner(repo, signer)
 	request := httptest.NewRequest(http.MethodGet, "/api/user/profile/summary", nil)
 	recorder := httptest.NewRecorder()
 
@@ -83,6 +97,9 @@ func TestSummaryReturnsDashboardData(t *testing.T) {
 	}
 	if body.Data.LatestReport == nil || body.Data.LatestReport.PublicID != "rpt_test" {
 		t.Fatalf("expected latest report summary, got %#v", body.Data.LatestReport)
+	}
+	if len(body.Data.ProfilePhotos) != 1 || body.Data.ProfilePhotos[0].Image == nil || body.Data.ProfilePhotos[0].Image.URL != "https://private.example.test/preview.jpg" {
+		t.Fatalf("expected signed profile photo url, got %#v", body.Data.ProfilePhotos)
 	}
 	if len(body.Data.Preferences.StyleGoals) != 1 || body.Data.Preferences.StyleGoals[0] != "更利落" {
 		t.Fatalf("expected style goals in summary, got %#v", body.Data.Preferences)
@@ -198,6 +215,7 @@ func TestMySQLSummaryFiltersActiveProfile(t *testing.T) {
 	mock.ExpectQuery(`(?s)FROM reports.*report_type = 'initial'.*status = 'ready'.*LIMIT 1`).
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"public_id", "title", "status", "generated_at"}))
+	expectProfilePhotoSummaryQuery(mock, userID)
 
 	summary, err := repo.Summary(context.Background(), userID)
 	if err != nil {
@@ -301,6 +319,7 @@ func TestMySQLSummaryTreatsNullLifestyleScenariosAsEmpty(t *testing.T) {
 	mock.ExpectQuery(`(?s)FROM reports.*report_type = 'initial'.*status = 'ready'.*LIMIT 1`).
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"public_id", "title", "status", "generated_at"}))
+	expectProfilePhotoSummaryQuery(mock, userID)
 
 	summary, err := repo.Summary(context.Background(), userID)
 	if err != nil {
@@ -369,6 +388,60 @@ func TestPatchProfileUpdatesExplicitProfileFields(t *testing.T) {
 	})
 }
 
+func TestPatchProfileUpdatesFullArchiveFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &routeProfileRepo{
+		summary: profile.Summary{
+			User: profile.UserSummary{UserPublicID: "usr_test", Nickname: "明明", OnboardingStatus: "completed"},
+			Profile: &profile.ProfileSummary{
+				ProfilePublicID: "prf_test",
+				HeightCM:        intPtr(165),
+				WeightKG:        floatPtr(52.5),
+				FaceShape:       "方圆脸",
+				UpperBodyNotes:  "肩线偏窄",
+				LowerBodyNotes:  "偏好利落裤装",
+				SizeNotes:       "上衣 M，鞋码 37",
+			},
+			MemorySummary: profile.MemorySummary{FactCount: 4},
+		},
+	}
+	router := newProfileRouteTestRouter(repo)
+	request := httptest.NewRequest(http.MethodPatch, "/api/user/profile", strings.NewReader(`{"weight_kg":52.5,"face_shape":"方圆脸","upper_body_notes":"肩线偏窄","lower_body_notes":"偏好利落裤装","size_notes":"上衣 M，鞋码 37"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	input := repo.lastProfileInput
+	if !input.WeightKG.Present || input.WeightKG.Value == nil || *input.WeightKG.Value != 52.5 {
+		t.Fatalf("expected weight patch, got %#v", input.WeightKG)
+	}
+	if !input.FaceShape.Present || input.FaceShape.Value != "方圆脸" {
+		t.Fatalf("expected face shape patch, got %#v", input.FaceShape)
+	}
+	if !input.UpperBodyNotes.Present || input.UpperBodyNotes.Value != "肩线偏窄" {
+		t.Fatalf("expected upper body patch, got %#v", input.UpperBodyNotes)
+	}
+	if !input.LowerBodyNotes.Present || input.LowerBodyNotes.Value != "偏好利落裤装" {
+		t.Fatalf("expected lower body patch, got %#v", input.LowerBodyNotes)
+	}
+	if !input.SizeNotes.Present || input.SizeNotes.Value != "上衣 M，鞋码 37" {
+		t.Fatalf("expected size notes patch, got %#v", input.SizeNotes)
+	}
+	var body struct {
+		Data profile.Summary `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.Profile == nil || body.Data.Profile.WeightKG == nil || *body.Data.Profile.WeightKG != 52.5 {
+		t.Fatalf("expected full archive profile in response, got %#v", body.Data.Profile)
+	}
+}
+
 func TestPatchProfileOnlyUpdatesPresentFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &routeProfileRepo{
@@ -402,6 +475,145 @@ func TestPatchProfileOnlyUpdatesPresentFields(t *testing.T) {
 	}
 	if input.Gender.Present || input.HeightCM.Present || input.BodyNotes.Present || input.SkinNotes.Present || input.HairNotes.Present || input.LifestyleScenarios.Present {
 		t.Fatalf("expected omitted profile fields to stay absent, got %#v", input)
+	}
+}
+
+func TestPatchProfileRejectsInvalidWeightRange(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "too low", body: `{"weight_kg":19.9}`},
+		{name: "too high", body: `{"weight_kg":300.1}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &routeProfileRepo{}
+			router := newProfileRouteTestRouter(repo)
+			request := httptest.NewRequest(http.MethodPatch, "/api/user/profile", strings.NewReader(tt.body))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			router.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", recorder.Code, recorder.Body.String())
+			}
+			assertErrorCode(t, recorder.Body.Bytes(), "profile.validation_failed")
+			if repo.lastProfileInput.WeightKG.Present {
+				t.Fatalf("expected invalid weight not to reach repo, got %#v", repo.lastProfileInput)
+			}
+		})
+	}
+}
+
+func TestCreateProfilePhotoCreatesArchivePhoto(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &routeProfileRepo{
+		photoResult: profile.ProfilePhoto{
+			PublicID:      "pph_test",
+			AssetPublicID: "ast_test",
+			PhotoType:     "full_body",
+			Angle:         "front",
+			Note:          "自然站姿",
+			SortOrder:     10,
+			Image: &profile.ProfilePhotoImage{
+				ObjectKey: "users/12/profile/ast_test.jpg",
+				URL:       "https://private.example.test/users/12/profile/ast_test.jpg",
+			},
+		},
+	}
+	router := newProfileRouteTestRouter(repo)
+	request := httptest.NewRequest(http.MethodPost, "/api/user/profile/photos", strings.NewReader(`{"asset_public_id":"ast_test","photo_type":"full_body","angle":"front","note":"自然站姿","sort_order":10}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if repo.lastPhotoUserID != 12 {
+		t.Fatalf("expected user 12, got %d", repo.lastPhotoUserID)
+	}
+	if repo.lastCreatePhotoInput.AssetPublicID != "ast_test" || repo.lastCreatePhotoInput.PhotoType != "full_body" || repo.lastCreatePhotoInput.Angle != "front" {
+		t.Fatalf("expected captured create photo input, got %#v", repo.lastCreatePhotoInput)
+	}
+	var body struct {
+		Data profile.ProfilePhoto `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.PublicID != "pph_test" || body.Data.Image == nil || body.Data.Image.URL == "" {
+		t.Fatalf("expected profile photo response, got %#v", body.Data)
+	}
+}
+
+func TestCreateProfilePhotoRejectsInvalidTypeAndAngle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "type", body: `{"asset_public_id":"ast_test","photo_type":"wardrobe","angle":"front"}`},
+		{name: "angle", body: `{"asset_public_id":"ast_test","photo_type":"full_body","angle":"diagonal"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &routeProfileRepo{}
+			router := newProfileRouteTestRouter(repo)
+			request := httptest.NewRequest(http.MethodPost, "/api/user/profile/photos", strings.NewReader(tt.body))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			router.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", recorder.Code, recorder.Body.String())
+			}
+			assertErrorCode(t, recorder.Body.Bytes(), "profile.validation_failed")
+			if repo.lastCreatePhotoInput.AssetPublicID != "" {
+				t.Fatalf("expected invalid photo not to reach repo, got %#v", repo.lastCreatePhotoInput)
+			}
+		})
+	}
+}
+
+func TestUpdateProfilePhotoRejectsNullStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &routeProfileRepo{}
+	router := newProfileRouteTestRouter(repo)
+	request := httptest.NewRequest(http.MethodPatch, "/api/user/profile/photos/pph_test", strings.NewReader(`{"status":null}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	assertErrorCode(t, recorder.Body.Bytes(), "profile.validation_failed")
+	if repo.lastUpdatePhotoInput.Status.Present {
+		t.Fatalf("expected invalid status not to reach repo, got %#v", repo.lastUpdatePhotoInput)
+	}
+}
+
+func TestDeleteProfilePhotoSoftDeletesArchivePhoto(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &routeProfileRepo{}
+	router := newProfileRouteTestRouter(repo)
+	request := httptest.NewRequest(http.MethodDelete, "/api/user/profile/photos/pph_test", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if repo.lastDeletePhotoUserID != 12 || repo.lastDeletePhotoPublicID != "pph_test" {
+		t.Fatalf("expected delete photo call, got user=%d public=%q", repo.lastDeletePhotoUserID, repo.lastDeletePhotoPublicID)
 	}
 }
 
@@ -519,6 +731,33 @@ func TestPatchProfileReturnsNotFoundWhenUserMissing(t *testing.T) {
 		t.Fatalf("expected 404, got %d body=%s", recorder.Code, recorder.Body.String())
 	}
 	assertErrorCode(t, recorder.Body.Bytes(), "profile.user_not_found")
+}
+
+func TestMySQLUpdateProfilePhotoRejectsFullGroupMove(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("create sql mock: %v", err)
+	}
+	defer db.Close()
+	repo := profile.NewMySQLRepository(sqlx.NewDb(db, "sqlmock"))
+	userID := int64(12)
+
+	mock.ExpectQuery(`(?s)SELECT photo_type FROM profile_photos.*WHERE user_id = \?.*public_id = \?`).
+		WithArgs(userID, "pph_test").
+		WillReturnRows(sqlmock.NewRows([]string{"photo_type"}).AddRow("headshot"))
+	mock.ExpectQuery(`(?s)SELECT.*COUNT\(\*\).*FROM profile_photos.*WHERE user_id = \?`).
+		WithArgs("full_body", userID).
+		WillReturnRows(sqlmock.NewRows([]string{"total", "group_count"}).AddRow(6, 6))
+
+	_, err = repo.UpdateProfilePhoto(context.Background(), userID, "pph_test", profile.UpdateProfilePhotoInput{
+		PhotoType: profile.PatchString{Present: true, Value: "full_body"},
+	})
+	if !errors.Is(err, profile.ErrProfilePhotoLimit) {
+		t.Fatalf("expected photo limit error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
 }
 
 func TestMySQLUpdateExplicitProfileWritesUserProfileAndFacts(t *testing.T) {
@@ -706,23 +945,115 @@ func TestMySQLUpdateExplicitPreferencesReplacesPrefsWithUserSource(t *testing.T)
 	}
 }
 
+func TestMySQLCreateProfilePhotoCreatesOwnedAssetReference(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("create sql mock: %v", err)
+	}
+	defer db.Close()
+	repo := profile.NewMySQLRepository(sqlx.NewDb(db, "sqlmock"))
+	userID := int64(12)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT id FROM users WHERE id = \? AND deleted_at IS NULL FOR UPDATE`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(userID))
+	mock.ExpectExec(`(?s)INSERT INTO profiles.*ON DUPLICATE KEY UPDATE`).
+		WithArgs(sqlmock.AnyArg(), userID, "active").
+		WillReturnResult(sqlmock.NewResult(34, 1))
+	mock.ExpectQuery(`(?s)SELECT.*FROM profiles.*WHERE user_id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id",
+			"public_id",
+			"user_id",
+			"status",
+			"gender",
+			"height_cm",
+			"weight_kg",
+			"body_notes",
+			"skin_notes",
+			"hair_notes",
+			"face_shape",
+			"upper_body_notes",
+			"lower_body_notes",
+			"size_notes",
+			"style_goal_summary",
+		}).AddRow(int64(34), "prf_test", userID, "active", "", nil, nil, "", "", "", "", "", "", "", ""))
+	mock.ExpectQuery(`(?s)SELECT.*COUNT\(\*\).*FROM profile_photos.*WHERE user_id = \?`).
+		WithArgs("full_body", userID).
+		WillReturnRows(sqlmock.NewRows([]string{"total", "group_count"}).AddRow(0, 0))
+	mock.ExpectQuery(`(?s)SELECT public_id, object_key.*FROM files.*asset_type = 'profile_photo'`).
+		WithArgs("ast_test", userID).
+		WillReturnRows(sqlmock.NewRows([]string{"public_id", "object_key"}).AddRow("ast_test", "users/12/profile/ast_test.jpg"))
+	mock.ExpectExec(`INSERT INTO profile_photos`).
+		WithArgs(sqlmock.AnyArg(), userID, int64(34), "ast_test", "full_body", "front", "自然站姿", 10, "active").
+		WillReturnResult(sqlmock.NewResult(56, 1))
+	mock.ExpectQuery(`(?s)FROM profile_photos pp.*WHERE pp\.user_id = \?.*pp\.public_id = \?`).
+		WithArgs(userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"public_id", "asset_public_id", "photo_type", "angle", "note", "sort_order", "status", "object_key"}).
+			AddRow("pph_test", "ast_test", "full_body", "front", "自然站姿", 10, "active", "users/12/profile/ast_test.jpg"))
+	mock.ExpectCommit()
+
+	photo, err := repo.CreateProfilePhoto(context.Background(), userID, profile.CreateProfilePhotoInput{
+		AssetPublicID: "ast_test",
+		PhotoType:     "full_body",
+		Angle:         "front",
+		Note:          "自然站姿",
+		SortOrder:     10,
+	})
+	if err != nil {
+		t.Fatalf("create profile photo: %v", err)
+	}
+	if photo.PublicID != "pph_test" || photo.Image == nil || photo.Image.ObjectKey != "users/12/profile/ast_test.jpg" {
+		t.Fatalf("unexpected profile photo: %#v", photo)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func newProfileRouteTestRouter(repo *routeProfileRepo) *gin.Engine {
+	return newProfileRouteTestRouterWithSigner(repo, nil)
+}
+
+func newProfileRouteTestRouterWithSigner(repo *routeProfileRepo, signer profile.ImageURLSigner) *gin.Engine {
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
 		c.Next()
 	})
-	profile.RegisterUserRoutesWithService(router.Group("/api/user/profile"), profile.NewService(repo), nil)
+	service := profile.NewService(repo)
+	service.SetImageURLSigner(signer)
+	profile.RegisterUserRoutesWithService(router.Group("/api/user/profile"), service, nil)
 	return router
 }
 
+type routeProfileImageSigner struct {
+	urls map[string]profile.SignedImageURLs
+}
+
+func (s *routeProfileImageSigner) PrivateImageURLs(_ context.Context, objectKeys []string) (map[string]profile.SignedImageURLs, error) {
+	result := make(map[string]profile.SignedImageURLs, len(objectKeys))
+	for _, key := range objectKeys {
+		result[key] = s.urls[key]
+	}
+	return result, nil
+}
+
 type routeProfileRepo struct {
-	summary               profile.Summary
-	err                   error
-	lastProfileUserID     int64
-	lastProfileInput      profile.UpdateProfileInput
-	lastPreferencesUserID int64
-	lastPreferencesInput  profile.UpdatePreferencesInput
+	summary                 profile.Summary
+	err                     error
+	lastProfileUserID       int64
+	lastProfileInput        profile.UpdateProfileInput
+	lastPreferencesUserID   int64
+	lastPreferencesInput    profile.UpdatePreferencesInput
+	photoResult             profile.ProfilePhoto
+	lastPhotoUserID         int64
+	lastCreatePhotoInput    profile.CreateProfilePhotoInput
+	lastUpdatePhotoInput    profile.UpdateProfilePhotoInput
+	lastDeletePhotoUserID   int64
+	lastDeletePhotoPublicID string
 }
 
 func (r *routeProfileRepo) Summary(context.Context, int64) (profile.Summary, error) {
@@ -770,7 +1101,44 @@ func (r *routeProfileRepo) UpdateExplicitPreferences(_ context.Context, userID i
 	return r.summary, nil
 }
 
+func (r *routeProfileRepo) CreateProfilePhoto(_ context.Context, userID int64, input profile.CreateProfilePhotoInput) (profile.ProfilePhoto, error) {
+	if r.err != nil {
+		return profile.ProfilePhoto{}, r.err
+	}
+	r.lastPhotoUserID = userID
+	r.lastCreatePhotoInput = input
+	if r.photoResult.PublicID != "" {
+		return r.photoResult, nil
+	}
+	return profile.ProfilePhoto{PublicID: "pph_test", AssetPublicID: input.AssetPublicID, PhotoType: input.PhotoType, Angle: input.Angle, Note: input.Note, SortOrder: input.SortOrder}, nil
+}
+
+func (r *routeProfileRepo) UpdateProfilePhoto(_ context.Context, userID int64, publicID string, input profile.UpdateProfilePhotoInput) (profile.ProfilePhoto, error) {
+	if r.err != nil {
+		return profile.ProfilePhoto{}, r.err
+	}
+	r.lastPhotoUserID = userID
+	r.lastUpdatePhotoInput = input
+	if r.photoResult.PublicID != "" {
+		return r.photoResult, nil
+	}
+	return profile.ProfilePhoto{PublicID: publicID, PhotoType: input.PhotoType.Value, Angle: input.Angle.Value, Note: input.Note.Value, SortOrder: 0}, nil
+}
+
+func (r *routeProfileRepo) DeleteProfilePhoto(_ context.Context, userID int64, publicID string) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.lastDeletePhotoUserID = userID
+	r.lastDeletePhotoPublicID = publicID
+	return nil
+}
+
 func intPtr(value int) *int {
+	return &value
+}
+
+func floatPtr(value float64) *float64 {
 	return &value
 }
 
@@ -853,4 +1221,11 @@ func expectSummaryQueries(mock sqlmock.Sqlmock, userID int64) {
 	mock.ExpectQuery(`(?s)FROM reports.*report_type = 'initial'.*status = 'ready'.*LIMIT 1`).
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"public_id", "title", "status", "generated_at"}))
+	expectProfilePhotoSummaryQuery(mock, userID)
+}
+
+func expectProfilePhotoSummaryQuery(mock sqlmock.Sqlmock, userID int64) {
+	mock.ExpectQuery(`(?s)FROM profile_photos pp.*LEFT JOIN files f.*WHERE pp\.user_id = \?.*ORDER BY pp\.photo_type ASC`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"public_id", "asset_public_id", "photo_type", "angle", "note", "sort_order", "status", "object_key"}))
 }

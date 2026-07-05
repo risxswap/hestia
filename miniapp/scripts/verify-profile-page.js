@@ -60,12 +60,46 @@ const initialSummary = {
   profile: {
     gender: "female",
     height_cm: 165,
+    weight_kg: 52.5,
     body_notes: "想让通勤更利落",
     skin_notes: "偏好低饱和色",
     hair_notes: "希望好打理",
+    face_shape: "方圆脸",
+    upper_body_notes: "肩线偏窄",
+    lower_body_notes: "偏好利落裤装",
+    size_notes: "上衣 M，鞋码 37",
     lifestyle_scenarios: ["通勤", "周末见朋友"],
     style_goal_summary: "更利落"
   },
+  profile_photos: [
+    {
+      public_id: "pph_head",
+      asset_public_id: "ast_head",
+      photo_type: "headshot",
+      angle: "front",
+      note: "正面自然光",
+      sort_order: 10,
+      image: { object_key: "users/12/profile/ast_head.jpg" }
+    },
+    {
+      public_id: "pph_half",
+      asset_public_id: "ast_half",
+      photo_type: "half_body",
+      angle: "side",
+      note: "半身侧面",
+      sort_order: 20,
+      image: { url: "https://example.test/half.jpg" }
+    },
+    {
+      public_id: "pph_full",
+      asset_public_id: "ast_full",
+      photo_type: "full_body",
+      angle: "front",
+      note: "全身正面",
+      sort_order: 30,
+      image: { url: "https://example.test/full.jpg" }
+    }
+  ],
   preferences: {
     style_goals: ["更利落"],
     avoidances: ["过甜"],
@@ -100,6 +134,30 @@ async function main() {
     updateProfilePreferences(data) {
       apiCalls.push({ name: "updateProfilePreferences", data });
       return Promise.resolve(clone(initialSummary));
+    },
+    uploadFileToQiniu(file, options) {
+      apiCalls.push({ name: "uploadFileToQiniu", file, options });
+      return Promise.resolve({
+        asset_public_id: "ast_uploaded",
+        object_key: "users/12/profile/ast_uploaded.jpg",
+        asset_type: "profile_photo"
+      });
+    },
+    createProfilePhoto(data) {
+      apiCalls.push({ name: "createProfilePhoto", data });
+      return Promise.resolve({
+        public_id: "pph_uploaded",
+        asset_public_id: data.asset_public_id,
+        photo_type: data.photo_type,
+        angle: data.angle,
+        note: data.note || "",
+        sort_order: data.sort_order || 0,
+        image: { url: "https://example.test/uploaded.jpg" }
+      });
+    },
+    deleteProfilePhoto(publicID) {
+      apiCalls.push({ name: "deleteProfilePhoto", publicID });
+      return Promise.resolve({ public_id: publicID });
     }
   };
 
@@ -155,10 +213,24 @@ async function main() {
   assert(typeof profileEdit.exported.payloadFromDraft === "function", "profile edit should export payloadFromDraft");
   const profileEditPage = createPageInstance(profileEdit.pageConfig);
   await profileEditPage.loadProfile.call(profileEditPage);
+  assert(profileEditPage.data.draft.weight_kg === "52.5", "profile edit should hydrate weight");
+  assert(profileEditPage.data.draft.face_shape === "方圆脸", "profile edit should hydrate face shape");
+  assert(profileEditPage.data.draft.upper_body_notes === "肩线偏窄", "profile edit should hydrate upper body notes");
+  assert(profileEditPage.data.draft.lower_body_notes === "偏好利落裤装", "profile edit should hydrate lower body notes");
+  assert(profileEditPage.data.draft.size_notes === "上衣 M，鞋码 37", "profile edit should hydrate size notes");
+  assert(profileEditPage.data.photoGroups.headshot.photos.length === 1, "profile edit should group headshot photos");
+  assert(profileEditPage.data.photoGroups.headshot.photos[0].url === "", "profile edit should not use object_key as image URL");
+  assert(profileEditPage.data.photoGroups.half_body.photos.length === 1, "profile edit should group half body photos");
+  assert(profileEditPage.data.photoGroups.full_body.photos.length === 1, "profile edit should group full body photos");
   profileEditPage.setData({
     draft: Object.assign({}, profileEditPage.data.draft, {
       nickname: "新的昵称",
-      scenarioText: "通勤，周末"
+      scenarioText: "通勤，周末",
+      weight_kg: "53",
+      face_shape: "鹅蛋脸",
+      upper_body_notes: "肩线清晰",
+      lower_body_notes: "喜欢直筒裤",
+      size_notes: "上衣 M"
     })
   });
   await profileEditPage.handleSave.call(profileEditPage);
@@ -166,6 +238,64 @@ async function main() {
   assert(profileSave, "profile edit should call updateProfile");
   assert(profileSave.data.nickname === "新的昵称", "profile edit should pass nickname");
   assert(profileSave.data.lifestyle_scenarios.length === 2, "profile edit should split scenarios");
+  assert(profileSave.data.weight_kg === 53, "profile edit should pass numeric weight");
+  assert(profileSave.data.face_shape === "鹅蛋脸", "profile edit should pass face shape");
+  assert(profileSave.data.upper_body_notes === "肩线清晰", "profile edit should pass upper body notes");
+  assert(profileSave.data.lower_body_notes === "喜欢直筒裤", "profile edit should pass lower body notes");
+  assert(profileSave.data.size_notes === "上衣 M", "profile edit should pass size notes");
+
+  const profileEditMarkup = require("fs").readFileSync(path.join(root, "pages/profile/edit.wxml"), "utf8");
+  assert(profileEditMarkup.includes("照片档案"), "profile edit should render photo archive section");
+  assert(profileEditMarkup.includes("自拍/头肩照"), "profile edit should render headshot group");
+  assert(profileEditMarkup.includes("半身照"), "profile edit should render half body group");
+  assert(profileEditMarkup.includes("全身照"), "profile edit should render full body group");
+  assert(!profileEditMarkup.includes("核心衣橱"), "profile edit should not include core wardrobe photos");
+  assert(!profileEditMarkup.includes("显胖"), "profile edit copy should avoid anxiety wording");
+
+  await profileEditPage.handlePhotoUpload.call(profileEditPage, {
+    currentTarget: { dataset: { type: "full_body" } },
+    detail: {
+      file: {
+        url: "wxfile://profile-photo",
+        size: 2048,
+        type: "image/jpeg"
+      }
+    }
+  });
+  const uploadCall = apiCalls.find((call) => call.name === "uploadFileToQiniu");
+  assert(uploadCall, "profile edit should upload selected profile photo");
+  assert(uploadCall.options.assetType === "profile_photo", "profile photo upload should use profile_photo asset type");
+  const createPhotoCall = apiCalls.find((call) => call.name === "createProfilePhoto");
+  assert(createPhotoCall, "profile edit should create profile photo reference after upload");
+  assert(createPhotoCall.data.asset_public_id === "ast_uploaded", "profile photo create should pass uploaded asset id");
+  assert(createPhotoCall.data.photo_type === "full_body", "profile photo create should pass photo type");
+  assert(createPhotoCall.data.angle === "front", "profile photo create should default angle");
+
+  global.wx = {
+    showModal(options) {
+      assert(options.title === "删除照片", "profile photo delete should show confirmation");
+      options.success({ confirm: false });
+    },
+    showToast() {}
+  };
+  await profileEditPage.handleDeletePhoto.call(profileEditPage, {
+    currentTarget: { dataset: { publicId: "pph_full" } }
+  });
+  assert(!apiCalls.find((call) => call.name === "deleteProfilePhoto"), "profile edit should not delete when confirmation is cancelled");
+
+  global.wx = {
+    showModal(options) {
+      assert(options.title === "删除照片", "profile photo delete should show confirmation");
+      options.success({ confirm: true });
+    },
+    showToast() {}
+  };
+  await profileEditPage.handleDeletePhoto.call(profileEditPage, {
+    currentTarget: { dataset: { publicId: "pph_full" } }
+  });
+  global.wx = originalWx;
+  const deletePhotoCall = apiCalls.find((call) => call.name === "deleteProfilePhoto");
+  assert(deletePhotoCall && deletePhotoCall.publicID === "pph_full", "profile edit should delete profile photo reference");
 
   const preferencesEdit = loadPage("pages/preferences/edit.js", apiStub);
   assert(preferencesEdit.pageConfig, "preferences/edit.js should register Page config");

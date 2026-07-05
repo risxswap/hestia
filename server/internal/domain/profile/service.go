@@ -29,12 +29,21 @@ const (
 	maxPreferenceLength  = 60
 	minHeightCM          = 80
 	maxHeightCM          = 250
+	minWeightKG          = 20.0
+	maxWeightKG          = 300.0
+	maxFaceShapeLength   = 80
+	maxProfilePhotoCount = 18
+	maxPhotoGroupCount   = 6
+	maxPhotoNoteLength   = 220
 )
 
 type Repository interface {
 	Summary(ctx context.Context, userID int64) (Summary, error)
 	UpdateExplicitProfile(ctx context.Context, userID int64, input UpdateProfileInput) (Summary, error)
 	UpdateExplicitPreferences(ctx context.Context, userID int64, input UpdatePreferencesInput) (Summary, error)
+	CreateProfilePhoto(ctx context.Context, userID int64, input CreateProfilePhotoInput) (ProfilePhoto, error)
+	UpdateProfilePhoto(ctx context.Context, userID int64, publicID string, input UpdateProfilePhotoInput) (ProfilePhoto, error)
+	DeleteProfilePhoto(ctx context.Context, userID int64, publicID string) error
 	Upsert(ctx context.Context, item Profile) (Profile, error)
 	ReplaceFacts(ctx context.Context, userID int64, profileID int64, facts []Fact) error
 	ReplacePrefs(ctx context.Context, userID int64, profileID int64, prefs []Pref) error
@@ -42,12 +51,25 @@ type Repository interface {
 	MarkUserOnboardingCompleted(ctx context.Context, userID int64) error
 }
 
+type SignedImageURLs = struct {
+	PreviewURL  string
+	OriginalURL string
+}
+
+type ImageURLSigner interface {
+	PrivateImageURLs(ctx context.Context, objectKeys []string) (map[string]SignedImageURLs, error)
+}
+
 type Service struct {
-	repo Repository
+	repo           Repository
+	imageURLSigner ImageURLSigner
 }
 
 var ErrValidation = errors.New("profile validation failed")
 var ErrUserNotFound = errors.New("profile user not found")
+var ErrProfilePhotoNotFound = errors.New("profile photo not found")
+var ErrProfilePhotoLimit = errors.New("profile photo limit reached")
+var ErrProfileAssetNotFound = errors.New("profile photo asset not found")
 
 type ValidationError struct {
 	Field   string
@@ -69,6 +91,13 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
+func (s *Service) SetImageURLSigner(signer ImageURLSigner) {
+	if s == nil {
+		return
+	}
+	s.imageURLSigner = signer
+}
+
 func (s *Service) Summary(ctx context.Context, userID int64) (Summary, error) {
 	if s == nil || s.repo == nil {
 		return Summary{}, errors.New("profile service dependencies are nil")
@@ -77,6 +106,7 @@ func (s *Service) Summary(ctx context.Context, userID int64) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
+	summary.ProfilePhotos = s.enrichProfilePhotos(ctx, summary.ProfilePhotos)
 	summary.QuickEntries = buildQuickEntries(summary)
 	return summary, nil
 }
@@ -93,6 +123,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, request Updat
 	if err != nil {
 		return Summary{}, err
 	}
+	summary.ProfilePhotos = s.enrichProfilePhotos(ctx, summary.ProfilePhotos)
 	summary.QuickEntries = buildQuickEntries(summary)
 	return summary, nil
 }
@@ -109,8 +140,49 @@ func (s *Service) UpdatePreferences(ctx context.Context, userID int64, request U
 	if err != nil {
 		return Summary{}, err
 	}
+	summary.ProfilePhotos = s.enrichProfilePhotos(ctx, summary.ProfilePhotos)
 	summary.QuickEntries = buildQuickEntries(summary)
 	return summary, nil
+}
+
+func (s *Service) CreateProfilePhoto(ctx context.Context, userID int64, request CreateProfilePhotoRequest) (ProfilePhoto, error) {
+	if s == nil || s.repo == nil {
+		return ProfilePhoto{}, errors.New("profile service dependencies are nil")
+	}
+	input, err := validateCreateProfilePhoto(request)
+	if err != nil {
+		return ProfilePhoto{}, err
+	}
+	photo, err := s.repo.CreateProfilePhoto(ctx, userID, input)
+	if err != nil {
+		return ProfilePhoto{}, err
+	}
+	return s.enrichProfilePhoto(ctx, photo), nil
+}
+
+func (s *Service) UpdateProfilePhoto(ctx context.Context, userID int64, publicID string, request UpdateProfilePhotoRequest) (ProfilePhoto, error) {
+	if s == nil || s.repo == nil {
+		return ProfilePhoto{}, errors.New("profile service dependencies are nil")
+	}
+	input, err := validateUpdateProfilePhoto(request)
+	if err != nil {
+		return ProfilePhoto{}, err
+	}
+	photo, err := s.repo.UpdateProfilePhoto(ctx, userID, strings.TrimSpace(publicID), input)
+	if err != nil {
+		return ProfilePhoto{}, err
+	}
+	return s.enrichProfilePhoto(ctx, photo), nil
+}
+
+func (s *Service) DeleteProfilePhoto(ctx context.Context, userID int64, publicID string) error {
+	if s == nil || s.repo == nil {
+		return errors.New("profile service dependencies are nil")
+	}
+	if strings.TrimSpace(publicID) == "" {
+		return ValidationError{Field: "public_id", Message: "required"}
+	}
+	return s.repo.DeleteProfilePhoto(ctx, userID, strings.TrimSpace(publicID))
 }
 
 func (s *Service) UpsertFromOnboarding(ctx context.Context, userID int64, input OnboardingInput) (Profile, error) {
@@ -184,12 +256,17 @@ func (s *Service) CompleteOnboarding(ctx context.Context, userID int64) error {
 
 func validateUpdateProfile(request UpdateProfileRequest) (UpdateProfileInput, error) {
 	input := UpdateProfileInput{
-		Nickname:  sanitizePatchString(request.Nickname),
-		Gender:    sanitizePatchString(request.Gender),
-		HeightCM:  request.HeightCM,
-		BodyNotes: sanitizePatchString(request.BodyNotes),
-		SkinNotes: sanitizePatchString(request.SkinNotes),
-		HairNotes: sanitizePatchString(request.HairNotes),
+		Nickname:       sanitizePatchString(request.Nickname),
+		Gender:         sanitizePatchString(request.Gender),
+		HeightCM:       request.HeightCM,
+		WeightKG:       request.WeightKG,
+		BodyNotes:      sanitizePatchString(request.BodyNotes),
+		SkinNotes:      sanitizePatchString(request.SkinNotes),
+		HairNotes:      sanitizePatchString(request.HairNotes),
+		FaceShape:      sanitizePatchString(request.FaceShape),
+		UpperBodyNotes: sanitizePatchString(request.UpperBodyNotes),
+		LowerBodyNotes: sanitizePatchString(request.LowerBodyNotes),
+		SizeNotes:      sanitizePatchString(request.SizeNotes),
 	}
 	if err := validatePatchString(input.Nickname, "nickname", maxProfileTextLength); err != nil {
 		return UpdateProfileInput{}, err
@@ -206,8 +283,23 @@ func validateUpdateProfile(request UpdateProfileRequest) (UpdateProfileInput, er
 	if err := validatePatchString(input.HairNotes, "hair_notes", maxProfileTextLength); err != nil {
 		return UpdateProfileInput{}, err
 	}
+	if err := validatePatchString(input.FaceShape, "face_shape", maxFaceShapeLength); err != nil {
+		return UpdateProfileInput{}, err
+	}
+	if err := validatePatchString(input.UpperBodyNotes, "upper_body_notes", maxProfileTextLength); err != nil {
+		return UpdateProfileInput{}, err
+	}
+	if err := validatePatchString(input.LowerBodyNotes, "lower_body_notes", maxProfileTextLength); err != nil {
+		return UpdateProfileInput{}, err
+	}
+	if err := validatePatchString(input.SizeNotes, "size_notes", maxProfileTextLength); err != nil {
+		return UpdateProfileInput{}, err
+	}
 	if input.HeightCM.Present && input.HeightCM.Value != nil && (*input.HeightCM.Value < minHeightCM || *input.HeightCM.Value > maxHeightCM) {
 		return UpdateProfileInput{}, ValidationError{Field: "height_cm", Message: "out of range"}
+	}
+	if input.WeightKG.Present && input.WeightKG.Value != nil && (*input.WeightKG.Value < minWeightKG || *input.WeightKG.Value > maxWeightKG) {
+		return UpdateProfileInput{}, ValidationError{Field: "weight_kg", Message: "out of range"}
 	}
 	if request.LifestyleScenarios.Present {
 		scenarios, err := sanitizeStringList(request.LifestyleScenarios.Value, maxScenarioCount, maxScenarioLength, "lifestyle_scenarios")
@@ -217,6 +309,109 @@ func validateUpdateProfile(request UpdateProfileRequest) (UpdateProfileInput, er
 		input.LifestyleScenarios = PatchStringSlice{Present: true, Value: scenarios}
 	}
 	return input, nil
+}
+
+func validateCreateProfilePhoto(request CreateProfilePhotoRequest) (CreateProfilePhotoInput, error) {
+	input := CreateProfilePhotoInput{
+		AssetPublicID: strings.TrimSpace(request.AssetPublicID),
+		PhotoType:     strings.TrimSpace(request.PhotoType),
+		Angle:         strings.TrimSpace(request.Angle),
+		Note:          strings.TrimSpace(request.Note),
+		SortOrder:     request.SortOrder,
+	}
+	if input.AssetPublicID == "" {
+		return CreateProfilePhotoInput{}, ValidationError{Field: "asset_public_id", Message: "required"}
+	}
+	if !validPhotoType(input.PhotoType) {
+		return CreateProfilePhotoInput{}, ValidationError{Field: "photo_type", Message: "unsupported"}
+	}
+	if !validPhotoAngle(input.Angle) {
+		return CreateProfilePhotoInput{}, ValidationError{Field: "angle", Message: "unsupported"}
+	}
+	if len([]rune(input.Note)) > maxPhotoNoteLength {
+		return CreateProfilePhotoInput{}, ValidationError{Field: "note", Message: "too long"}
+	}
+	return input, nil
+}
+
+func validateUpdateProfilePhoto(request UpdateProfilePhotoRequest) (UpdateProfilePhotoInput, error) {
+	input := UpdateProfilePhotoInput{
+		PhotoType: sanitizePatchString(request.PhotoType),
+		Angle:     sanitizePatchString(request.Angle),
+		Note:      sanitizePatchString(request.Note),
+		SortOrder: request.SortOrder,
+		Status:    sanitizePatchString(request.Status),
+	}
+	if input.PhotoType.Present && !validPhotoType(input.PhotoType.Value) {
+		return UpdateProfilePhotoInput{}, ValidationError{Field: "photo_type", Message: "unsupported"}
+	}
+	if input.Angle.Present && !validPhotoAngle(input.Angle.Value) {
+		return UpdateProfilePhotoInput{}, ValidationError{Field: "angle", Message: "unsupported"}
+	}
+	if err := validatePatchString(input.Note, "note", maxPhotoNoteLength); err != nil {
+		return UpdateProfilePhotoInput{}, err
+	}
+	if input.Status.Present && input.Status.Value != StatusActive {
+		return UpdateProfilePhotoInput{}, ValidationError{Field: "status", Message: "unsupported"}
+	}
+	return input, nil
+}
+
+func validPhotoType(value string) bool {
+	switch value {
+	case "headshot", "half_body", "full_body":
+		return true
+	default:
+		return false
+	}
+}
+
+func validPhotoAngle(value string) bool {
+	switch value {
+	case "front", "left_45", "right_45", "side", "back", "natural", "sitting", "other":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) enrichProfilePhoto(ctx context.Context, photo ProfilePhoto) ProfilePhoto {
+	photos := s.enrichProfilePhotos(ctx, []ProfilePhoto{photo})
+	if len(photos) == 0 {
+		return photo
+	}
+	return photos[0]
+}
+
+func (s *Service) enrichProfilePhotos(ctx context.Context, photos []ProfilePhoto) []ProfilePhoto {
+	if s == nil || s.imageURLSigner == nil || len(photos) == 0 {
+		return photos
+	}
+	objectKeys := make([]string, 0, len(photos))
+	for _, photo := range photos {
+		if photo.Image != nil && strings.TrimSpace(photo.Image.ObjectKey) != "" {
+			objectKeys = append(objectKeys, strings.TrimSpace(photo.Image.ObjectKey))
+		}
+	}
+	if len(objectKeys) == 0 {
+		return photos
+	}
+	urls, err := s.imageURLSigner.PrivateImageURLs(ctx, objectKeys)
+	if err != nil {
+		return photos
+	}
+	for index := range photos {
+		if photos[index].Image == nil {
+			continue
+		}
+		signed := urls[photos[index].Image.ObjectKey]
+		if signed.PreviewURL != "" {
+			photos[index].Image.URL = signed.PreviewURL
+		} else if signed.OriginalURL != "" {
+			photos[index].Image.URL = signed.OriginalURL
+		}
+	}
+	return photos
 }
 
 func sanitizePatchString(value PatchString) PatchString {

@@ -158,9 +158,53 @@ function updateProfilePreferences(data) {
   });
 }
 
+function createProfilePhoto(data) {
+  return authorizedRequest({
+    path: "/api/user/profile/photos",
+    method: "POST",
+    data
+  });
+}
+
+function updateProfilePhoto(publicID, data) {
+  return authorizedRequest({
+    path: `/api/user/profile/photos/${publicID}`,
+    method: "PATCH",
+    data
+  });
+}
+
+function deleteProfilePhoto(publicID) {
+  return authorizedRequest({
+    path: `/api/user/profile/photos/${publicID}`,
+    method: "DELETE"
+  });
+}
+
 function getCollectionSummary() {
   return authorizedRequest({
     path: "/api/user/collection"
+  });
+}
+
+function getMemoryItems() {
+  return authorizedRequest({
+    path: "/api/user/memories"
+  });
+}
+
+function updateMemoryItem(publicID, data) {
+  return authorizedRequest({
+    path: `/api/user/memories/${publicID}`,
+    method: "PATCH",
+    data
+  });
+}
+
+function deleteMemoryItem(publicID) {
+  return authorizedRequest({
+    path: `/api/user/memories/${publicID}`,
+    method: "DELETE"
   });
 }
 
@@ -611,7 +655,13 @@ module.exports = {
   getProfileSummary,
   updateProfile,
   updateProfilePreferences,
+  createProfilePhoto,
+  updateProfilePhoto,
+  deleteProfilePhoto,
   getCollectionSummary,
+  getMemoryItems,
+  updateMemoryItem,
+  deleteMemoryItem,
   getHairItems,
   getHairItem,
   createHairItem,

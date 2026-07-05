@@ -39,9 +39,14 @@ SELECT
   p.public_id AS profile_public_id,
   p.gender,
   p.height_cm,
+  p.weight_kg,
   p.body_notes,
   p.skin_notes,
   p.hair_notes,
+  p.face_shape,
+  p.upper_body_notes,
+  p.lower_body_notes,
+  p.size_notes,
   p.lifestyle_scenarios,
   p.style_goal_summary
 FROM users u
@@ -75,6 +80,11 @@ LIMIT 1
 		return Summary{}, err
 	}
 	summary.LatestReport = latest
+	photos, err := r.profilePhotos(ctx, userID)
+	if err != nil {
+		return Summary{}, err
+	}
+	summary.ProfilePhotos = photos
 	return summary, nil
 }
 
@@ -176,19 +186,24 @@ func (r *MySQLRepository) Upsert(ctx context.Context, item Profile) (Profile, er
 	}
 	_, err = r.ext.ExecContext(ctx, `
 INSERT INTO profiles
-  (public_id, user_id, status, gender, height_cm, body_notes, skin_notes, hair_notes, lifestyle_scenarios, style_goal_summary)
+  (public_id, user_id, status, gender, height_cm, weight_kg, body_notes, skin_notes, hair_notes, face_shape, upper_body_notes, lower_body_notes, size_notes, lifestyle_scenarios, style_goal_summary)
 VALUES
-  (?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CAST(? AS JSON), NULLIF(?, ''))
+  (?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CAST(? AS JSON), NULLIF(?, ''))
 ON DUPLICATE KEY UPDATE
   status = VALUES(status),
   gender = VALUES(gender),
   height_cm = VALUES(height_cm),
+  weight_kg = VALUES(weight_kg),
   body_notes = VALUES(body_notes),
   skin_notes = VALUES(skin_notes),
   hair_notes = VALUES(hair_notes),
+  face_shape = VALUES(face_shape),
+  upper_body_notes = VALUES(upper_body_notes),
+  lower_body_notes = VALUES(lower_body_notes),
+  size_notes = VALUES(size_notes),
   lifestyle_scenarios = VALUES(lifestyle_scenarios),
   style_goal_summary = VALUES(style_goal_summary)
-`, item.PublicID, item.UserID, item.Status, item.Gender, item.HeightCM, item.BodyNotes, item.SkinNotes, item.HairNotes, scenarios, item.StyleGoalSummary)
+`, item.PublicID, item.UserID, item.Status, item.Gender, item.HeightCM, item.WeightKG, item.BodyNotes, item.SkinNotes, item.HairNotes, item.FaceShape, item.UpperBodyNotes, item.LowerBodyNotes, item.SizeNotes, scenarios, item.StyleGoalSummary)
 	if err != nil {
 		return Profile{}, err
 	}
@@ -201,9 +216,14 @@ SELECT
   status,
   COALESCE(gender, '') AS gender,
   height_cm,
+  weight_kg,
   COALESCE(body_notes, '') AS body_notes,
   COALESCE(skin_notes, '') AS skin_notes,
   COALESCE(hair_notes, '') AS hair_notes,
+  COALESCE(face_shape, '') AS face_shape,
+  COALESCE(upper_body_notes, '') AS upper_body_notes,
+  COALESCE(lower_body_notes, '') AS lower_body_notes,
+  COALESCE(size_notes, '') AS size_notes,
   COALESCE(style_goal_summary, '') AS style_goal_summary
 FROM profiles
 WHERE user_id = ? AND deleted_at IS NULL
@@ -223,19 +243,24 @@ func (r *MySQLRepository) upsertExplicitProfile(ctx context.Context, item Profil
 	}
 	_, err = r.ext.ExecContext(ctx, `
 INSERT INTO profiles
-  (public_id, user_id, status, gender, height_cm, body_notes, skin_notes, hair_notes, lifestyle_scenarios)
+  (public_id, user_id, status, gender, height_cm, weight_kg, body_notes, skin_notes, hair_notes, face_shape, upper_body_notes, lower_body_notes, size_notes, lifestyle_scenarios)
 VALUES
-  (?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CAST(? AS JSON))
+  (?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CAST(? AS JSON))
 ON DUPLICATE KEY UPDATE
   status = VALUES(status),
   gender = VALUES(gender),
   height_cm = VALUES(height_cm),
+  weight_kg = VALUES(weight_kg),
   body_notes = VALUES(body_notes),
   skin_notes = VALUES(skin_notes),
   hair_notes = VALUES(hair_notes),
+  face_shape = VALUES(face_shape),
+  upper_body_notes = VALUES(upper_body_notes),
+  lower_body_notes = VALUES(lower_body_notes),
+  size_notes = VALUES(size_notes),
   lifestyle_scenarios = VALUES(lifestyle_scenarios),
   deleted_at = NULL
-`, item.PublicID, item.UserID, item.Status, item.Gender, item.HeightCM, item.BodyNotes, item.SkinNotes, item.HairNotes, scenarios)
+`, item.PublicID, item.UserID, item.Status, item.Gender, item.HeightCM, item.WeightKG, item.BodyNotes, item.SkinNotes, item.HairNotes, item.FaceShape, item.UpperBodyNotes, item.LowerBodyNotes, item.SizeNotes, scenarios)
 	if err != nil {
 		return Profile{}, err
 	}
@@ -283,6 +308,10 @@ func (r *MySQLRepository) updateExplicitProfileFields(ctx context.Context, userI
 		sets = append(sets, "height_cm = ?")
 		args = append(args, input.HeightCM.Value)
 	}
+	if input.WeightKG.Present {
+		sets = append(sets, "weight_kg = ?")
+		args = append(args, input.WeightKG.Value)
+	}
 	if input.BodyNotes.Present {
 		sets = append(sets, "body_notes = NULLIF(?, '')")
 		args = append(args, input.BodyNotes.Value)
@@ -294,6 +323,22 @@ func (r *MySQLRepository) updateExplicitProfileFields(ctx context.Context, userI
 	if input.HairNotes.Present {
 		sets = append(sets, "hair_notes = NULLIF(?, '')")
 		args = append(args, input.HairNotes.Value)
+	}
+	if input.FaceShape.Present {
+		sets = append(sets, "face_shape = NULLIF(?, '')")
+		args = append(args, input.FaceShape.Value)
+	}
+	if input.UpperBodyNotes.Present {
+		sets = append(sets, "upper_body_notes = NULLIF(?, '')")
+		args = append(args, input.UpperBodyNotes.Value)
+	}
+	if input.LowerBodyNotes.Present {
+		sets = append(sets, "lower_body_notes = NULLIF(?, '')")
+		args = append(args, input.LowerBodyNotes.Value)
+	}
+	if input.SizeNotes.Present {
+		sets = append(sets, "size_notes = NULLIF(?, '')")
+		args = append(args, input.SizeNotes.Value)
 	}
 	if input.LifestyleScenarios.Present {
 		scenarios, err := jsonText(input.LifestyleScenarios.Value)
@@ -325,15 +370,237 @@ SELECT
   status,
   COALESCE(gender, '') AS gender,
   height_cm,
+  weight_kg,
   COALESCE(body_notes, '') AS body_notes,
   COALESCE(skin_notes, '') AS skin_notes,
   COALESCE(hair_notes, '') AS hair_notes,
+  COALESCE(face_shape, '') AS face_shape,
+  COALESCE(upper_body_notes, '') AS upper_body_notes,
+  COALESCE(lower_body_notes, '') AS lower_body_notes,
+  COALESCE(size_notes, '') AS size_notes,
   COALESCE(style_goal_summary, '') AS style_goal_summary
 FROM profiles
 WHERE user_id = ? AND deleted_at IS NULL
 LIMIT 1
 `, userID)
 	return saved, err
+}
+
+func (r *MySQLRepository) CreateProfilePhoto(ctx context.Context, userID int64, input CreateProfilePhotoInput) (ProfilePhoto, error) {
+	if r == nil || r.ext == nil {
+		return ProfilePhoto{}, errors.New("profile repository database is nil")
+	}
+	if starter, ok := r.ext.(txStarter); ok {
+		tx, err := starter.BeginTxx(ctx, nil)
+		if err != nil {
+			return ProfilePhoto{}, err
+		}
+		txRepo := &MySQLRepository{ext: tx}
+		photo, err := txRepo.createProfilePhoto(ctx, userID, input)
+		if err != nil {
+			_ = tx.Rollback()
+			return ProfilePhoto{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return ProfilePhoto{}, err
+		}
+		return photo, nil
+	}
+	return r.createProfilePhoto(ctx, userID, input)
+}
+
+func (r *MySQLRepository) createProfilePhoto(ctx context.Context, userID int64, input CreateProfilePhotoInput) (ProfilePhoto, error) {
+	if err := r.ensureUserExistsForUpdate(ctx, userID); err != nil {
+		return ProfilePhoto{}, err
+	}
+	profile, err := r.ensureActiveProfile(ctx, userID)
+	if err != nil {
+		return ProfilePhoto{}, err
+	}
+	if err := r.requireProfilePhotoCapacity(ctx, userID, input.PhotoType); err != nil {
+		return ProfilePhoto{}, err
+	}
+	asset, err := r.findProfilePhotoAsset(ctx, userID, input.AssetPublicID)
+	if err != nil {
+		return ProfilePhoto{}, err
+	}
+	publicID := id.NewPublicID("pph")
+	_, err = r.ext.ExecContext(ctx, `
+INSERT INTO profile_photos
+  (public_id, user_id, profile_id, asset_public_id, photo_type, angle, note, sort_order, status)
+VALUES
+  (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+`, publicID, userID, profile.ID, asset.PublicID, input.PhotoType, input.Angle, input.Note, input.SortOrder, StatusActive)
+	if err != nil {
+		return ProfilePhoto{}, err
+	}
+	return r.findProfilePhoto(ctx, userID, publicID)
+}
+
+func (r *MySQLRepository) UpdateProfilePhoto(ctx context.Context, userID int64, publicID string, input UpdateProfilePhotoInput) (ProfilePhoto, error) {
+	if r == nil || r.ext == nil {
+		return ProfilePhoto{}, errors.New("profile repository database is nil")
+	}
+	if input.PhotoType.Present {
+		currentType, err := r.findProfilePhotoType(ctx, userID, publicID)
+		if err != nil {
+			return ProfilePhoto{}, err
+		}
+		if currentType != input.PhotoType.Value {
+			if err := r.requireProfilePhotoCapacity(ctx, userID, input.PhotoType.Value); err != nil {
+				return ProfilePhoto{}, err
+			}
+		}
+	}
+	sets := make([]string, 0, 5)
+	args := make([]any, 0, 7)
+	if input.PhotoType.Present {
+		sets = append(sets, "photo_type = ?")
+		args = append(args, input.PhotoType.Value)
+	}
+	if input.Angle.Present {
+		sets = append(sets, "angle = ?")
+		args = append(args, input.Angle.Value)
+	}
+	if input.Note.Present {
+		sets = append(sets, "note = NULLIF(?, '')")
+		args = append(args, input.Note.Value)
+	}
+	if input.SortOrder.Present {
+		sets = append(sets, "sort_order = ?")
+		if input.SortOrder.Value == nil {
+			args = append(args, 0)
+		} else {
+			args = append(args, *input.SortOrder.Value)
+		}
+	}
+	if input.Status.Present {
+		sets = append(sets, "status = ?")
+		args = append(args, input.Status.Value)
+	}
+	if len(sets) > 0 {
+		args = append(args, userID, strings.TrimSpace(publicID))
+		result, err := r.ext.ExecContext(ctx, `
+UPDATE profile_photos
+SET `+strings.Join(sets, ", ")+`
+WHERE user_id = ? AND public_id = ? AND deleted_at IS NULL
+`, args...)
+		if err != nil {
+			return ProfilePhoto{}, err
+		}
+		if err := dbutil.RequireRowsAffected(result, "profile photo update"); err != nil {
+			return ProfilePhoto{}, ErrProfilePhotoNotFound
+		}
+	}
+	return r.findProfilePhoto(ctx, userID, publicID)
+}
+
+func (r *MySQLRepository) findProfilePhotoType(ctx context.Context, userID int64, publicID string) (string, error) {
+	var photoType string
+	err := sqlx.GetContext(ctx, r.ext, &photoType, `
+SELECT photo_type
+FROM profile_photos
+WHERE user_id = ?
+  AND public_id = ?
+  AND deleted_at IS NULL
+LIMIT 1
+`, userID, strings.TrimSpace(publicID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrProfilePhotoNotFound
+	}
+	return photoType, err
+}
+
+func (r *MySQLRepository) DeleteProfilePhoto(ctx context.Context, userID int64, publicID string) error {
+	if r == nil || r.ext == nil {
+		return errors.New("profile repository database is nil")
+	}
+	result, err := r.ext.ExecContext(ctx, `
+UPDATE profile_photos
+SET deleted_at = CURRENT_TIMESTAMP(3), status = 'deleted'
+WHERE user_id = ? AND public_id = ? AND deleted_at IS NULL
+`, userID, strings.TrimSpace(publicID))
+	if err != nil {
+		return err
+	}
+	if err := dbutil.RequireRowsAffected(result, "profile photo delete"); err != nil {
+		return ErrProfilePhotoNotFound
+	}
+	return nil
+}
+
+type profilePhotoAsset struct {
+	PublicID  string `db:"public_id"`
+	ObjectKey string `db:"object_key"`
+}
+
+func (r *MySQLRepository) findProfilePhotoAsset(ctx context.Context, userID int64, publicID string) (profilePhotoAsset, error) {
+	var asset profilePhotoAsset
+	err := sqlx.GetContext(ctx, r.ext, &asset, `
+SELECT public_id, object_key
+FROM files
+WHERE public_id = ?
+  AND owner_user_id = ?
+  AND asset_type = 'profile_photo'
+  AND status <> 'deleted'
+  AND deleted_at IS NULL
+LIMIT 1
+`, strings.TrimSpace(publicID), userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return profilePhotoAsset{}, ErrProfileAssetNotFound
+	}
+	return asset, err
+}
+
+func (r *MySQLRepository) requireProfilePhotoCapacity(ctx context.Context, userID int64, photoType string) error {
+	var counts struct {
+		Total int `db:"total"`
+		Group int `db:"group_count"`
+	}
+	err := sqlx.GetContext(ctx, r.ext, &counts, `
+SELECT
+  COUNT(*) AS total,
+  COALESCE(SUM(CASE WHEN photo_type = ? THEN 1 ELSE 0 END), 0) AS group_count
+FROM profile_photos
+WHERE user_id = ?
+  AND deleted_at IS NULL
+`, photoType, userID)
+	if err != nil {
+		return err
+	}
+	if counts.Total >= maxProfilePhotoCount || counts.Group >= maxPhotoGroupCount {
+		return ErrProfilePhotoLimit
+	}
+	return nil
+}
+
+func (r *MySQLRepository) profilePhotos(ctx context.Context, userID int64) ([]ProfilePhoto, error) {
+	var rows []profilePhotoRow
+	if err := sqlx.SelectContext(ctx, r.ext, &rows, profilePhotoSelectSQL(`
+WHERE pp.user_id = ?
+  AND pp.deleted_at IS NULL
+ORDER BY pp.photo_type ASC, pp.sort_order ASC, pp.id ASC
+`), userID); err != nil {
+		return nil, err
+	}
+	return profilePhotoRows(rows), nil
+}
+
+func (r *MySQLRepository) findProfilePhoto(ctx context.Context, userID int64, publicID string) (ProfilePhoto, error) {
+	var row profilePhotoRow
+	err := sqlx.GetContext(ctx, r.ext, &row, profilePhotoSelectSQL(`
+WHERE pp.user_id = ?
+  AND pp.public_id = ?
+  AND pp.deleted_at IS NULL
+LIMIT 1
+`), userID, strings.TrimSpace(publicID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProfilePhoto{}, ErrProfilePhotoNotFound
+	}
+	if err != nil {
+		return ProfilePhoto{}, err
+	}
+	return row.profilePhoto(), nil
 }
 
 func (r *MySQLRepository) ReplaceFacts(ctx context.Context, userID int64, profileID int64, facts []Fact) error {
@@ -537,18 +804,23 @@ ORDER BY id ASC
 }
 
 type profileSummaryRow struct {
-	UserPublicID       string         `db:"user_public_id"`
-	Nickname           string         `db:"nickname"`
-	OnboardingStatus   string         `db:"onboarding_status"`
-	ProfileID          sql.NullInt64  `db:"profile_id"`
-	ProfilePublicID    sql.NullString `db:"profile_public_id"`
-	Gender             sql.NullString `db:"gender"`
-	HeightCM           sql.NullInt64  `db:"height_cm"`
-	BodyNotes          sql.NullString `db:"body_notes"`
-	SkinNotes          sql.NullString `db:"skin_notes"`
-	HairNotes          sql.NullString `db:"hair_notes"`
-	LifestyleScenarios sql.NullString `db:"lifestyle_scenarios"`
-	StyleGoalSummary   sql.NullString `db:"style_goal_summary"`
+	UserPublicID       string          `db:"user_public_id"`
+	Nickname           string          `db:"nickname"`
+	OnboardingStatus   string          `db:"onboarding_status"`
+	ProfileID          sql.NullInt64   `db:"profile_id"`
+	ProfilePublicID    sql.NullString  `db:"profile_public_id"`
+	Gender             sql.NullString  `db:"gender"`
+	HeightCM           sql.NullInt64   `db:"height_cm"`
+	WeightKG           sql.NullFloat64 `db:"weight_kg"`
+	BodyNotes          sql.NullString  `db:"body_notes"`
+	SkinNotes          sql.NullString  `db:"skin_notes"`
+	HairNotes          sql.NullString  `db:"hair_notes"`
+	FaceShape          sql.NullString  `db:"face_shape"`
+	UpperBodyNotes     sql.NullString  `db:"upper_body_notes"`
+	LowerBodyNotes     sql.NullString  `db:"lower_body_notes"`
+	SizeNotes          sql.NullString  `db:"size_notes"`
+	LifestyleScenarios sql.NullString  `db:"lifestyle_scenarios"`
+	StyleGoalSummary   sql.NullString  `db:"style_goal_summary"`
 }
 
 func (r profileSummaryRow) toSummary() (Summary, error) {
@@ -572,6 +844,10 @@ func (r profileSummaryRow) toSummary() (Summary, error) {
 		BodyNotes:          r.BodyNotes.String,
 		SkinNotes:          r.SkinNotes.String,
 		HairNotes:          r.HairNotes.String,
+		FaceShape:          r.FaceShape.String,
+		UpperBodyNotes:     r.UpperBodyNotes.String,
+		LowerBodyNotes:     r.LowerBodyNotes.String,
+		SizeNotes:          r.SizeNotes.String,
 		LifestyleScenarios: scenarios,
 		StyleGoalSummary:   r.StyleGoalSummary.String,
 	}
@@ -579,8 +855,66 @@ func (r profileSummaryRow) toSummary() (Summary, error) {
 		height := int(r.HeightCM.Int64)
 		profile.HeightCM = &height
 	}
+	if r.WeightKG.Valid {
+		weight := r.WeightKG.Float64
+		profile.WeightKG = &weight
+	}
 	summary.Profile = profile
 	return summary, nil
+}
+
+type profilePhotoRow struct {
+	PublicID      string         `db:"public_id"`
+	AssetPublicID string         `db:"asset_public_id"`
+	PhotoType     string         `db:"photo_type"`
+	Angle         string         `db:"angle"`
+	Note          sql.NullString `db:"note"`
+	SortOrder     int            `db:"sort_order"`
+	Status        string         `db:"status"`
+	ObjectKey     sql.NullString `db:"object_key"`
+}
+
+func (r profilePhotoRow) profilePhoto() ProfilePhoto {
+	photo := ProfilePhoto{
+		PublicID:      r.PublicID,
+		AssetPublicID: r.AssetPublicID,
+		PhotoType:     r.PhotoType,
+		Angle:         r.Angle,
+		Note:          r.Note.String,
+		SortOrder:     r.SortOrder,
+		Status:        r.Status,
+	}
+	if r.ObjectKey.Valid && r.ObjectKey.String != "" {
+		photo.Image = &ProfilePhotoImage{ObjectKey: r.ObjectKey.String}
+	}
+	return photo
+}
+
+func profilePhotoRows(rows []profilePhotoRow) []ProfilePhoto {
+	photos := make([]ProfilePhoto, 0, len(rows))
+	for _, row := range rows {
+		photos = append(photos, row.profilePhoto())
+	}
+	return photos
+}
+
+func profilePhotoSelectSQL(where string) string {
+	return `
+SELECT
+  pp.public_id,
+  pp.asset_public_id,
+  pp.photo_type,
+  pp.angle,
+  pp.note,
+  pp.sort_order,
+  pp.status,
+  f.object_key
+FROM profile_photos pp
+LEFT JOIN files f
+  ON f.public_id = pp.asset_public_id
+  AND f.owner_user_id = pp.user_id
+  AND f.deleted_at IS NULL
+` + where
 }
 
 type latestReportSummaryRow struct {
@@ -618,6 +952,12 @@ func explicitProfileFacts(input UpdateProfileInput) []Fact {
 	if input.HeightCM.Present && input.HeightCM.Value != nil {
 		facts = append(facts, Fact{Key: "height_cm", Value: input.HeightCM.Value, Source: SourceUser})
 	}
+	if input.WeightKG.Present && input.WeightKG.Value != nil {
+		facts = append(facts, Fact{Key: "weight_kg", Value: input.WeightKG.Value, Source: SourceUser})
+	}
+	if input.FaceShape.Present && input.FaceShape.Value != "" {
+		facts = append(facts, Fact{Key: "face_shape", Value: input.FaceShape.Value, Source: SourceUser})
+	}
 	if input.LifestyleScenarios.Present {
 		facts = append(facts, Fact{Key: "lifestyle_scenarios", Value: input.LifestyleScenarios.Value, Source: SourceUser})
 	}
@@ -632,6 +972,12 @@ func explicitProfileFactKeys(input UpdateProfileInput) []string {
 	if input.HeightCM.Present {
 		keys = append(keys, "height_cm")
 	}
+	if input.WeightKG.Present {
+		keys = append(keys, "weight_kg")
+	}
+	if input.FaceShape.Present {
+		keys = append(keys, "face_shape")
+	}
 	if input.LifestyleScenarios.Present {
 		keys = append(keys, "lifestyle_scenarios")
 	}
@@ -641,9 +987,14 @@ func explicitProfileFactKeys(input UpdateProfileInput) []string {
 func hasProfileFieldPatch(input UpdateProfileInput) bool {
 	return input.Gender.Present ||
 		input.HeightCM.Present ||
+		input.WeightKG.Present ||
 		input.BodyNotes.Present ||
 		input.SkinNotes.Present ||
 		input.HairNotes.Present ||
+		input.FaceShape.Present ||
+		input.UpperBodyNotes.Present ||
+		input.LowerBodyNotes.Present ||
+		input.SizeNotes.Present ||
 		input.LifestyleScenarios.Present
 }
 
