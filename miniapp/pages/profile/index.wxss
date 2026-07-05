@@ -4,13 +4,6 @@
   gap: 24rpx;
 }
 
-.title {
-  color: #27231f;
-  font-size: 42rpx;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
 .section-title {
   color: #27231f;
   font-size: 30rpx;
@@ -24,33 +17,12 @@
   line-height: 1.55;
 }
 
-.eyebrow {
-  color: #71695d;
-  font-size: 22rpx;
-  font-weight: 600;
-}
-
-.profile-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24rpx;
-  padding-top: 8rpx;
-}
-
-.identity-copy,
 .section-head,
 .edit-panel,
 .privacy-panel,
 .state-card {
   display: flex;
   flex-direction: column;
-}
-
-.identity-copy {
-  min-width: 0;
-  flex: 1;
-  gap: 10rpx;
 }
 
 .section-head {
@@ -88,21 +60,6 @@
   line-height: 1.5;
 }
 
-.memory-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10rpx;
-}
-
-.memory-item {
-  min-width: 0;
-  padding: 18rpx 10rpx;
-  border: 1rpx solid #e6ded0;
-  border-radius: 12rpx;
-  background: #fffaf2;
-  text-align: center;
-}
-
 .memory-value {
   display: block;
   color: #245d4f;
@@ -111,17 +68,9 @@
   line-height: 1.2;
 }
 
-.memory-label {
-  display: block;
-  margin-top: 6rpx;
-  color: #71695d;
-  font-size: 21rpx;
-  line-height: 1.25;
-}
-
-.quick-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.quick-list {
+  display: flex;
+  flex-direction: column;
   gap: 16rpx;
 }
 
@@ -148,15 +97,24 @@
 }
 
 .quick-entry {
-  align-items: flex-start;
-  min-height: 180rpx;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 124rpx;
   padding: 24rpx;
   border: 1rpx solid #e6ded0;
   color: #27231f;
   background: #fffdf8;
-  flex-direction: column;
-  gap: 10rpx;
+  flex-direction: row;
+  gap: 20rpx;
   text-align: left;
+}
+
+.quick-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8rpx;
 }
 
 .quick-title {
@@ -171,7 +129,7 @@
 }
 
 .quick-action {
-  margin-top: auto;
+  flex: 0 0 auto;
   color: #245d4f;
   font-size: 23rpx;
   font-weight: 700;
@@ -258,12 +216,6 @@
 .privacy-panel--active {
   border-color: #245d4f;
   box-shadow: 0 14rpx 36rpx rgba(36, 93, 79, 0.12);
-}
-
-.small-button {
-  flex: 0 0 auto;
-  min-width: 150rpx;
-  padding: 0 20rpx;
 }
 
 .action-button,

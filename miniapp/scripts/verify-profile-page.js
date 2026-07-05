@@ -117,7 +117,24 @@ async function main() {
   assert(profilePage.data.user.nickname === "明明", "profile index should hydrate user nickname");
   assert(profilePage.data.profileDraft.scenarioText === "通勤、周末见朋友", "profile index should hydrate scenario summary");
   assert(profilePage.data.preferencesDraft.avoidancesText === "过甜", "profile index should hydrate avoidance summary");
-  assert(profilePage.data.memoryItems.length === 5, "profile index should show memory summary items");
+  assert(profilePage.data.quickEntries.map((entry) => entry.key).join(",") === "profile,preferences,memory,report,privacy", "profile entries should keep memory before privacy");
+
+  const profileMarkup = require("fs").readFileSync(path.join(root, "pages/profile/index.wxml"), "utf8");
+  const profileStyles = require("fs").readFileSync(path.join(root, "pages/profile/index.wxss"), "utf8");
+  assert(!profileMarkup.includes("我的形象档案"), "profile index should not show top identity title");
+  assert(!profileMarkup.includes("用户："), "profile index should not show user id copy");
+  assert(!profileMarkup.includes("本地开发用户"), "profile index should not show local user fallback copy");
+  assert(!profileMarkup.includes("onboarding"), "profile index should not show onboarding status copy");
+  assert(!profileMarkup.includes("补充档案"), "profile index should not show supplemental profile action");
+  assert(!profileMarkup.includes("handleStartOnboarding"), "profile index should not bind onboarding action");
+  assert(!profileMarkup.includes("档案摘要"), "profile index should not duplicate profile summary");
+  assert(!profileMarkup.includes("长期记忆摘要"), "profile index should not duplicate memory summary");
+  assert(!Object.prototype.hasOwnProperty.call(profilePage.data, "memoryItems"), "profile index should not prepare removed memory summary data");
+  assert(profileMarkup.includes('class="quick-list"'), "profile index should render quick entries as a single-column list");
+  assert(!profileMarkup.includes('class="quick-grid"'), "profile index should no longer render quick entries as a grid");
+  assert(profileStyles.includes(".quick-list"), "profile index styles should define single-column quick list");
+  assert(!profileStyles.includes(".quick-grid"), "profile index styles should remove quick grid layout");
+  assert(!profileStyles.includes(".memory-grid"), "profile index styles should remove memory summary grid");
 
   const navigations = [];
   const originalWx = global.wx;

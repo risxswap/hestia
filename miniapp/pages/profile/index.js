@@ -77,33 +77,23 @@ function joinList(value) {
 }
 
 function normalizeQuickEntries(entries) {
-  const source = Array.isArray(entries) && entries.length ? entries : fallbackQuickEntries;
-  const merged = source.map((entry, index) => {
-    const fallback = quickEntryFallbackByKey[entry.key] || fallbackQuickEntries[index] || fallbackQuickEntries[0];
+  const source = Array.isArray(entries) ? entries : [];
+  const entryByKey = source.reduce((result, entry) => {
+    if (entry && entry.key) {
+      result[entry.key] = entry;
+    }
+    return result;
+  }, {});
+
+  return fallbackQuickEntries.map((fallback) => {
+    const entry = entryByKey[fallback.key] || {};
     return {
-      key: entry.key || fallback.key,
+      key: fallback.key,
       title: entry.title || fallback.title,
       summary: entry.summary || fallback.summary,
       action: entry.action || fallback.action
     };
   });
-  fallbackQuickEntries.forEach((entry) => {
-    if (!merged.some((item) => item.key === entry.key)) {
-      merged.push(entry);
-    }
-  });
-  return merged.slice(0, 5);
-}
-
-function normalizeMemorySummary(memorySummary) {
-  const memory = memorySummary || {};
-  return [
-    { label: "事实", value: Number(memory.fact_count || 0) },
-    { label: "偏好", value: Number(memory.preference_count || 0) },
-    { label: "禁忌", value: Number(memory.avoidance_count || 0) },
-    { label: "推断", value: Number(memory.inference_count || 0) },
-    { label: "待确认", value: Number(memory.pending_confirmation_count || 0) }
-  ];
 }
 
 function buildProfileDraft(summary) {
@@ -155,7 +145,6 @@ function normalizeProfileSummary(rawSummary) {
     profile,
     latestReport,
     quickEntries: normalizeQuickEntries(summary.quick_entries),
-    memoryItems: normalizeMemorySummary(summary.memory_summary),
     profileDraft: hasSummary ? buildProfileDraft(summary) : Object.assign({}, emptyProfileDraft),
     preferencesDraft: hasSummary ? buildPreferencesDraft(summary) : Object.assign({}, emptyPreferencesDraft)
   };
@@ -181,7 +170,6 @@ function emptyLocalProfileState() {
     latestReport: null,
     activeSection: "",
     quickEntries: [],
-    memoryItems: normalizeMemorySummary(),
     profileDraft: Object.assign({}, emptyProfileDraft),
     preferencesDraft: Object.assign({}, emptyPreferencesDraft)
   };
@@ -240,7 +228,6 @@ const profilePageConfig = {
     latestReport: null,
     activeSection: "",
     quickEntries: fallbackQuickEntries,
-    memoryItems: normalizeMemorySummary(),
     profileDraft: Object.assign({}, emptyProfileDraft),
     preferencesDraft: Object.assign({}, emptyPreferencesDraft)
   },
@@ -373,14 +360,6 @@ const profilePageConfig = {
 
     if (typeof wx !== "undefined" && wx.navigateTo) {
       wx.navigateTo({ url });
-    }
-  },
-
-  handleStartOnboarding() {
-    if (typeof wx !== "undefined" && wx.navigateTo) {
-      wx.navigateTo({
-        url: "/pages/onboarding/onboarding"
-      });
     }
   },
 

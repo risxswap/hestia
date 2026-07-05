@@ -120,7 +120,18 @@ async function verifyRoutesAndStaticContracts() {
   assert(!clothesDetailMarkup.includes("<textarea"), "clothes detail should not include textareas");
   assert(!clothesDetailMarkup.includes("保存"), "clothes detail should not include save action");
   assert(read("pages/clothes/edit.wxml").includes("保存"), "clothes edit should include save action");
-  assert(read("pages/profile/index.wxml").includes("概览页不承载表单"), "profile index should not expose inline forms");
+  const profileMarkup = read("pages/profile/index.wxml");
+  assert(!profileMarkup.includes("<input"), "profile index should not expose inline inputs");
+  assert(!profileMarkup.includes("<textarea"), "profile index should not expose inline textareas");
+  assert(!profileMarkup.includes("我的形象档案"), "profile index should not show top identity title");
+  assert(!profileMarkup.includes("用户："), "profile index should not show user id copy");
+  assert(!profileMarkup.includes("本地开发用户"), "profile index should not show local user fallback copy");
+  assert(!profileMarkup.includes("onboarding"), "profile index should not show onboarding status copy");
+  assert(!profileMarkup.includes("补充档案"), "profile index should not show supplemental profile action");
+  assert(!profileMarkup.includes("handleStartOnboarding"), "profile index should not bind onboarding action");
+  assert(!profileMarkup.includes("档案摘要"), "profile index should not duplicate profile summary");
+  assert(!profileMarkup.includes("长期记忆摘要"), "profile index should not duplicate memory summary");
+  assert(profileMarkup.includes('class="quick-list"'), "profile index should render entries as rows");
 }
 
 async function verifyCollectionPage() {

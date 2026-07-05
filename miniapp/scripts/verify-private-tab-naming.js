@@ -151,7 +151,14 @@ assert(!clothesEditMarkup.includes('bind:success="handleImageUpload"'), "clothes
 
 assert(!profileMarkup.includes("<input"), "profile index should not include profile form inputs");
 assert(!profileMarkup.includes("<textarea"), "profile index should not include textareas");
-assert(profileMarkup.includes("档案摘要"), "profile index should show summary");
-assert(profileMarkup.includes("概览页不承载表单"), "profile index should explain no inline form");
+assert(!profileMarkup.includes("我的形象档案"), "profile index should not show top identity title");
+assert(!profileMarkup.includes("用户："), "profile index should not show user id copy");
+assert(!profileMarkup.includes("本地开发用户"), "profile index should not show local user fallback copy");
+assert(!profileMarkup.includes("onboarding"), "profile index should not show onboarding status copy");
+assert(!profileMarkup.includes("补充档案"), "profile index should not show supplemental profile action");
+assert(!profileMarkup.includes("handleStartOnboarding"), "profile index should not bind onboarding action");
+assert(!profileMarkup.includes("档案摘要"), "profile index should not duplicate profile summary");
+assert(!profileMarkup.includes("长期记忆摘要"), "profile index should not duplicate memory summary");
+assert(profileMarkup.includes('class="quick-list"'), "profile index should render entries as rows");
 
 console.log("private tab naming verification passed");
