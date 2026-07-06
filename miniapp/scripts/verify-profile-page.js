@@ -211,6 +211,7 @@ async function main() {
   const profileEdit = loadPage("pages/profile/edit.js", apiStub);
   assert(profileEdit.pageConfig, "profile/edit.js should register Page config");
   assert(typeof profileEdit.exported.payloadFromDraft === "function", "profile edit should export payloadFromDraft");
+  assert(profileEdit.exported.payloadFromDraft({ gender: "custom" }).gender === "female", "profile edit payload should normalize unknown gender to allowed option");
   const profileEditPage = createPageInstance(profileEdit.pageConfig);
   await profileEditPage.loadProfile.call(profileEditPage);
   assert(profileEditPage.data.draft.weight_kg === "52.5", "profile edit should hydrate weight");
@@ -222,10 +223,35 @@ async function main() {
   assert(profileEditPage.data.photoGroups.headshot.photos[0].url === "", "profile edit should not use object_key as image URL");
   assert(profileEditPage.data.photoGroups.half_body.photos.length === 1, "profile edit should group half body photos");
   assert(profileEditPage.data.photoGroups.full_body.photos.length === 1, "profile edit should group full body photos");
+  assert(profileEditPage.data.photoObservations.length === 3, "profile edit should render three fixed observation groups");
+  assert(profileEditPage.data.photoObservations.map((group) => group.title).join(",") === "脸型与五官比例,身形与比例,肤色、妆发与发型", "profile edit should use fixed observation group titles");
+  assert(profileEditPage.data.photoObservations.map((group) => group.noteLabel).join(",") === "脸型与五官比例备注,身形与比例备注,肤色、妆发与发型备注", "profile edit should label observation note fields as notes");
+  assert(!profileEditPage.data.photoObservations.map((group) => group.noteLabel).join(",").includes("描述"), "profile edit note labels should not use description wording");
+  assert(profileEditPage.data.photoObservations.map((group) => group.noteField).join(",") === "face_shape,body_notes,skin_notes", "profile edit should attach note fields to photo observation groups");
+  assert(profileEditPage.data.photoObservations.map((group) => group.noteValue).join("|") === "方圆脸|想让通勤更利落|偏好低饱和色", "profile edit should expose observation note values without dynamic template lookup");
+  assert(profileEditPage.data.photoObservations.every((group) => Array.isArray(group.photos)), "profile edit should expose uploaded photos per observation group");
+  assert(profileEditPage.data.photoObservations[0].photos.length === 1, "profile edit face group should show uploaded photos instead of all empty slots");
+  assert(profileEditPage.data.photoObservations[1].photos.length === 1, "profile edit body group should show uploaded photos instead of all empty slots");
+  const observationSlots = profileEditPage.data.photoObservations.reduce((items, group) => items.concat(group.slots), []);
+  assert(observationSlots.map((slot) => slot.label).includes("正面头肩照"), "profile edit should define front headshot slot");
+  assert(observationSlots.map((slot) => slot.label).includes("左 45 度头肩照"), "profile edit should define left 45 headshot slot");
+  assert(observationSlots.map((slot) => slot.label).includes("右 45 度头肩照"), "profile edit should define right 45 headshot slot");
+  assert(observationSlots.map((slot) => slot.label).includes("侧面头肩照"), "profile edit should define side headshot slot");
+  assert(observationSlots.map((slot) => slot.label).includes("正面全身照"), "profile edit should define front full body slot");
+  assert(observationSlots.map((slot) => slot.label).includes("侧面全身照"), "profile edit should define side full body slot");
+  assert(observationSlots.map((slot) => slot.label).includes("背面全身照"), "profile edit should define back full body slot");
+  assert(observationSlots.map((slot) => slot.label).includes("日常站姿全身照"), "profile edit should define natural full body slot");
+  assert(observationSlots.map((slot) => slot.label).includes("自然光近照"), "profile edit should define natural light close-up slot");
+  assert(observationSlots.map((slot) => slot.label).includes("日常妆发照"), "profile edit should define daily makeup slot");
+  assert(observationSlots.map((slot) => slot.label).includes("发型侧面照"), "profile edit should define side hair slot");
+  assert(observationSlots.map((slot) => slot.label).includes("发型背面照"), "profile edit should define back hair slot");
+  assert(observationSlots.every((slot) => slot.photoType && slot.angle), "profile edit fixed photo slots should carry upload type and angle");
+  assert(observationSlots.map((slot) => slot.photoType).includes("headshot"), "profile edit fixed slots should include headshot upload type");
+  assert(observationSlots.map((slot) => slot.photoType).includes("half_body"), "profile edit fixed slots should include half body upload type");
+  assert(observationSlots.map((slot) => slot.photoType).includes("full_body"), "profile edit fixed slots should include full body upload type");
   profileEditPage.setData({
     draft: Object.assign({}, profileEditPage.data.draft, {
       nickname: "新的昵称",
-      scenarioText: "通勤，周末",
       weight_kg: "53",
       face_shape: "鹅蛋脸",
       upper_body_notes: "肩线清晰",
@@ -237,7 +263,8 @@ async function main() {
   const profileSave = apiCalls.find((call) => call.name === "updateProfile");
   assert(profileSave, "profile edit should call updateProfile");
   assert(profileSave.data.nickname === "新的昵称", "profile edit should pass nickname");
-  assert(profileSave.data.lifestyle_scenarios.length === 2, "profile edit should split scenarios");
+  assert(profileSave.data.gender === "female", "profile edit should preserve loaded gender before picker changes");
+  assert(profileSave.data.lifestyle_scenarios.join(",") === "通勤,周末见朋友", "profile edit should preserve loaded scenarios without rendering a scenario input");
   assert(profileSave.data.weight_kg === 53, "profile edit should pass numeric weight");
   assert(profileSave.data.face_shape === "鹅蛋脸", "profile edit should pass face shape");
   assert(profileSave.data.upper_body_notes === "肩线清晰", "profile edit should pass upper body notes");
@@ -245,12 +272,73 @@ async function main() {
   assert(profileSave.data.size_notes === "上衣 M", "profile edit should pass size notes");
 
   const profileEditMarkup = require("fs").readFileSync(path.join(root, "pages/profile/edit.wxml"), "utf8");
+  const profileEditStyles = require("fs").readFileSync(path.join(root, "pages/profile/edit.wxss"), "utf8");
+  assert(!profileEditMarkup.includes("性别表达"), "profile edit should rename gender expression to gender");
+  assert(profileEditMarkup.includes("<picker"), "profile edit should use picker for gender");
+  assert(profileEditMarkup.includes('range="{{genderOptions}}"'), "profile edit gender picker should use genderOptions");
+  assert(profileEditStyles.includes(".picker-field"), "profile edit should style gender picker field");
+  assert(/\.picker-field\s*\{[^}]*display:\s*flex;[^}]*align-items:\s*center;/s.test(profileEditStyles), "profile edit gender picker value should be vertically centered");
+  assert(!profileEditMarkup.includes("常见场景"), "profile edit should remove confusing scenario input");
+  assert(!profileEditMarkup.includes('data-field="scenarioText"'), "profile edit should not render scenarioText input");
   assert(profileEditMarkup.includes("照片档案"), "profile edit should render photo archive section");
-  assert(profileEditMarkup.includes("自拍/头肩照"), "profile edit should render headshot group");
-  assert(profileEditMarkup.includes("半身照"), "profile edit should render half body group");
-  assert(profileEditMarkup.includes("全身照"), "profile edit should render full body group");
+  assert(!profileEditMarkup.includes("照片档案与备注"), "profile edit should not call photo archive section notes");
+  assert(!profileEditMarkup.includes("尺码备注"), "profile edit should not render size notes extra field");
+  assert(!profileEditMarkup.includes("发型补充"), "profile edit should not render hair extra field");
+  assert(!profileEditMarkup.includes("上半身补充"), "profile edit should not render upper body extra field");
+  assert(!profileEditMarkup.includes("下半身补充"), "profile edit should not render lower body extra field");
+  assert(!profileEditMarkup.includes("archive-extra-grid"), "profile edit should remove extra archive grid");
+  assert(!profileEditMarkup.includes("按角度补充"), "profile edit should not use generic angle guidance copy");
+  assert(profileEditMarkup.includes('class="photo-observations"'), "profile edit should render fixed photo observation container");
+  assert(profileEditMarkup.includes('wx:for="{{photoObservations}}"'), "profile edit should render observations from fixed model");
+  assert(profileEditMarkup.includes('wx:for="{{group.photos}}"'), "profile edit should render uploaded photos inside each observation group");
+  assert(profileEditMarkup.includes('class="photo-add-tile"'), "profile edit should render one add tile per observation group");
+  assert(profileEditMarkup.includes('bind:tap="handleAddObservationPhoto"'), "profile edit should choose photo type when adding from group plus");
+  assert(!profileEditMarkup.includes('wx:for="{{group.slots}}"'), "profile edit should not display every fixed photo slot upfront");
+  assert(profileEditMarkup.includes('value="{{group.noteValue}}"'), "profile edit should bind observation note value directly");
+  assert(profileEditMarkup.includes('data-field="{{group.noteField}}"'), "profile edit should render note input inside photo observation group");
   assert(!profileEditMarkup.includes("核心衣橱"), "profile edit should not include core wardrobe photos");
   assert(!profileEditMarkup.includes("显胖"), "profile edit copy should avoid anxiety wording");
+  const profileEditScript = require("fs").readFileSync(path.join(root, "pages/profile/edit.js"), "utf8");
+  assert(profileEditScript.includes('sourceType: ["album", "camera"]'), "profile edit photo picker should support camera capture");
+  assert(Array.isArray(profileEditPage.data.genderOptions), "profile edit should expose gender options");
+  assert(profileEditPage.data.genderOptions.join(",") === "女,男", "profile edit gender options should only be female and male labels");
+
+  profileEditPage.handleGenderChange.call(profileEditPage, { detail: { value: 1 } });
+  assert(profileEditPage.data.draft.gender === "male", "gender picker should write male value");
+  assert(profileEditPage.data.genderLabel === "男", "gender picker should render selected label");
+  await profileEditPage.handleSave.call(profileEditPage);
+  const profileSaves = apiCalls.filter((call) => call.name === "updateProfile");
+  const genderSave = profileSaves[profileSaves.length - 1];
+  assert(genderSave.data.gender === "male", "profile edit should save gender selected from picker");
+
+  const actionSheets = [];
+  const chooseMediaOptions = [];
+  global.wx = {
+    showActionSheet(options) {
+      actionSheets.push(options.itemList);
+      options.success({ tapIndex: 1 });
+    },
+    chooseMedia(options) {
+      chooseMediaOptions.push(options);
+      options.success({
+        tempFiles: [{
+          tempFilePath: "wxfile://typed-profile-photo",
+          size: 2048,
+          fileType: "image"
+        }]
+      });
+    },
+    showToast() {}
+  };
+  await profileEditPage.handleAddObservationPhoto.call(profileEditPage, {
+    currentTarget: { dataset: { groupKey: "face" } }
+  });
+  assert(actionSheets[0].join(",") === "正面头肩照,左 45 度头肩照,右 45 度头肩照,侧面头肩照", "profile edit should ask user what photo type they are uploading");
+  assert(chooseMediaOptions[0].sourceType.join(",") === "album,camera", "profile edit chooseMedia should allow album and camera");
+  const typedCreatePhotoCall = apiCalls.filter((call) => call.name === "createProfilePhoto").pop();
+  assert(typedCreatePhotoCall.data.photo_type === "headshot", "typed profile photo upload should use selected photo type");
+  assert(typedCreatePhotoCall.data.angle === "left_45", "typed profile photo upload should use selected angle");
+  global.wx = originalWx;
 
   await profileEditPage.handlePhotoUpload.call(profileEditPage, {
     currentTarget: { dataset: { type: "full_body" } },
@@ -265,7 +353,7 @@ async function main() {
   const uploadCall = apiCalls.find((call) => call.name === "uploadFileToQiniu");
   assert(uploadCall, "profile edit should upload selected profile photo");
   assert(uploadCall.options.assetType === "profile_photo", "profile photo upload should use profile_photo asset type");
-  const createPhotoCall = apiCalls.find((call) => call.name === "createProfilePhoto");
+  const createPhotoCall = apiCalls.filter((call) => call.name === "createProfilePhoto").pop();
   assert(createPhotoCall, "profile edit should create profile photo reference after upload");
   assert(createPhotoCall.data.asset_public_id === "ast_uploaded", "profile photo create should pass uploaded asset id");
   assert(createPhotoCall.data.photo_type === "full_body", "profile photo create should pass photo type");

@@ -34,11 +34,78 @@ function buildDraft(summary) {
   };
 }
 
+const photoObservationMeta = [
+  {
+    key: "face",
+    title: "脸型与五官比例",
+    noteField: "face_shape",
+    noteLabel: "脸型与五官比例备注",
+    notePlaceholder: "可不填。不确定脸型时，系统会结合这些照片识别。",
+    slots: [
+      { key: "headshot_front", label: "正面头肩照", photoType: "headshot", angle: "front" },
+      { key: "headshot_left_45", label: "左 45 度头肩照", photoType: "headshot", angle: "left_45" },
+      { key: "headshot_right_45", label: "右 45 度头肩照", photoType: "headshot", angle: "right_45" },
+      { key: "headshot_side", label: "侧面头肩照", photoType: "headshot", angle: "side" }
+    ]
+  },
+  {
+    key: "body",
+    title: "身形与比例",
+    noteField: "body_notes",
+    noteLabel: "身形与比例备注",
+    notePlaceholder: "可不填。系统会根据全身照识别比例、线条和适合的廓形方向。",
+    slots: [
+      { key: "full_body_front", label: "正面全身照", photoType: "full_body", angle: "front" },
+      { key: "full_body_side", label: "侧面全身照", photoType: "full_body", angle: "side" },
+      { key: "full_body_back", label: "背面全身照", photoType: "full_body", angle: "back" },
+      { key: "full_body_natural", label: "日常站姿全身照", photoType: "full_body", angle: "natural" }
+    ]
+  },
+  {
+    key: "beauty",
+    title: "肤色、妆发与发型",
+    noteField: "skin_notes",
+    noteLabel: "肤色、妆发与发型备注",
+    notePlaceholder: "可不填。系统会结合照片判断用色、妆感和发型方向。",
+    slots: [
+      { key: "headshot_natural", label: "自然光近照", photoType: "headshot", angle: "natural" },
+      { key: "headshot_other", label: "日常妆发照", photoType: "headshot", angle: "other" },
+      { key: "half_body_hair_side", label: "发型侧面照", photoType: "half_body", angle: "side" },
+      { key: "half_body_hair_back", label: "发型背面照", photoType: "half_body", angle: "back" }
+    ]
+  }
+];
+
 const photoGroupMeta = [
   { key: "headshot", title: "自拍/头肩照", defaultAngle: "front" },
   { key: "half_body", title: "半身照", defaultAngle: "front" },
   { key: "full_body", title: "全身照", defaultAngle: "front" }
 ];
+
+const genderOptions = [
+  { label: "女", value: "female" },
+  { label: "男", value: "male" }
+];
+
+function genderIndex(value) {
+  const index = genderOptions.findIndex((item) => item.value === normalizeText(value));
+  return index >= 0 ? index : 0;
+}
+
+function genderLabel(value) {
+  return genderOptions[genderIndex(value)].label;
+}
+
+function genderValue(value) {
+  return genderOptions[genderIndex(value)].value;
+}
+
+function withNormalizedGender(draft) {
+  const source = draft || {};
+  return Object.assign({}, source, {
+    gender: genderValue(source.gender)
+  });
+}
 
 function photoImageURL(photo) {
   const image = photo && photo.image ? photo.image : {};
@@ -72,6 +139,35 @@ function buildPhotoGroups(summary) {
   }, {});
 }
 
+function photoSlotKey(photoType, angle) {
+  return `${normalizeText(photoType)}:${normalizeText(angle)}`;
+}
+
+function buildPhotoObservations(summary, draft) {
+  const photos = Array.isArray(summary && summary.profile_photos) ? summary.profile_photos.map(normalizePhoto) : [];
+  const draftSource = draft || {};
+  const photoBySlot = photos.reduce((result, photo) => {
+    const key = photoSlotKey(photo.photo_type, photo.angle);
+    result[key] = photo;
+    return result;
+  }, {});
+  return photoObservationMeta.map((group) => Object.assign({}, group, {
+    noteValue: normalizeText(draftSource[group.noteField]),
+    slots: group.slots.map((slot) => Object.assign({}, slot, {
+      photo: photoBySlot[photoSlotKey(slot.photoType, slot.angle)] || null
+    })),
+    photos: group.slots.map((slot) => Object.assign({}, slot, {
+      photo: photoBySlot[photoSlotKey(slot.photoType, slot.angle)] || null
+    })).filter((slot) => slot.photo)
+  }));
+}
+
+function flattenObservationPhotos(observations) {
+  return (observations || []).reduce((items, group) => (
+    items.concat((group.slots || []).map((slot) => slot.photo).filter(Boolean))
+  ), []);
+}
+
 function nextPhotoSortOrder(group) {
   const photos = group && Array.isArray(group.photos) ? group.photos : [];
   const maxOrder = photos.reduce((max, photo) => Math.max(max, Number(photo.sort_order) || 0), 0);
@@ -86,7 +182,7 @@ function payloadFromDraft(draft) {
   const weightValue = weightText ? Number(weightText) : null;
   return {
     nickname: normalizeText(source.nickname),
-    gender: normalizeText(source.gender),
+    gender: genderValue(source.gender),
     height_cm: Number.isFinite(heightValue) ? heightValue : null,
     weight_kg: Number.isFinite(weightValue) ? weightValue : null,
     body_notes: normalizeText(source.body_notes),
@@ -154,6 +250,27 @@ function chooseImageFile() {
   return Promise.resolve(null);
 }
 
+function chooseObservationSlot(group) {
+  const slots = group && Array.isArray(group.slots) ? group.slots : [];
+  if (!slots.length) {
+    return Promise.resolve(null);
+  }
+  if (typeof wx === "undefined" || !wx.showActionSheet) {
+    return Promise.resolve(slots[0]);
+  }
+  return new Promise((resolve) => {
+    wx.showActionSheet({
+      itemList: slots.map((slot) => slot.label),
+      success(result) {
+        resolve(slots[result && Number.isInteger(result.tapIndex) ? result.tapIndex : 0] || null);
+      },
+      fail() {
+        resolve(null);
+      }
+    });
+  });
+}
+
 function confirmDeletePhoto() {
   if (typeof wx === "undefined" || !wx.showModal) {
     return Promise.resolve(true);
@@ -186,8 +303,12 @@ const profileEditPageConfig = {
     imageUploading: false,
     errorMessage: "",
     imageUploadError: "",
-    draft: buildDraft(null),
-    photoGroups: buildPhotoGroups(null)
+    draft: withNormalizedGender(buildDraft(null)),
+    photoGroups: buildPhotoGroups(null),
+    photoObservations: buildPhotoObservations(null, withNormalizedGender(buildDraft(null))),
+    genderOptions: genderOptions.map((item) => item.label),
+    genderIndex: 0,
+    genderLabel: genderOptions[0].label
   },
 
   onLoad() {
@@ -198,10 +319,14 @@ const profileEditPageConfig = {
     this.setData({ loading: true, errorMessage: "" });
     try {
       const summary = await api.getProfileSummary();
+      const draft = withNormalizedGender(buildDraft(summary));
       this.setData({
         loading: false,
-        draft: buildDraft(summary),
-        photoGroups: buildPhotoGroups(summary)
+        draft,
+        photoGroups: buildPhotoGroups(summary),
+        photoObservations: buildPhotoObservations(summary, draft),
+        genderIndex: genderIndex(draft.gender),
+        genderLabel: genderLabel(draft.gender)
       });
     } catch (error) {
       this.setData({
@@ -218,9 +343,25 @@ const profileEditPageConfig = {
     if (!field) {
       return;
     }
+    const draft = Object.assign({}, this.data.draft, {
+      [field]: event && event.detail ? event.detail.value : ""
+    });
     this.setData({
+      draft,
+      photoObservations: buildPhotoObservations({
+        profile_photos: flattenObservationPhotos(this.data.photoObservations)
+      }, draft)
+    });
+  },
+
+  handleGenderChange(event) {
+    const index = Number(event && event.detail ? event.detail.value : 0);
+    const option = genderOptions[index] || genderOptions[0];
+    this.setData({
+      genderIndex: index >= 0 && index < genderOptions.length ? index : 0,
+      genderLabel: option.label,
       draft: Object.assign({}, this.data.draft, {
-        [field]: event && event.detail ? event.detail.value : ""
+        gender: option.value
       })
     });
   },
@@ -253,6 +394,29 @@ const profileEditPageConfig = {
     });
   },
 
+  async handleAddObservationPhoto(event) {
+    const groupKey = normalizeText(getDataset(event).groupKey);
+    const group = (this.data.photoObservations || []).find((item) => item.key === groupKey);
+    const slot = await chooseObservationSlot(group);
+    if (!slot) {
+      return null;
+    }
+    const file = await chooseImageFile();
+    if (!file) {
+      return null;
+    }
+    return this.handlePhotoUpload({
+      currentTarget: {
+        dataset: {
+          type: slot.photoType,
+          photoType: slot.photoType,
+          angle: slot.angle
+        }
+      },
+      detail: { file }
+    });
+  },
+
   async handlePhotoUpload(event) {
     const dataset = getDataset(event);
     const photoType = normalizeText(dataset.type || dataset.photoType) || "headshot";
@@ -277,8 +441,14 @@ const profileEditPageConfig = {
           items.concat((this.data.photoGroups[key].photos || []))
         ), []).concat(photo)
       });
+      const observations = buildPhotoObservations({
+        profile_photos: flattenObservationPhotos(this.data.photoObservations).filter((item) => (
+          photoSlotKey(item.photo_type, item.angle) !== photoSlotKey(photo.photo_type, photo.angle)
+        )).concat(photo)
+      }, this.data.draft);
       this.setData({
         photoGroups: groups,
+        photoObservations: observations,
         imageUploading: false,
         imageUploadError: ""
       });
@@ -308,8 +478,11 @@ const profileEditPageConfig = {
       const photos = Object.keys(this.data.photoGroups || {}).reduce((items, key) => (
         items.concat((this.data.photoGroups[key].photos || []))
       ), []).filter((photo) => photo.public_id !== publicID);
+      const observationPhotos = flattenObservationPhotos(this.data.photoObservations)
+        .filter((photo) => photo.public_id !== publicID);
       this.setData({
         photoGroups: buildPhotoGroups({ profile_photos: photos }),
+        photoObservations: buildPhotoObservations({ profile_photos: observationPhotos }, this.data.draft),
         imageUploadError: ""
       });
       showToast("照片已删除", "success");
