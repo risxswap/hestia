@@ -34,7 +34,7 @@ Agent 只能调用白名单 tools。读上下文 tools 可以查询档案、记�
 
 ```text
 miniapp pages/advisor
-  -> POST /api/user/agent/stream
+  -> POST /api/user/agent/chat
   -> 写 chat_msgs(user)
   -> Eino ReAct Agent
        -> get_profile_context
@@ -386,7 +386,7 @@ confirm_advice_draft
 
 ## SSE 事件
 
-`POST /api/user/agent/stream` 返回 SSE。
+`POST /api/user/agent/chat` 返回 SSE。
 
 建议事件：
 
