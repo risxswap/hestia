@@ -36,7 +36,7 @@ Agent 只能调用白名单 tools。读上下文 tools 可以查询档案、记�
 miniapp pages/advisor
   -> POST /api/user/agent/chat
   -> 写 chat_msgs(user)
-  -> 创建 agent_runs
+  -> 创建 chat_msgs(assistant,status=generating)
   -> Eino ReAct Agent
        -> get_profile_context
        -> get_memory_context
@@ -44,7 +44,7 @@ miniapp pages/advisor
        -> get_current_advice_draft
        -> create_advice_draft / update_advice_draft / discard_advice_draft
   -> 写 agent_run_steps
-  -> 写 chat_msgs(assistant)
+  -> 更新 chat_msgs(assistant,status=sent|failed)
   -> SSE 返回助手文案和草稿卡片
 
 用户点击保存草稿
@@ -74,7 +74,7 @@ Agent 根据系统提示、用户消息、历史消息和当前草稿状态自�
 - 写入 tool 必须绑定当前用户和当前 `source_msg_id`。
 - tool 参数必须结构化校验。
 - 缺少必要场景信息时，Agent 可以追问，不强行生成。
-- Agent 每轮运行和每个可观察决策步骤必须记录到审计表。
+- Agent 每轮运行由助手消息承载，可观察决策步骤必须记录到审计表。
 - 不记录模型隐藏思维链全文，只记录模型输出的用户可见回复、tool 调用、tool 结果摘要和后端生成的决策摘要。
 
 ## 数据模型
@@ -83,8 +83,8 @@ Agent 根据系统提示、用户消息、历史消息和当前草稿状态自�
 
 ```text
 chat_msgs(user)
-  -> agent_runs(source_msg_id)
-  -> agent_run_steps(agent_run_id)
+  -> chat_msgs(assistant)
+       -> agent_run_steps(assistant_msg_id)
   -> advice_requests(source_msg_id)
   -> advice_drafts(advice_request_id)
   -> advice_draft_versions(draft_id)
@@ -116,40 +116,36 @@ chat_msgs(user)
 - `status` 可扩展为 `drafting`、`confirmed`、`discarded`。
 - `scenario` 和 `trigger_context` 仅存请求级上下文，不承担版本历史。
 
-### `agent_runs`
+### `chat_msgs`
 
-Agent 单次运行主表。一次用户消息触发一次 run。
+聊天消息表同时承载用户可见消息和一次 Agent 执行的头记录。
 
-字段：
+关键字段和扩展字段：
 
 - `id`
 - `public_id`
 - `user_id`
-- `source_msg_id`
-- `assistant_msg_id`
-- `status`：`running` / `succeeded` / `failed` / `cancelled`
-- `usage_key`：例如 `agent_chat`
-- `provider_code`
-- `model_code`
-- `prompt_version`
-- `max_step`
-- `started_at`
-- `finished_at`
-- `duration_ms`
-- `final_action`：`answer` / `create_draft` / `update_draft` / `discard_draft` / `ask_clarification` / `error`
-- `final_summary`
-- `draft_id`
-- `draft_version_id`
-- `error_message`
-- `created_at`
-- `updated_at`
+- `source_msg_id`：新增可空字段，仅助手消息用于指向触发本轮 Agent 的用户消息
+- `role`：`user` / `assistant`
+- `msg_type`：`text` / `draft_card` / `error`
+- `content_text`
+- `content_json`
+- `asset_refs`
+- `related_type`
+- `related_id`
+- `related_public_id`
+- `job_id`
+- `status`
 
 约束：
 
-- `source_msg_id` 指向本轮用户消息。
-- `assistant_msg_id` 在助手消息写入后回填。
-- `draft_id` 和 `draft_version_id` 只在本轮创建、修改或废弃草稿时写入。
-- `final_summary` 是后端生成或模型显式输出的简短摘要，不保存隐藏思维链。
+- 用户消息写 `role=user,status=sent`。
+- Agent 收到用户消息后先创建助手占位消息：`role=assistant,status=generating,source_msg_id=用户消息 id`。
+- Agent 完成后更新同一条助手消息：`status=sent`，并写入 `content_text`、`msg_type` 和业务关联。
+- Agent 失败后更新同一条助手消息：`status=failed,msg_type=error`，并写入可展示错误。
+- `source_msg_id` 为可空字段；用户消息为空，助手消息指向触发本轮 Agent 的用户消息。
+- `related_type` 和 `related_public_id` 用于关联本次助手消息生成或修改的草稿，例如 `related_type=advice_draft`。
+- `chat_msgs` 不存模型、prompt、耗时和步骤审计信息；这些写入 `agent_run_steps`。
 
 ### `agent_run_steps`
 
@@ -159,11 +155,17 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 - `id`
 - `public_id`
-- `agent_run_id`
 - `user_id`
+- `source_msg_id`
+- `assistant_msg_id`
 - `step_no`
 - `step_type`：`model_decision` / `tool_call` / `tool_result` / `final_response` / `error`
 - `status`：`running` / `succeeded` / `failed` / `skipped`
+- `usage_key`
+- `provider_code`
+- `model_code`
+- `prompt_version`
+- `max_step`
 - `tool_name`
 - `tool_call_id`
 - `decision_label`：`answer` / `create_draft` / `update_draft` / `discard_draft` / `read_context` / `ask_clarification`
@@ -180,7 +182,10 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 约束：
 
-- `(agent_run_id, step_no)` 唯一。
+- `(assistant_msg_id, step_no)` 唯一。
+- `source_msg_id` 指向本轮用户消息。
+- `assistant_msg_id` 指向本轮 Agent 执行对应的助手占位消息。
+- `usage_key`、`provider_code`、`model_code`、`prompt_version`、`max_step` 至少在第一条 `model_decision` 步骤写入。
 - `tool_call` 和 `tool_result` 使用相同 `tool_call_id` 关联。
 - `input_summary` 和 `output_summary` 使用短文本，不存完整大段 prompt、图片内容或任意 JSON。
 - 写入型 tool 成功后必须写 `related_type` 和 `related_public_id`，方便追踪是哪一步创建或修改了草稿。
@@ -390,13 +395,16 @@ Agent Runner 负责记录运行和步骤，不把记录职责交给 LLM。
 
 记录流程：
 
-1. 收到用户消息并写入 `chat_msgs(user)` 后，创建 `agent_runs(status=running)`。
-2. 每次进入模型前写 `agent_run_steps(step_type=model_decision,status=running)`。
-3. 模型返回 tool call 后，将该步骤更新为 `succeeded`，写入 `decision_label` 和 `output_summary`。
-4. 调用 tool 前写 `agent_run_steps(step_type=tool_call,status=running)`。
-5. tool 返回后写 `agent_run_steps(step_type=tool_result,status=succeeded|failed)`。
-6. 如果 tool 创建或修改草稿，步骤中写入 `related_type`、`related_id`、`related_public_id`。
-7. 写助手消息后，补一条 `final_response` 步骤，并回填 `agent_runs.assistant_msg_id`、`final_action`、`final_summary` 和结束时间。
+1. 收到用户消息并写入 `chat_msgs(role=user,status=sent)`。
+2. 创建本轮 Agent 对应的助手占位消息：`chat_msgs(role=assistant,status=generating,source_msg_id=用户消息 id)`。
+3. 每次进入模型前写 `agent_run_steps(step_type=model_decision,status=running)`，并关联 `source_msg_id` 和 `assistant_msg_id`。
+4. 第一条 `model_decision` 步骤写入 `usage_key`、`provider_code`、`model_code`、`prompt_version` 和 `max_step`。
+5. 模型返回 tool call 后，将该步骤更新为 `succeeded`，写入 `decision_label` 和 `output_summary`。
+6. 调用 tool 前写 `agent_run_steps(step_type=tool_call,status=running)`。
+7. tool 返回后写 `agent_run_steps(step_type=tool_result,status=succeeded|failed)`。
+8. 如果 tool 创建或修改草稿，步骤中写入 `related_type`、`related_id`、`related_public_id`。
+9. 写入最终回复后，补一条 `final_response` 步骤。
+10. 更新助手占位消息为 `status=sent` 或 `status=failed`，并写入 `content_text`、`msg_type` 和业务关联。
 
 记录内容：
 
@@ -521,7 +529,7 @@ Agent 决策步骤默认只写后端审计表，不直接展示给普通用户�
 服务端：
 
 - Agent route：SSE 事件包含 `message`、`draft`、`done`。
-- Agent run 测试：每条用户消息创建一条 `agent_runs`，完成后回填助手消息、最终动作和耗时。
+- Agent run 测试：每条用户消息创建一条助手占位 `chat_msgs`，完成后更新状态、文本和业务关联。
 - Agent step 测试：模型决策、tool 调用、tool 结果和最终回复按顺序写入 `agent_run_steps`。
 - Agent step 失败测试：tool 失败时记录 `failed` 步骤和错误摘要，不丢失已完成步骤。
 - tool 单元测试：创建草稿、精修草稿、复制未修改分段、废弃草稿。
