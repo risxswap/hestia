@@ -36,12 +36,14 @@ Agent 只能调用白名单 tools。读上下文 tools 可以查询档案、记�
 miniapp pages/advisor
   -> POST /api/user/agent/chat
   -> 写 chat_msgs(user)
+  -> 创建 agent_runs
   -> Eino ReAct Agent
        -> get_profile_context
        -> get_memory_context
        -> get_wardrobe_context
        -> get_current_advice_draft
        -> create_advice_draft / update_advice_draft / discard_advice_draft
+  -> 写 agent_run_steps
   -> 写 chat_msgs(assistant)
   -> SSE 返回助手文案和草稿卡片
 
@@ -72,6 +74,8 @@ Agent 根据系统提示、用户消息、历史消息和当前草稿状态自�
 - 写入 tool 必须绑定当前用户和当前 `source_msg_id`。
 - tool 参数必须结构化校验。
 - 缺少必要场景信息时，Agent 可以追问，不强行生成。
+- Agent 每轮运行和每个可观察决策步骤必须记录到审计表。
+- 不记录模型隐藏思维链全文，只记录模型输出的用户可见回复、tool 调用、tool 结果摘要和后端生成的决策摘要。
 
 ## 数据模型
 
@@ -79,6 +83,8 @@ Agent 根据系统提示、用户消息、历史消息和当前草稿状态自�
 
 ```text
 chat_msgs(user)
+  -> agent_runs(source_msg_id)
+  -> agent_run_steps(agent_run_id)
   -> advice_requests(source_msg_id)
   -> advice_drafts(advice_request_id)
   -> advice_draft_versions(draft_id)
@@ -109,6 +115,76 @@ chat_msgs(user)
 - 不存草稿正文。
 - `status` 可扩展为 `drafting`、`confirmed`、`discarded`。
 - `scenario` 和 `trigger_context` 仅存请求级上下文，不承担版本历史。
+
+### `agent_runs`
+
+Agent 单次运行主表。一次用户消息触发一次 run。
+
+字段：
+
+- `id`
+- `public_id`
+- `user_id`
+- `source_msg_id`
+- `assistant_msg_id`
+- `status`：`running` / `succeeded` / `failed` / `cancelled`
+- `usage_key`：例如 `agent_chat`
+- `provider_code`
+- `model_code`
+- `prompt_version`
+- `max_step`
+- `started_at`
+- `finished_at`
+- `duration_ms`
+- `final_action`：`answer` / `create_draft` / `update_draft` / `discard_draft` / `ask_clarification` / `error`
+- `final_summary`
+- `draft_id`
+- `draft_version_id`
+- `error_message`
+- `created_at`
+- `updated_at`
+
+约束：
+
+- `source_msg_id` 指向本轮用户消息。
+- `assistant_msg_id` 在助手消息写入后回填。
+- `draft_id` 和 `draft_version_id` 只在本轮创建、修改或废弃草稿时写入。
+- `final_summary` 是后端生成或模型显式输出的简短摘要，不保存隐藏思维链。
+
+### `agent_run_steps`
+
+Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool 调用、tool 结果和最终输出。
+
+字段：
+
+- `id`
+- `public_id`
+- `agent_run_id`
+- `user_id`
+- `step_no`
+- `step_type`：`model_decision` / `tool_call` / `tool_result` / `final_response` / `error`
+- `status`：`running` / `succeeded` / `failed` / `skipped`
+- `tool_name`
+- `tool_call_id`
+- `decision_label`：`answer` / `create_draft` / `update_draft` / `discard_draft` / `read_context` / `ask_clarification`
+- `input_summary`
+- `output_summary`
+- `related_type`：`advice_draft` / `advice_draft_version` / `chat_msg` / `memory` / `clothes_item`
+- `related_id`
+- `related_public_id`
+- `started_at`
+- `finished_at`
+- `duration_ms`
+- `error_message`
+- `created_at`
+
+约束：
+
+- `(agent_run_id, step_no)` 唯一。
+- `tool_call` 和 `tool_result` 使用相同 `tool_call_id` 关联。
+- `input_summary` 和 `output_summary` 使用短文本，不存完整大段 prompt、图片内容或任意 JSON。
+- 写入型 tool 成功后必须写 `related_type` 和 `related_public_id`，方便追踪是哪一步创建或修改了草稿。
+- 不记录模型隐藏思维链；如果模型输出了面向用户或面向 tool 的可见理由，只能压缩成 `decision_label` 和 `output_summary`。
 
 ### `advice_drafts`
 
@@ -308,6 +384,25 @@ chat_msgs(user)
 - 将 `advice_drafts.status` 改为 `discarded`。
 - 将关联 `advice_requests.status` 改为 `discarded`。
 
+### 决策步骤记录
+
+Agent Runner 负责记录运行和步骤，不把记录职责交给 LLM。
+
+记录流程：
+
+1. 收到用户消息并写入 `chat_msgs(user)` 后，创建 `agent_runs(status=running)`。
+2. 每次进入模型前写 `agent_run_steps(step_type=model_decision,status=running)`。
+3. 模型返回 tool call 后，将该步骤更新为 `succeeded`，写入 `decision_label` 和 `output_summary`。
+4. 调用 tool 前写 `agent_run_steps(step_type=tool_call,status=running)`。
+5. tool 返回后写 `agent_run_steps(step_type=tool_result,status=succeeded|failed)`。
+6. 如果 tool 创建或修改草稿，步骤中写入 `related_type`、`related_id`、`related_public_id`。
+7. 写助手消息后，补一条 `final_response` 步骤，并回填 `agent_runs.assistant_msg_id`、`final_action`、`final_summary` 和结束时间。
+
+记录内容：
+
+- 可以记录：调用了哪个 tool、输入摘要、输出摘要、关联草稿或版本、耗时、错误。
+- 不记录：隐藏思维链、完整 prompt、完整 tool 参数大对象、用户图片内容、未经压缩的模型中间文本。
+
 ### 非 Agent 接口
 
 `POST /api/user/advice-drafts/:public_id/confirm`
@@ -396,6 +491,8 @@ confirm_advice_draft
 - `done`：结束，包含 `message_public_id`、`draft_public_id`。
 - `error`：错误状态和可展示文案。
 
+Agent 决策步骤默认只写后端审计表，不直接展示给普通用户。开发或排障阶段如需前端观察，可增加仅开发环境启用的 `debug_step` SSE 事件，但不应包含隐藏思维链、完整 prompt 或敏感图片信息。
+
 ## Prompt 约束
 
 系统提示应包含：
@@ -424,6 +521,9 @@ confirm_advice_draft
 服务端：
 
 - Agent route：SSE 事件包含 `message`、`draft`、`done`。
+- Agent run 测试：每条用户消息创建一条 `agent_runs`，完成后回填助手消息、最终动作和耗时。
+- Agent step 测试：模型决策、tool 调用、tool 结果和最终回复按顺序写入 `agent_run_steps`。
+- Agent step 失败测试：tool 失败时记录 `failed` 步骤和错误摘要，不丢失已完成步骤。
 - tool 单元测试：创建草稿、精修草稿、复制未修改分段、废弃草稿。
 - repository 测试：版本号唯一、当前版本查询、用户隔离。
 - 确认接口测试：从最新版生成正式 `advices`，重复确认幂等。
