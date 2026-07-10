@@ -54,6 +54,63 @@ miniapp pages/advisor
   -> advice_drafts.status = confirmed
 ```
 
+## 上下文管理
+
+第一版不新增会话摘要表，也不让 LLM 直接读取全量用户数据。每轮 Agent 运行只装配完成当前任务所需的最小上下文，其余信息通过 tools 按需读取。
+
+### 上下文装配
+
+`POST /api/user/agent/chat` 每轮装配：
+
+```text
+system prompt
++ 最近 N 条 chat_msgs
++ 当前草稿轻量摘要
++ 当前用户消息
++ tool definitions
+```
+
+装配规则：
+
+- `system prompt` 只包含角色、产品边界、隐私边界、tool 使用规则和保存限制，不塞业务数据。
+- 最近聊天历史默认取最近 `8-12` 条 `chat_msgs`，按 token 预算裁剪。
+- 聊天历史只保留用户可见文本和草稿卡片摘要，不重复注入完整草稿结构。
+- 当前草稿默认只注入轻量摘要：`draft_public_id`、当前版本号、场景、穿搭/发型/妆容短摘要。
+- 当前用户消息必须完整保留，不被摘要替代。
+- tool definitions 每轮提供给 ReAct Agent，但 tool 返回内容必须短、相关、可解释。
+
+### 按需读取
+
+以下数据不默认进入 prompt：
+
+- 完整用户档案。
+- 全量长期记忆。
+- 全量衣物列表。
+- 完整草稿版本内容。
+- `agent_run_steps` 决策步骤。
+
+Agent 需要时通过 tools 读取：
+
+- `get_profile_context`：读取与当前问题相关的明确档案、偏好、禁忌和可展示推断。
+- `get_memory_context`：读取与当前场景相关的高置信或最近记忆。
+- `get_wardrobe_context`：读取与当前场景、季节、品类或用户要求相关的可推荐衣物。
+- `get_current_advice_draft`：读取当前草稿的完整结构化内容。
+
+`agent_run_steps` 只用于审计、排错和重试恢复，不作为常规上下文喂回 LLM。
+
+### 裁剪优先级
+
+超过上下文预算时，按以下优先级保留：
+
+1. 系统边界和安全规则。
+2. 当前用户消息。
+3. 当前草稿轻量摘要。
+4. 最近用户明确约束，例如“不要露腿”“妆淡一点”。
+5. 最近助手草稿摘要。
+6. 普通寒暄和低信息密度回复。
+
+第一版不建立 `chat_context_summaries`。当聊天历史明显变长、成本不可控或用户频繁跨多轮引用旧约束时，再新增会话摘要能力。
+
 ## Agent 决策边界
 
 聊天意图由 LLM 在 ReAct 循环里判断，不单独实现一套后端规则引擎。
