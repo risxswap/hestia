@@ -136,40 +136,15 @@ Agent 根据系统提示、用户消息、历史消息和当前草稿状态自�
 
 ## 数据模型
 
-保留 `advice_requests` 作为原始请求记录。新增草稿体系承载可对话精修的内容和版本。
+草稿体系直接由用户消息触发，不再单独引入 `advice_requests`。用户原始输入、图片和触发来源由 `chat_msgs(user)` 承载，草稿通过 `source_msg_id` 回指触发消息。
 
 ```text
 chat_msgs(user)
   -> chat_msgs(assistant)
        -> agent_run_steps(assistant_msg_id)
-  -> advice_requests(source_msg_id)
-  -> advice_drafts(advice_request_id)
+  -> advice_drafts(source_msg_id)
   -> advice_draft_versions(draft_id)
 ```
-
-### `advice_requests`
-
-继续记录一次建议请求的来源和原始输入。
-
-关键字段沿用已有设计：
-
-| 字段 | 备注 |
-| --- | --- |
-| `source` | 请求来源，例如 `agent_chat`、`daily_scene`，用于区分触发渠道。 |
-| `source_msg_id` | 触发本次建议请求的用户消息 ID。 |
-| `status` | 请求状态，第一版用于区分草稿中、已确认、已废弃。 |
-| `input_text` | 用户原始请求文本，例如“明天见客户怎么穿”。 |
-| `input_assets` | 用户随请求上传的图片引用；沿用已有 JSON 字段，但不存草稿正文。 |
-| `scenario` | 请求级场景信息快照；只保存场景上下文，不承担草稿版本历史。 |
-| `trigger_context` | 触发请求时的轻量上下文快照；不存完整推荐内容。 |
-| `parent_request_id` | 关联上一条建议请求，用于后续重来、派生或追踪来源。 |
-| `parent_advice_id` | 关联上一条正式建议，用于基于历史建议继续调整。 |
-
-约束：
-
-- 不存草稿正文。
-- `status` 可扩展为 `drafting`、`confirmed`、`discarded`。
-- `scenario` 和 `trigger_context` 仅存请求级上下文，不承担版本历史。
 
 ### `chat_msgs`
 
@@ -260,7 +235,6 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 | --- | --- |
 | `id` | 内部自增 ID。 |
 | `public_id` | 草稿对外 ID，用于卡片、确认和废弃接口。 |
-| `advice_request_id` | 关联原始建议请求。 |
 | `user_id` | 草稿所属用户。 |
 | `source_msg_id` | 创建该草稿的用户消息 ID。 |
 | `status` | 草稿状态：`draft` / `confirmed` / `discarded`。 |
@@ -427,7 +401,6 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 `create_advice_draft`
 
-- 创建 `advice_requests`。
 - 创建 `advice_drafts(status=draft)`。
 - 创建 `advice_draft_versions(version_no=1)`。
 - 写入 `outfit_advice`、`hair_advice`、`makeup_advice` 三段受控 JSON。
@@ -446,7 +419,6 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 - 仅废弃当前用户自己的 `status=draft` 草稿。
 - 将 `advice_drafts.status` 改为 `discarded`。
-- 将关联 `advice_requests.status` 改为 `discarded`。
 
 ### 决策步骤记录
 
@@ -480,7 +452,6 @@ Agent Runner 负责记录运行和步骤，不把记录职责交给 LLM。
 - 校验 `outfit_advice.items` 中临时引用的用户已有衣物是否仍有效。
 - 创建 `advices(status=ready)`。
 - 更新 `advice_drafts.status=confirmed`。
-- 更新 `advice_requests.status=confirmed`。
 - 返回正式建议 public id。
 
 `GET /api/user/advice-drafts/current`
@@ -498,7 +469,6 @@ Agent Runner 负责记录运行和步骤，不把记录职责交给 LLM。
 - 前端 `不要这版` 按钮调用。
 - 校验草稿属于当前用户且 `status=draft`。
 - 更新 `advice_drafts.status=discarded`。
-- 更新 `advice_requests.status=discarded`。
 
 ## 状态机
 
@@ -525,7 +495,6 @@ confirm_advice_draft
   -> 读取 current_version_no
   -> 创建 advices
   -> draft.status = confirmed
-  -> request.status = confirmed
 ```
 
 ## 小程序交互
