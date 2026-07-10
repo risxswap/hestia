@@ -5,6 +5,8 @@ import (
 	"errors"
 
 	"hestia/server/internal/domain/clothes"
+	"hestia/server/internal/domain/memory"
+	"hestia/server/internal/domain/profile"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
@@ -26,6 +28,14 @@ const (
 var ErrAdviceToolSessionMissing = errors.New("advice tool session missing")
 
 func NewAdviceTools(repo Repository, clothesServices ...ClothesAdviceService) ([]tool.BaseTool, error) {
+	var deps AdviceToolDependencies
+	if len(clothesServices) > 0 {
+		deps.Clothes = clothesServices[0]
+	}
+	return NewAdviceToolsWithDependencies(repo, deps)
+}
+
+func NewAdviceToolsWithDependencies(repo Repository, deps AdviceToolDependencies) ([]tool.BaseTool, error) {
 	if repo == nil {
 		return nil, ErrRepositoryUnsupported
 	}
@@ -104,7 +114,53 @@ func NewAdviceTools(repo Repository, clothesServices ...ClothesAdviceService) ([
 		return nil, err
 	}
 	tools := []tool.BaseTool{getCurrentDraftTool, createDraftTool, updateDraftTool, discardDraftTool}
-	if len(clothesServices) > 0 && clothesServices[0] != nil {
+	if deps.Profile != nil {
+		profileTool, err := toolutils.InferTool[adviceToolEmptyInput, adviceToolProfileOutput](
+			"get_profile_context",
+			"读取当前用户的结构化形象档案、偏好、禁忌、记忆统计和最近报告摘要，供生成建议前参考。",
+			func(ctx context.Context, _ adviceToolEmptyInput) (adviceToolProfileOutput, error) {
+				userID, _, err := adviceToolSession(ctx)
+				if err != nil {
+					return adviceToolProfileOutput{}, err
+				}
+				summary, err := deps.Profile.Summary(ctx, userID)
+				if err != nil {
+					return adviceToolProfileOutput{OK: false, ErrorMessage: err.Error()}, nil
+				}
+				return adviceToolProfileContext(summary), nil
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, profileTool)
+	}
+	if deps.Memory != nil {
+		memoryTool, err := toolutils.InferTool[adviceToolMemoryInput, adviceToolMemoryOutput](
+			"get_memory_context",
+			"按用户当前需求读取长期记忆片段，包括明确事实、偏好、禁忌和 AI 推断。",
+			func(ctx context.Context, input adviceToolMemoryInput) (adviceToolMemoryOutput, error) {
+				userID, _, err := adviceToolSession(ctx)
+				if err != nil {
+					return adviceToolMemoryOutput{}, err
+				}
+				limit := input.Limit
+				if limit <= 0 || limit > 12 {
+					limit = 8
+				}
+				items, err := deps.Memory.AgentMemoryContext(ctx, userID, input.Query, limit)
+				if err != nil {
+					return adviceToolMemoryOutput{OK: false, ErrorMessage: err.Error()}, nil
+				}
+				return adviceToolMemoryOutput{OK: true, Items: adviceToolMemoryItems(items)}, nil
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, memoryTool)
+	}
+	if deps.Clothes != nil {
 		wardrobeTool, err := toolutils.InferTool[adviceToolWardrobeInput, adviceToolWardrobeOutput](
 			"get_wardrobe_context",
 			"按场景读取当前用户可用于建议的核心衣物，返回短字段供穿搭草稿引用。",
@@ -117,7 +173,7 @@ func NewAdviceTools(repo Repository, clothesServices ...ClothesAdviceService) ([
 				if limit <= 0 || limit > 10 {
 					limit = 5
 				}
-				items, err := clothesServices[0].AdviceContextItems(ctx, userID, clothes.AdviceContextFilter{
+				items, err := deps.Clothes.AdviceContextItems(ctx, userID, clothes.AdviceContextFilter{
 					Scene: input.Scene,
 					Limit: limit,
 				})
@@ -191,6 +247,40 @@ type adviceToolWardrobeOutput struct {
 	Items        []adviceToolWardrobeItem `json:"items,omitempty"`
 }
 
+type adviceToolProfileOutput struct {
+	OK            bool                         `json:"ok"`
+	ErrorMessage  string                       `json:"error_message,omitempty"`
+	User          profile.UserSummary          `json:"user"`
+	Profile       *profile.ProfileSummary      `json:"profile,omitempty"`
+	Preferences   profile.PreferencesSummary   `json:"preferences"`
+	MemorySummary profile.MemorySummary        `json:"memory_summary"`
+	LatestReport  *profile.LatestReportSummary `json:"latest_report,omitempty"`
+	QuickEntries  []profile.QuickEntry         `json:"quick_entries,omitempty"`
+}
+
+type adviceToolMemoryInput struct {
+	Query string `json:"query,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type adviceToolMemoryOutput struct {
+	OK           bool                   `json:"ok"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
+	Items        []adviceToolMemoryItem `json:"items,omitempty"`
+}
+
+type adviceToolMemoryItem struct {
+	PublicID       string   `json:"public_id"`
+	MemoryType     string   `json:"memory_type"`
+	TypeLabel      string   `json:"type_label,omitempty"`
+	MemoryKey      string   `json:"memory_key"`
+	DisplayText    string   `json:"display_text"`
+	Polarity       string   `json:"polarity"`
+	Confidence     *float64 `json:"confidence,omitempty"`
+	SourceLabel    string   `json:"source_label,omitempty"`
+	CorrectionNote string   `json:"correction_note,omitempty"`
+}
+
 type adviceToolWardrobeItem struct {
 	PublicID             string   `json:"public_id"`
 	Name                 string   `json:"name"`
@@ -218,6 +308,37 @@ func adviceToolWardrobeItems(items []clothes.Item) []adviceToolWardrobeItem {
 			SceneTags:            item.SceneTags,
 			IsCore:               item.IsCore,
 			RecommendationStatus: item.RecommendationStatus,
+		})
+	}
+	return result
+}
+
+func adviceToolProfileContext(summary profile.Summary) adviceToolProfileOutput {
+	return adviceToolProfileOutput{
+		OK:            true,
+		User:          summary.User,
+		Profile:       summary.Profile,
+		Preferences:   summary.Preferences,
+		MemorySummary: summary.MemorySummary,
+		LatestReport:  summary.LatestReport,
+		QuickEntries:  summary.QuickEntries,
+	}
+}
+
+func adviceToolMemoryItems(items []memory.Item) []adviceToolMemoryItem {
+	result := make([]adviceToolMemoryItem, 0, len(items))
+	for _, item := range items {
+		decorated := memory.DecorateItem(item)
+		result = append(result, adviceToolMemoryItem{
+			PublicID:       decorated.PublicID,
+			MemoryType:     decorated.MemoryType,
+			TypeLabel:      decorated.TypeLabel,
+			MemoryKey:      decorated.MemoryKey,
+			DisplayText:    decorated.DisplayText,
+			Polarity:       decorated.Polarity,
+			Confidence:     decorated.Confidence,
+			SourceLabel:    decorated.SourceLabel,
+			CorrectionNote: decorated.CorrectionNote,
 		})
 	}
 	return result

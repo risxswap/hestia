@@ -77,6 +77,59 @@ func TestMemoryUpdateRejectsEmptyValue(t *testing.T) {
 	}
 }
 
+func TestServiceAgentMemoryContextFiltersByQueryAndLimit(t *testing.T) {
+	repo := newMemoryRepo()
+	repo.items["mem_commute"] = memory.Item{
+		PublicID:    "mem_commute",
+		UserID:      12,
+		MemoryType:  memory.TypePreference,
+		MemoryKey:   "style_goal",
+		MemoryValue: "通勤更清爽利落",
+		Polarity:    memory.PolarityPositive,
+		Status:      memory.StatusActive,
+	}
+	repo.items["mem_date"] = memory.Item{
+		PublicID:    "mem_date",
+		UserID:      12,
+		MemoryType:  memory.TypeAvoidance,
+		MemoryKey:   "avoid_style",
+		MemoryValue: "约会不想太甜美",
+		Polarity:    memory.PolarityNegative,
+		Status:      memory.StatusActive,
+	}
+	service := memory.NewService(repo)
+
+	items, err := service.AgentMemoryContext(context.Background(), 12, "通勤", 1)
+	if err != nil {
+		t.Fatalf("agent memory context: %v", err)
+	}
+	if len(items) != 1 || items[0].PublicID != "mem_commute" || items[0].TypeLabel != "偏好" {
+		t.Fatalf("unexpected memory context: %#v", items)
+	}
+}
+
+func TestServiceAgentMemoryContextFallsBackWhenQueryMisses(t *testing.T) {
+	repo := newMemoryRepo()
+	repo.items["mem_style"] = memory.Item{
+		PublicID:    "mem_style",
+		UserID:      12,
+		MemoryType:  memory.TypePreference,
+		MemoryKey:   "style_goal",
+		MemoryValue: "清爽利落",
+		Polarity:    memory.PolarityPositive,
+		Status:      memory.StatusActive,
+	}
+	service := memory.NewService(repo)
+
+	items, err := service.AgentMemoryContext(context.Background(), 12, "晚宴穿搭", 3)
+	if err != nil {
+		t.Fatalf("agent memory context: %v", err)
+	}
+	if len(items) != 1 || items[0].PublicID != "mem_style" {
+		t.Fatalf("expected fallback memory context, got %#v", items)
+	}
+}
+
 func newRouter(service *memory.Service) *gin.Engine {
 	router := gin.New()
 	router.Use(func(c *gin.Context) {

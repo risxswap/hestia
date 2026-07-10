@@ -85,6 +85,49 @@ func (m *captureEinoChatModel) Generate(_ context.Context, input []*schema.Messa
 	return schema.AssistantMessage(`{"name":"米白衬衫"}`, nil), nil
 }
 
+type captureToolCallingChatModel struct{}
+
+func (m *captureToolCallingChatModel) Generate(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error) {
+	return schema.AssistantMessage("ok", nil), nil
+}
+
+func (m *captureToolCallingChatModel) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, nil
+}
+
+func (m *captureToolCallingChatModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+type captureToolCallingClient struct {
+	qwenModel      model.ToolCallingChatModel
+	openAIModel    model.ToolCallingChatModel
+	onQwenConfig   func(*qwen.ChatModelConfig)
+	onOpenAIConfig func(*einoopenai.ChatModelConfig)
+}
+
+func (c *captureToolCallingClient) NewQwenChatModel(context.Context, *qwen.ChatModelConfig) (EinoChatModel, error) {
+	return nil, ErrClientUnavailable
+}
+
+func (c *captureToolCallingClient) NewOpenAIChatModel(context.Context, *einoopenai.ChatModelConfig) (EinoChatModel, error) {
+	return nil, ErrClientUnavailable
+}
+
+func (c *captureToolCallingClient) NewQwenToolCallingChatModel(_ context.Context, config *qwen.ChatModelConfig) (model.ToolCallingChatModel, error) {
+	if c.onQwenConfig != nil {
+		c.onQwenConfig(config)
+	}
+	return c.qwenModel, nil
+}
+
+func (c *captureToolCallingClient) NewOpenAIToolCallingChatModel(_ context.Context, config *einoopenai.ChatModelConfig) (model.ToolCallingChatModel, error) {
+	if c.onOpenAIConfig != nil {
+		c.onOpenAIConfig(config)
+	}
+	return c.openAIModel, nil
+}
+
 func TestServiceGenerateUsesEinoChatModelWithResolvedProviderAndImage(t *testing.T) {
 	temperature := float64(0.2)
 	maxTokens := float64(1200)
@@ -149,6 +192,49 @@ func TestServiceGenerateUsesEinoChatModelWithResolvedProviderAndImage(t *testing
 	if len(parts) != 2 || parts[0].Text != "识别这件衣服" || parts[1].Image == nil ||
 		parts[1].Image.URL == nil || *parts[1].Image.URL != "https://download.example.test/private.jpg" {
 		t.Fatalf("expected text and image multi content, got %#v", parts)
+	}
+}
+
+func TestServiceNewToolCallingChatModelWithUsageReturnsResolvedMetadata(t *testing.T) {
+	toolModel := &captureToolCallingChatModel{}
+	var capturedConfig *qwen.ChatModelConfig
+	service := NewService(NewConfigResolver(memoryConfigRepo{
+		usages: map[string]Usage{
+			"agent_chat": {
+				Key:           "agent_chat",
+				ProviderCode:  "qwen",
+				ModelCode:     "qwen-plus",
+				PromptVersion: "v2",
+			},
+		},
+		providers: map[string]Provider{
+			"qwen": {ID: 7, Code: "qwen", APIBaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", Token: "token", Status: StatusActive},
+		},
+		models: map[string]Model{
+			modelKey("qwen", "qwen-plus"): {ID: 9, ProviderCode: "qwen", ModelCode: "qwen-plus", Caps: []string{"text"}, Status: StatusActive},
+		},
+	}), &captureToolCallingClient{
+		qwenModel: toolModel,
+		onQwenConfig: func(config *qwen.ChatModelConfig) {
+			capturedConfig = config
+		},
+	})
+
+	chatModel, resolved, err := service.NewToolCallingChatModelWithUsage(context.Background(), Request{
+		UsageKey:     "agent_chat",
+		RequiredCaps: []string{"text"},
+	})
+	if err != nil {
+		t.Fatalf("new tool calling chat model: %v", err)
+	}
+	if chatModel != toolModel {
+		t.Fatalf("expected returned tool model")
+	}
+	if resolved.Usage.Key != "agent_chat" || resolved.Provider.Code != "qwen" || resolved.Model.ModelCode != "qwen-plus" || resolved.Usage.PromptVersion != "v2" {
+		t.Fatalf("unexpected resolved usage: %#v", resolved)
+	}
+	if capturedConfig == nil || capturedConfig.Model != "qwen-plus" {
+		t.Fatalf("expected qwen model config, got %#v", capturedConfig)
 	}
 }
 

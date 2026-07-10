@@ -118,12 +118,24 @@ func (r *MySQLRepository) CreateAgentRunStep(ctx context.Context, input AgentRun
 	if r == nil || r.ext == nil {
 		return ErrRepositoryUnsupported
 	}
+	startedAt := input.StartedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	finishedAt := input.FinishedAt
+	if finishedAt.IsZero() {
+		finishedAt = startedAt
+	}
+	duration := input.DurationMS
+	if duration <= 0 {
+		duration = durationMS(startedAt, finishedAt)
+	}
 	_, err := r.ext.ExecContext(ctx, `
 INSERT INTO agent_run_steps
-  (public_id, user_id, source_msg_id, assistant_msg_id, step_no, step_type, status, decision_label, input_summary, output_summary, related_type, related_id, related_public_id, started_at, finished_at, error_message)
+  (public_id, user_id, source_msg_id, assistant_msg_id, step_no, step_type, status, usage_key, provider_code, model_code, prompt_version, max_iterations, tool_name, tool_call_id, decision_label, input_summary, output_summary, related_type, related_id, related_public_id, started_at, finished_at, duration_ms, error_message)
 VALUES
-  (?, ?, NULLIF(?, 0), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?, NULLIF(?, ''))
-`, id.NewPublicID("ars"), input.UserID, input.SourceMsgID, input.AssistantMsgID, input.StepNo, input.StepType, input.Status, input.DecisionLabel, input.InputSummary, input.OutputSummary, input.RelatedType, input.RelatedID, input.RelatedPublicID, time.Now().UTC(), time.Now().UTC(), input.ErrorMessage)
+  (?, ?, NULLIF(?, 0), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?, NULLIF(?, 0), NULLIF(?, ''))
+`, id.NewPublicID("ars"), input.UserID, input.SourceMsgID, input.AssistantMsgID, input.StepNo, input.StepType, input.Status, input.UsageKey, input.ProviderCode, input.ModelCode, input.PromptVersion, input.MaxIterations, input.ToolName, input.ToolCallID, input.DecisionLabel, input.InputSummary, input.OutputSummary, input.RelatedType, input.RelatedID, input.RelatedPublicID, startedAt, finishedAt, duration, input.ErrorMessage)
 	return err
 }
 

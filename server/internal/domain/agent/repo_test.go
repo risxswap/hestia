@@ -5,6 +5,7 @@ import (
 	"errors"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jmoiron/sqlx"
@@ -166,18 +167,40 @@ func TestRepositoryCreateAgentRunStepWritesObservableStep(t *testing.T) {
 	}
 	defer db.Close()
 	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
+	startedAt := time.Date(2026, 7, 10, 9, 0, 0, 0, time.UTC)
+	finishedAt := startedAt.Add(25 * time.Millisecond)
 
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO agent_run_steps")).
+		WithArgs(
+			sqlmock.AnyArg(), int64(12), int64(100), int64(101), 1, AgentStepTypeModelDecision, AgentStepStatusSucceeded,
+			"agent_chat", "qwen", "qwen-plus", "v1", 8, "create_advice_draft", "call_1", "draft", "用户输入", "模型输出",
+			"advice_draft", int64(30), "drf_test", startedAt, finishedAt, 25, "",
+		).
 		WillReturnResult(sqlmock.NewResult(201, 1))
 
 	err = repo.CreateAgentRunStep(context.Background(), AgentRunStepInput{
-		UserID:         12,
-		SourceMsgID:    100,
-		AssistantMsgID: 101,
-		StepNo:         1,
-		StepType:       AgentStepTypeModelDecision,
-		Status:         AgentStepStatusSucceeded,
-		DecisionLabel:  "draft",
+		UserID:          12,
+		SourceMsgID:     100,
+		AssistantMsgID:  101,
+		StepNo:          1,
+		StepType:        AgentStepTypeModelDecision,
+		Status:          AgentStepStatusSucceeded,
+		UsageKey:        "agent_chat",
+		ProviderCode:    "qwen",
+		ModelCode:       "qwen-plus",
+		PromptVersion:   "v1",
+		MaxIterations:   8,
+		ToolName:        "create_advice_draft",
+		ToolCallID:      "call_1",
+		DecisionLabel:   "draft",
+		InputSummary:    "用户输入",
+		OutputSummary:   "模型输出",
+		RelatedType:     "advice_draft",
+		RelatedID:       30,
+		RelatedPublicID: "drf_test",
+		StartedAt:       startedAt,
+		FinishedAt:      finishedAt,
+		DurationMS:      25,
 	})
 	if err != nil {
 		t.Fatalf("create run step: %v", err)

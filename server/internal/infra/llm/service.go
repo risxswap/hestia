@@ -93,32 +93,39 @@ func (s *Service) Generate(ctx context.Context, request Request) (Response, erro
 }
 
 func (s *Service) NewToolCallingChatModel(ctx context.Context, request Request) (einomodel.ToolCallingChatModel, error) {
+	chatModel, _, err := s.NewToolCallingChatModelWithUsage(ctx, request)
+	return chatModel, err
+}
+
+func (s *Service) NewToolCallingChatModelWithUsage(ctx context.Context, request Request) (einomodel.ToolCallingChatModel, ResolvedUsage, error) {
 	if s == nil || s.client == nil {
-		return nil, ErrClientUnavailable
+		return nil, ResolvedUsage{}, ErrClientUnavailable
 	}
 	resolved, err := s.resolver.ResolveUsage(ctx, request.UsageKey, request.RequiredCaps)
 	if err != nil {
-		return nil, err
+		return nil, ResolvedUsage{}, err
 	}
 	if toolClient, ok := s.client.(ToolCallingClient); ok {
 		switch strings.ToLower(strings.TrimSpace(resolved.Provider.Code)) {
 		case "qwen":
-			return toolClient.NewQwenToolCallingChatModel(ctx, qwenChatModelConfig(resolved, request))
+			chatModel, err := toolClient.NewQwenToolCallingChatModel(ctx, qwenChatModelConfig(resolved, request))
+			return chatModel, resolved, err
 		case "siliconflow", "openai":
-			return toolClient.NewOpenAIToolCallingChatModel(ctx, openAIChatModelConfig(resolved, request))
+			chatModel, err := toolClient.NewOpenAIToolCallingChatModel(ctx, openAIChatModelConfig(resolved, request))
+			return chatModel, resolved, err
 		default:
-			return nil, fmt.Errorf("unsupported llm provider %q", resolved.Provider.Code)
+			return nil, ResolvedUsage{}, fmt.Errorf("unsupported llm provider %q", resolved.Provider.Code)
 		}
 	}
 	chatModel, err := s.newChatModel(ctx, resolved, request)
 	if err != nil {
-		return nil, err
+		return nil, ResolvedUsage{}, err
 	}
 	toolModel, ok := chatModel.(einomodel.ToolCallingChatModel)
 	if !ok {
-		return nil, ErrClientUnavailable
+		return nil, ResolvedUsage{}, ErrClientUnavailable
 	}
-	return toolModel, nil
+	return toolModel, resolved, nil
 }
 
 func (s *Service) generateLogAttrs(request Request, resolved ResolvedUsage) []any {

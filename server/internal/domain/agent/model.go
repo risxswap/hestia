@@ -70,14 +70,40 @@ type AdviceRunInput struct {
 type AdviceRunOutput struct {
 	AssistantText string
 	DecisionLabel string
+	Metadata      AdviceRunMetadata
+	AuditSteps    []AdviceRunAuditStep
 	ToolCalls     []AdviceToolCall
+}
+
+type AdviceRunMetadata struct {
+	UsageKey      string
+	ProviderCode  string
+	ModelCode     string
+	PromptVersion string
+	MaxIterations int
 }
 
 type AdviceToolCall struct {
 	Name             string
+	ToolCallID       string
 	InputSummary     string
 	CreateDraftInput *CreateDraftInput
 	UpdateDraftInput *UpdateDraftInput
+}
+
+type AdviceRunAuditStep struct {
+	StepType        string
+	Status          string
+	ToolName        string
+	ToolCallID      string
+	DecisionLabel   string
+	InputSummary    string
+	OutputSummary   string
+	RelatedType     string
+	RelatedID       int64
+	RelatedPublicID string
+	ErrorMessage    string
+	DurationMS      int
 }
 
 type ChatMessage struct {
@@ -123,12 +149,22 @@ type AgentRunStepInput struct {
 	StepNo          int
 	StepType        string
 	Status          string
+	UsageKey        string
+	ProviderCode    string
+	ModelCode       string
+	PromptVersion   string
+	MaxIterations   int
+	ToolName        string
+	ToolCallID      string
 	DecisionLabel   string
 	InputSummary    string
 	OutputSummary   string
 	RelatedType     string
 	RelatedID       int64
 	RelatedPublicID string
+	StartedAt       time.Time
+	FinishedAt      time.Time
+	DurationMS      int
 	ErrorMessage    string
 }
 

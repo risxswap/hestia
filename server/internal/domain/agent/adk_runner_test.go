@@ -43,6 +43,7 @@ func TestParseAdviceRunOutputJSONMapsToolCalls(t *testing.T) {
   "tool_calls": [
     {
       "name": "update_advice_draft",
+      "tool_call_id": "call_update_1",
       "input_summary": "鞋子换稳一点",
       "update_draft_input": {
         "public_id": "drf_test",
@@ -71,6 +72,9 @@ func TestParseAdviceRunOutputJSONMapsToolCalls(t *testing.T) {
 	}
 	if len(output.ToolCalls) != 1 || output.ToolCalls[0].UpdateDraftInput == nil {
 		t.Fatalf("expected update tool call, got %#v", output.ToolCalls)
+	}
+	if output.ToolCalls[0].ToolCallID != "call_update_1" {
+		t.Fatalf("expected tool call id, got %#v", output.ToolCalls[0])
 	}
 	update := output.ToolCalls[0].UpdateDraftInput
 	if update.PublicID != "drf_test" || update.Sections[0].SectionType != SectionTypeOutfit {

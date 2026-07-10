@@ -100,6 +100,108 @@ func TestServiceChatUsesAdviceRunnerToolCalls(t *testing.T) {
 	}
 }
 
+func TestServiceChatRecordsRunnerMetadataAndToolStepDetails(t *testing.T) {
+	repo := &spyAgentRepo{}
+	runner := &spyAdviceRunner{
+		output: AdviceRunOutput{
+			AssistantText: "已创建一版适合通勤的草稿。",
+			DecisionLabel: "create_draft",
+			Metadata: AdviceRunMetadata{
+				UsageKey:      "agent_chat",
+				ProviderCode:  "qwen",
+				ModelCode:     "qwen-plus",
+				PromptVersion: "v1",
+				MaxIterations: 8,
+			},
+			ToolCalls: []AdviceToolCall{{
+				Name:         AdviceToolCreateDraft,
+				ToolCallID:   "call_create_1",
+				InputSummary: "创建通勤建议",
+				CreateDraftInput: &CreateDraftInput{
+					Sections: []DraftSectionInput{{
+						SectionType:          SectionTypeOutfit,
+						ContentSchemaVersion: "v1",
+						ContentJSON:          defaultAdviceContent("通勤穿搭", "清爽利落"),
+					}},
+				},
+			}},
+		},
+	}
+	service := NewServiceWithRunner(repo, nil, runner)
+
+	_, err := service.Chat(context.Background(), 12, "明天通勤怎么穿")
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if len(repo.steps) < 3 {
+		t.Fatalf("expected recorded steps, got %#v", repo.steps)
+	}
+	modelStep := repo.steps[0]
+	if modelStep.UsageKey != "agent_chat" || modelStep.ProviderCode != "qwen" || modelStep.ModelCode != "qwen-plus" || modelStep.PromptVersion != "v1" || modelStep.MaxIterations != 8 {
+		t.Fatalf("expected runner metadata on model step, got %#v", modelStep)
+	}
+	if modelStep.DurationMS <= 0 {
+		t.Fatalf("expected model duration, got %#v", modelStep)
+	}
+	toolCallStep := repo.steps[1]
+	if toolCallStep.ToolName != AdviceToolCreateDraft || toolCallStep.ToolCallID != "call_create_1" {
+		t.Fatalf("expected tool identity on call step, got %#v", toolCallStep)
+	}
+	toolResultStep := repo.steps[2]
+	if toolResultStep.ToolName != AdviceToolCreateDraft || toolResultStep.ToolCallID != "call_create_1" || toolResultStep.DurationMS <= 0 {
+		t.Fatalf("expected tool result details, got %#v", toolResultStep)
+	}
+}
+
+func TestServiceChatRecordsRunnerAuditStepsWithoutExecutingTools(t *testing.T) {
+	repo := &spyAgentRepo{currentDraft: routeLikeDraft(12)}
+	runner := &spyAdviceRunner{
+		output: AdviceRunOutput{
+			AssistantText: "已按你的反馈更新草稿。",
+			DecisionLabel: "update_draft",
+			AuditSteps: []AdviceRunAuditStep{
+				{
+					StepType:      AgentStepTypeToolCall,
+					Status:        AgentStepStatusSucceeded,
+					ToolName:      AdviceToolUpdateDraft,
+					ToolCallID:    "call_update_1",
+					InputSummary:  "调用 update_advice_draft",
+					DecisionLabel: AdviceToolUpdateDraft,
+				},
+				{
+					StepType:        AgentStepTypeToolResult,
+					Status:          AgentStepStatusSucceeded,
+					ToolName:        AdviceToolUpdateDraft,
+					ToolCallID:      "call_update_1",
+					OutputSummary:   "草稿已由 ADK 工具更新",
+					DecisionLabel:   AdviceToolUpdateDraft,
+					RelatedType:     "advice_draft",
+					RelatedID:       10,
+					RelatedPublicID: "drf_test",
+				},
+			},
+		},
+	}
+	service := NewServiceWithRunner(repo, nil, runner)
+
+	result, err := service.Chat(context.Background(), 12, "鞋子换舒服点")
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if repo.updatedDraft || repo.createdDraft {
+		t.Fatalf("expected runner audit steps not to execute service tools again")
+	}
+	if result.Draft == nil || result.Draft.DraftPublicID != "drf_test" {
+		t.Fatalf("expected refreshed draft card, got %#v", result.Draft)
+	}
+	if len(repo.steps) != 4 {
+		t.Fatalf("expected model, two runner audit steps and final response, got %#v", repo.steps)
+	}
+	if repo.steps[1].ToolName != AdviceToolUpdateDraft || repo.steps[1].ToolCallID != "call_update_1" || repo.steps[2].StepType != AgentStepTypeToolResult {
+		t.Fatalf("expected runner audit tool steps, got %#v", repo.steps)
+	}
+}
+
 func TestServiceChatFallsBackWhenRunnerReturnsNoToolCallsForFirstDraft(t *testing.T) {
 	repo := &spyAgentRepo{}
 	runner := &spyAdviceRunner{

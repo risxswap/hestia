@@ -40,6 +40,32 @@ func (s *Service) ListItems(ctx context.Context, userID int64) ([]Item, error) {
 	return items, nil
 }
 
+func (s *Service) AgentMemoryContext(ctx context.Context, userID int64, query string, limit int) ([]Item, error) {
+	items, err := s.ListItems(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	query = strings.TrimSpace(query)
+	if query != "" {
+		filtered := make([]Item, 0, len(items))
+		for _, item := range items {
+			if memoryItemMatchesQuery(item, query) {
+				filtered = append(filtered, item)
+			}
+		}
+		if len(filtered) > 0 {
+			items = filtered
+		}
+	}
+	if limit <= 0 || limit > 12 {
+		limit = 8
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
 func (s *Service) UpdateItem(ctx context.Context, userID int64, publicID string, request UpdateRequest) (Item, error) {
 	if s == nil || s.repo == nil {
 		return Item{}, ErrRepositoryUnsupported
@@ -119,4 +145,20 @@ func displayText(raw string) string {
 		return strings.Trim(value, `"`)
 	}
 	return value
+}
+
+func memoryItemMatchesQuery(item Item, query string) bool {
+	haystacks := []string{
+		item.MemoryKey,
+		item.MemoryValue,
+		item.DisplayText,
+		item.TypeLabel,
+		item.SourceLabel,
+	}
+	for _, text := range haystacks {
+		if strings.Contains(strings.TrimSpace(text), query) {
+			return true
+		}
+	}
+	return false
 }

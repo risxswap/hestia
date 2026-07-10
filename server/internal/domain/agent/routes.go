@@ -6,6 +6,8 @@ import (
 
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/domain/clothes"
+	"hestia/server/internal/domain/memory"
+	"hestia/server/internal/domain/profile"
 	"hestia/server/internal/infra/llm"
 
 	"github.com/cloudwego/eino/adk"
@@ -15,10 +17,14 @@ import (
 
 func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 	var clothesService ClothesAdviceService
+	var profileService ProfileContextService
+	var memoryService MemoryContextService
 	var repo Repository
 	var logger *slog.Logger
 	if deps != nil && deps.DB != nil {
 		clothesService = clothes.NewService(clothes.NewMySQLRepository(deps.DB))
+		profileService = profile.NewService(profile.NewMySQLRepository(deps.DB))
+		memoryService = memory.NewService(memory.NewMySQLRepository(deps.DB))
 		repo = NewMySQLRepository(deps.DB)
 	}
 	if deps != nil {
@@ -28,18 +34,29 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 	if deps != nil && deps.DB != nil && deps.LLM != nil {
 		llmService := llm.NewService(llm.NewConfigResolver(llm.NewMySQLConfigRepository(deps.DB)), deps.LLM)
 		llmService.SetLogger(logger)
-		if chatModel, err := llmService.NewToolCallingChatModel(context.Background(), llm.Request{
+		if chatModel, resolvedUsage, err := llmService.NewToolCallingChatModelWithUsage(context.Background(), llm.Request{
 			UsageKey:     "agent_chat",
 			RequiredCaps: []string{"text"},
 		}); err == nil {
-			if tools, err := NewAdviceTools(repo, clothesService); err == nil {
+			if tools, err := NewAdviceToolsWithDependencies(repo, AdviceToolDependencies{
+				Clothes: clothesService,
+				Profile: profileService,
+				Memory:  memoryService,
+			}); err == nil {
 				toolsConfig := adk.ToolsConfig{
 					ToolsNodeConfig: compose.ToolsNodeConfig{
 						Tools:               tools,
 						ExecuteSequentially: true,
 					},
 				}
-				if runner, err := NewEinoADKChatModelAdviceRunner(context.Background(), chatModel, toolsConfig); err == nil {
+				metadata := AdviceRunMetadata{
+					UsageKey:      resolvedUsage.Usage.Key,
+					ProviderCode:  resolvedUsage.Provider.Code,
+					ModelCode:     resolvedUsage.Model.ModelCode,
+					PromptVersion: resolvedUsage.Usage.PromptVersion,
+					MaxIterations: einoADKMaxIterations,
+				}
+				if runner, err := NewEinoADKChatModelAdviceRunnerWithMetadata(context.Background(), chatModel, toolsConfig, metadata); err == nil {
 					service.SetAdviceRunner(runner)
 				}
 			}

@@ -13,18 +13,30 @@ import (
 
 var ErrAdviceRunnerUnavailable = errors.New("advice runner unavailable")
 
+const einoADKMaxIterations = 8
+
 type EinoADKAdviceRunner struct {
-	runner *adk.Runner
+	runner   *adk.Runner
+	metadata AdviceRunMetadata
 }
 
 func NewEinoADKAdviceRunner(runner *adk.Runner) *EinoADKAdviceRunner {
 	return &EinoADKAdviceRunner{runner: runner}
 }
 
+func NewEinoADKAdviceRunnerWithMetadata(runner *adk.Runner, metadata AdviceRunMetadata) *EinoADKAdviceRunner {
+	return &EinoADKAdviceRunner{runner: runner, metadata: normalizeAdviceRunMetadata(metadata)}
+}
+
 func NewEinoADKChatModelAdviceRunner(ctx context.Context, chatModel model.ToolCallingChatModel, tools adk.ToolsConfig) (*EinoADKAdviceRunner, error) {
+	return NewEinoADKChatModelAdviceRunnerWithMetadata(ctx, chatModel, tools, AdviceRunMetadata{})
+}
+
+func NewEinoADKChatModelAdviceRunnerWithMetadata(ctx context.Context, chatModel model.ToolCallingChatModel, tools adk.ToolsConfig, metadata AdviceRunMetadata) (*EinoADKAdviceRunner, error) {
 	if chatModel == nil {
 		return nil, ErrAdviceRunnerUnavailable
 	}
+	metadata = normalizeAdviceRunMetadata(metadata)
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "style_advice_agent",
 		Description: "通过对话创建和精修穿搭、发型、妆容建议草稿",
@@ -36,12 +48,12 @@ func NewEinoADKChatModelAdviceRunner(ctx context.Context, chatModel model.ToolCa
 `),
 		Model:         chatModel,
 		ToolsConfig:   tools,
-		MaxIterations: 8,
+		MaxIterations: metadata.MaxIterations,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &EinoADKAdviceRunner{runner: adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})}, nil
+	return &EinoADKAdviceRunner{runner: adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent}), metadata: metadata}, nil
 }
 
 func (r *EinoADKAdviceRunner) Run(ctx context.Context, input AdviceRunInput) (AdviceRunOutput, error) {
@@ -81,8 +93,10 @@ func (r *EinoADKAdviceRunner) Run(ctx context.Context, input AdviceRunInput) (Ad
 	}
 	output, err := parseAdviceRunOutputJSON(finalText)
 	if err != nil {
-		return AdviceRunOutput{AssistantText: finalText, DecisionLabel: "final_response"}, nil
+		return AdviceRunOutput{AssistantText: finalText, DecisionLabel: "final_response", Metadata: r.metadata}, nil
 	}
+	output.Metadata = r.metadata
+	output.AuditSteps = adviceRunAuditStepsFromToolCalls(output.ToolCalls)
 	output.ToolCalls = nil
 	return output, nil
 }
@@ -154,6 +168,7 @@ func parseAdviceRunOutputJSON(raw string) (AdviceRunOutput, error) {
 	for _, call := range payload.ToolCalls {
 		output.ToolCalls = append(output.ToolCalls, AdviceToolCall{
 			Name:             strings.TrimSpace(call.Name),
+			ToolCallID:       strings.TrimSpace(call.ToolCallID),
 			InputSummary:     call.InputSummary,
 			CreateDraftInput: call.CreateDraftInput.domainInput(),
 			UpdateDraftInput: call.UpdateDraftInput.domainInput(),
@@ -178,9 +193,43 @@ type adviceRunOutputPayload struct {
 
 type adviceToolCallPayload struct {
 	Name             string                   `json:"name"`
+	ToolCallID       string                   `json:"tool_call_id"`
 	InputSummary     string                   `json:"input_summary"`
 	CreateDraftInput *createDraftInputPayload `json:"create_draft_input"`
 	UpdateDraftInput *updateDraftInputPayload `json:"update_draft_input"`
+}
+
+func normalizeAdviceRunMetadata(metadata AdviceRunMetadata) AdviceRunMetadata {
+	if metadata.MaxIterations <= 0 {
+		metadata.MaxIterations = einoADKMaxIterations
+	}
+	return metadata
+}
+
+func adviceRunAuditStepsFromToolCalls(calls []AdviceToolCall) []AdviceRunAuditStep {
+	steps := make([]AdviceRunAuditStep, 0, len(calls)*2)
+	for _, call := range calls {
+		if strings.TrimSpace(call.Name) == "" {
+			continue
+		}
+		steps = append(steps, AdviceRunAuditStep{
+			StepType:      AgentStepTypeToolCall,
+			Status:        AgentStepStatusSucceeded,
+			ToolName:      call.Name,
+			ToolCallID:    call.ToolCallID,
+			DecisionLabel: call.Name,
+			InputSummary:  call.InputSummary,
+		})
+		steps = append(steps, AdviceRunAuditStep{
+			StepType:      AgentStepTypeToolResult,
+			Status:        AgentStepStatusSucceeded,
+			ToolName:      call.Name,
+			ToolCallID:    call.ToolCallID,
+			DecisionLabel: call.Name,
+			OutputSummary: "ADK 工具已执行",
+		})
+	}
+	return steps
 }
 
 type createDraftInputPayload struct {
