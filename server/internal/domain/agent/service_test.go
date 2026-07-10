@@ -171,6 +171,7 @@ type spyAgentRepo struct {
 	createdMessages []ChatMessage
 	steps           []AgentRunStepInput
 	createdDraft    bool
+	lastCreate      CreateDraftInput
 	updatedDraft    bool
 	lastUpdate      UpdateDraftInput
 	updateErr       error
@@ -202,6 +203,10 @@ func (r *spyAgentRepo) UpdateChatMessage(_ context.Context, input UpdateChatMess
 	return ChatMessage{ID: input.ID, Status: input.Status, MsgType: input.MsgType, ContentText: input.ContentText}, nil
 }
 
+func (r *spyAgentRepo) ListRecentChatMessages(context.Context, int64, int) ([]ChatMessage, error) {
+	return nil, nil
+}
+
 func (r *spyAgentRepo) CreateAgentRunStep(_ context.Context, input AgentRunStepInput) error {
 	r.steps = append(r.steps, input)
 	return nil
@@ -209,6 +214,7 @@ func (r *spyAgentRepo) CreateAgentRunStep(_ context.Context, input AgentRunStepI
 
 func (r *spyAgentRepo) CreateDraft(_ context.Context, input CreateDraftInput) (Draft, error) {
 	r.createdDraft = true
+	r.lastCreate = input
 	draft := routeLikeDraft(input.UserID)
 	draft.SourceMsgID = input.SourceMsgID
 	return draft, nil
@@ -231,6 +237,10 @@ func (r *spyAgentRepo) UpdateDraftSections(_ context.Context, input UpdateDraftI
 	draft.CurrentRevisionNo++
 	draft.Sections[0].ContentJSON = input.Sections[0].ContentJSON
 	return draft, nil
+}
+
+func (r *spyAgentRepo) ListDraftVersions(context.Context, int64, string) ([]DraftRevision, error) {
+	return nil, nil
 }
 
 func (r *spyAgentRepo) ConfirmDraft(context.Context, int64, string) (Advice, error) {

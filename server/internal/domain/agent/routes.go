@@ -9,6 +9,7 @@ import (
 	"hestia/server/internal/infra/llm"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/compose"
 	"github.com/gin-gonic/gin"
 )
 
@@ -31,8 +32,16 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 			UsageKey:     "agent_chat",
 			RequiredCaps: []string{"text"},
 		}); err == nil {
-			if runner, err := NewEinoADKChatModelAdviceRunner(context.Background(), chatModel, adk.ToolsConfig{}); err == nil {
-				service.SetAdviceRunner(runner)
+			if tools, err := NewAdviceTools(repo, clothesService); err == nil {
+				toolsConfig := adk.ToolsConfig{
+					ToolsNodeConfig: compose.ToolsNodeConfig{
+						Tools:               tools,
+						ExecuteSequentially: true,
+					},
+				}
+				if runner, err := NewEinoADKChatModelAdviceRunner(context.Background(), chatModel, toolsConfig); err == nil {
+					service.SetAdviceRunner(runner)
+				}
 			}
 		}
 	}
@@ -61,6 +70,7 @@ func RegisterAdviceDraftRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 func RegisterAdviceDraftRoutesWithService(group *gin.RouterGroup, service *Service, logger ...*slog.Logger) {
 	handler := NewHandler(service, optionalLogger(logger))
 	group.GET("/current", handler.CurrentDraft)
+	group.GET("/:public_id/versions", handler.DraftVersions)
 	group.POST("/:public_id/confirm", handler.ConfirmDraft)
 	group.POST("/:public_id/discard", handler.DiscardDraft)
 }

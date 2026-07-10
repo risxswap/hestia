@@ -40,8 +40,28 @@ Page({
       }
     ]
   },
+  onLoad() {
+    this.restoreCurrentDraft();
+  },
   onUnload() {
     this.abortActiveRequest();
+  },
+  async restoreCurrentDraft() {
+    try {
+      const draft = await api.getCurrentAdviceDraft();
+      if (!draft || !draft.draft_public_id) {
+        return;
+      }
+      const exists = this.data.messages.some((message) => message.draft && message.draft.draft_public_id === draft.draft_public_id);
+      if (exists) {
+        return;
+      }
+      this.appendAssistantMessage("继续调整这版草稿也可以。", "", normalizeDraftCard(draft));
+    } catch (error) {
+      if (error && error.code === "agent.draft_not_found") {
+        return;
+      }
+    }
   },
   handleScene(event) {
     const scene = event.currentTarget.dataset.scene || event.detail.scene;
@@ -149,12 +169,13 @@ Page({
     });
     this.sendToAgent(content, assistantMessage.id);
   },
-  appendAssistantMessage(content, status) {
+  appendAssistantMessage(content, status, draft) {
     const message = {
       id: nextMessageID("assistant"),
       role: "assistant",
       status: status || "",
-      content
+      content,
+      draft
     };
     this.setData({
       messages: this.data.messages.concat(message)

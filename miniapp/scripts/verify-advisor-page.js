@@ -25,7 +25,8 @@ try {
     "handleStop",
     "handleConfirmDraft",
     "handleContinueDraft",
-    "handleDiscardDraft"
+    "handleDiscardDraft",
+    "restoreCurrentDraft"
   ].forEach((name) => {
     assert(typeof pageConfig[name] === "function", `advisor page should define ${name}`);
   });

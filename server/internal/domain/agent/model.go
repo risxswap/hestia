@@ -60,10 +60,11 @@ type ChatResult struct {
 }
 
 type AdviceRunInput struct {
-	UserID       int64
-	Text         string
-	SourceMsgID  int64
-	CurrentDraft *Draft
+	UserID         int64
+	Text           string
+	SourceMsgID    int64
+	RecentMessages []ChatMessage
+	CurrentDraft   *Draft
 }
 
 type AdviceRunOutput struct {
@@ -255,4 +256,22 @@ type DraftCard struct {
 	Status        string         `json:"status"`
 	SceneLabel    string         `json:"scene_label,omitempty"`
 	Sections      []DraftSection `json:"sections"`
+}
+
+type DraftRevision struct {
+	DraftRevisionNo int                   `json:"draft_revision_no"`
+	SourceMsgID     int64                 `json:"-"`
+	UserIntent      string                `json:"user_intent,omitempty"`
+	RevisionSummary string                `json:"revision_summary,omitempty"`
+	Sections        []DraftVersionSection `json:"sections"`
+	CreatedAt       time.Time             `json:"created_at,omitempty"`
+}
+
+type DraftVersionSection struct {
+	PublicID             string         `json:"public_id"`
+	SectionType          string         `json:"section_type"`
+	SectionVersionNo     int            `json:"section_version_no"`
+	ContentSchemaVersion string         `json:"content_schema_version"`
+	ContentJSON          map[string]any `json:"content_json"`
+	CreatedAt            time.Time      `json:"created_at,omitempty"`
 }

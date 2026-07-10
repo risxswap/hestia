@@ -79,6 +79,20 @@ func (h *Handler) ConfirmDraft(c *gin.Context) {
 	response.OK(c, gin.H{"advice_public_id": advice.PublicID})
 }
 
+func (h *Handler) DraftVersions(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	versions, err := h.service.DraftVersions(c.Request.Context(), user.UserID, c.Param("public_id"))
+	if err != nil {
+		h.writeError(c, err, "list advice draft versions failed", user.UserID, c.Param("public_id"))
+		return
+	}
+	response.OK(c, gin.H{"versions": versions})
+}
+
 func (h *Handler) DiscardDraft(c *gin.Context) {
 	user, ok := auth.UserFromContext(c)
 	if !ok {
@@ -101,6 +115,8 @@ func (h *Handler) writeError(c *gin.Context, err error, logMessage string, userI
 		response.Error(c, http.StatusConflict, "agent.draft_not_active", "草稿已确认或废弃")
 	case errors.Is(err, ErrDraftIncomplete):
 		response.Error(c, http.StatusConflict, "agent.draft_incomplete", "草稿内容不完整")
+	case errors.Is(err, ErrDraftInvalid):
+		response.Error(c, http.StatusBadRequest, "agent.draft_invalid", "草稿内容不符合结构要求")
 	case errors.Is(err, ErrRepositoryUnsupported):
 		response.Error(c, http.StatusServiceUnavailable, "agent.repository_unavailable", "智能体草稿服务不可用")
 	default:

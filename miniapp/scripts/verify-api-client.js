@@ -55,6 +55,7 @@ async function main() {
     "sendAgentMessage",
     "streamAgentChat",
     "getCurrentAdviceDraft",
+    "getAdviceDraftVersions",
     "confirmAdviceDraft",
     "discardAdviceDraft",
     "parseSSEEvents",
@@ -204,6 +205,7 @@ async function main() {
     const chatEvents = await api.sendAgentMessage("今天怎么穿");
     assert(chatEvents.length === 2, `sendAgentMessage should collect SSE events, got ${chatEvents.length}`);
     await api.getCurrentAdviceDraft();
+    await api.getAdviceDraftVersions("drf_test");
     await api.confirmAdviceDraft("drf_test");
     await api.discardAdviceDraft("drf_test");
   });
@@ -216,8 +218,9 @@ async function main() {
   assert(agentCalls[0].header.Authorization === "Bearer agent_token", "agent chat should send bearer token");
   assert(!agentPaths.some((apiPath) => apiPath.includes("/api/user/agent/stream")), `old agent stream path should not be used: ${agentPaths.join(",")}`);
   assert(agentPaths[1] === "/api/user/advice-drafts/current", `current draft path mismatch: ${agentPaths[1]}`);
-  assert(agentPaths[2] === "/api/user/advice-drafts/drf_test/confirm", `confirm draft path mismatch: ${agentPaths[2]}`);
-  assert(agentPaths[3] === "/api/user/advice-drafts/drf_test/discard", `discard draft path mismatch: ${agentPaths[3]}`);
+  assert(agentPaths[2] === "/api/user/advice-drafts/drf_test/versions", `draft versions path mismatch: ${agentPaths[2]}`);
+  assert(agentPaths[3] === "/api/user/advice-drafts/drf_test/confirm", `confirm draft path mismatch: ${agentPaths[3]}`);
+  assert(agentPaths[4] === "/api/user/advice-drafts/drf_test/discard", `discard draft path mismatch: ${agentPaths[4]}`);
 
   await withGlobals({
     getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),

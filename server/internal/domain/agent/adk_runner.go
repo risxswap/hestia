@@ -29,9 +29,9 @@ func NewEinoADKChatModelAdviceRunner(ctx context.Context, chatModel model.ToolCa
 		Name:        "style_advice_agent",
 		Description: "通过对话创建和精修穿搭、发型、妆容建议草稿",
 		Instruction: strings.TrimSpace(`
-你是 Hestia 的个人 AI 形象顾问智能体。你需要判断用户意图，必要时调用草稿工具创建或更新建议草稿。
-最终回答必须是 JSON，字段为 assistant_text、decision_label、tool_calls。
-tool_calls[].name 只能是 create_advice_draft 或 update_advice_draft。
+	你是 Hestia 的个人 AI 形象顾问智能体。你需要判断用户意图，必要时通过 ADK 工具调用创建、读取、更新或废弃建议草稿。
+	最终回答必须是 JSON，字段为 assistant_text、decision_label、tool_calls。tool_calls 只用于总结本轮已经完成的工具动作，不会再次执行。
+	需要写入草稿时必须先真实调用 create_advice_draft、update_advice_draft 或 discard_advice_draft 工具，不得只在最终 JSON 里声明。
 建议内容要中性、具体、可执行，避免医疗诊断、羞辱式表达和确定性变美承诺。
 `),
 		Model:         chatModel,
@@ -48,7 +48,11 @@ func (r *EinoADKAdviceRunner) Run(ctx context.Context, input AdviceRunInput) (Ad
 	if r == nil || r.runner == nil {
 		return AdviceRunOutput{}, ErrAdviceRunnerUnavailable
 	}
-	iterator := r.runner.Query(ctx, adkRunnerQuery(input))
+	ctx = contextWithAdviceToolSession(ctx, input.UserID, input.SourceMsgID)
+	iterator := r.runner.Query(ctx, adkRunnerQuery(input), adk.WithSessionValues(map[string]any{
+		adviceToolSessionUserID:      input.UserID,
+		adviceToolSessionSourceMsgID: input.SourceMsgID,
+	}))
 	var finalText string
 	for {
 		event, ok := iterator.Next()
@@ -79,17 +83,62 @@ func (r *EinoADKAdviceRunner) Run(ctx context.Context, input AdviceRunInput) (Ad
 	if err != nil {
 		return AdviceRunOutput{AssistantText: finalText, DecisionLabel: "final_response"}, nil
 	}
+	output.ToolCalls = nil
 	return output, nil
 }
 
 func adkRunnerQuery(input AdviceRunInput) string {
-	currentDraft := "无"
-	if input.CurrentDraft != nil {
-		if raw, err := json.Marshal(input.CurrentDraft); err == nil {
-			currentDraft = string(raw)
+	var builder strings.Builder
+	builder.WriteString("最近聊天：\n")
+	if len(input.RecentMessages) == 0 {
+		builder.WriteString("无\n")
+	} else {
+		for _, message := range input.RecentMessages {
+			text := strings.TrimSpace(message.ContentText)
+			if text == "" {
+				continue
+			}
+			builder.WriteString("- ")
+			builder.WriteString(message.Role)
+			builder.WriteString(": ")
+			builder.WriteString(text)
+			builder.WriteString("\n")
 		}
 	}
-	return "用户输入：" + strings.TrimSpace(input.Text) + "\n当前草稿：" + currentDraft
+	builder.WriteString("当前草稿摘要：")
+	if input.CurrentDraft != nil {
+		builder.WriteString(draftPromptSummary(*input.CurrentDraft))
+	} else {
+		builder.WriteString("无")
+	}
+	builder.WriteString("\n用户输入：")
+	builder.WriteString(strings.TrimSpace(input.Text))
+	return builder.String()
+}
+
+func draftPromptSummary(draft Draft) string {
+	summary := map[string]any{
+		"draft_public_id":     draft.PublicID,
+		"current_revision_no": draft.CurrentRevisionNo,
+		"scene_label":         draft.SceneLabel,
+		"target_date":         draft.TargetDate,
+		"sections":            make([]map[string]string, 0, len(draft.Sections)),
+	}
+	sections := summary["sections"].([]map[string]string)
+	for _, section := range draft.Sections {
+		content := section.ContentJSON
+		sections = append(sections, map[string]string{
+			"section_type": section.SectionType,
+			"title":        jsonString(content["title"]),
+			"summary":      jsonString(content["summary"]),
+		})
+	}
+	summary["sections"] = sections
+	raw, err := json.Marshal(summary)
+	if err != nil {
+		return draft.PublicID
+	}
+	return string(raw)
 }
 
 func parseAdviceRunOutputJSON(raw string) (AdviceRunOutput, error) {

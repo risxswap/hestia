@@ -15,6 +15,7 @@ var (
 	ErrDraftNotFound         = errors.New("advice draft not found")
 	ErrDraftNotActive        = errors.New("advice draft is not active")
 	ErrDraftIncomplete       = errors.New("advice draft incomplete")
+	ErrDraftInvalid          = errors.New("advice draft invalid")
 )
 
 type ClothesAdviceService interface {
@@ -24,10 +25,12 @@ type ClothesAdviceService interface {
 type Repository interface {
 	CreateChatMessage(ctx context.Context, input CreateChatMessageInput) (ChatMessage, error)
 	UpdateChatMessage(ctx context.Context, input UpdateChatMessageInput) (ChatMessage, error)
+	ListRecentChatMessages(ctx context.Context, userID int64, limit int) ([]ChatMessage, error)
 	CreateAgentRunStep(ctx context.Context, input AgentRunStepInput) error
 	CreateDraft(ctx context.Context, input CreateDraftInput) (Draft, error)
 	GetCurrentDraft(ctx context.Context, userID int64) (Draft, error)
 	UpdateDraftSections(ctx context.Context, input UpdateDraftInput) (Draft, error)
+	ListDraftVersions(ctx context.Context, userID int64, publicID string) ([]DraftRevision, error)
 	ConfirmDraft(ctx context.Context, userID int64, publicID string) (Advice, error)
 	DiscardDraft(ctx context.Context, userID int64, publicID string) error
 }
@@ -132,27 +135,46 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string) (ChatResu
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
 		return result, err
 	}
+	recentMessages, err := s.repo.ListRecentChatMessages(ctx, userID, 12)
+	if err != nil {
+		_ = s.recordFailedStep(ctx, userID, userMessage.ID, assistantMessage.ID, 1, AgentStepTypeModelDecision, "chat_history_failed", message.Text, err)
+		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
+		return result, err
+	}
 	runner := s.runner
 	if runner == nil {
 		runner = RuleBasedAdviceRunner{}
 	}
 	output, err := runner.Run(ctx, AdviceRunInput{
-		UserID:       userID,
-		Text:         message.Text,
-		SourceMsgID:  userMessage.ID,
-		CurrentDraft: currentDraftPtr,
+		UserID:         userID,
+		Text:           message.Text,
+		SourceMsgID:    userMessage.ID,
+		RecentMessages: recentMessages,
+		CurrentDraft:   currentDraftPtr,
 	})
 	if err != nil {
 		_ = s.recordFailedStep(ctx, userID, userMessage.ID, assistantMessage.ID, 1, AgentStepTypeModelDecision, "runner_failed", message.Text, err)
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
 		return result, err
 	}
+	if len(output.ToolCalls) == 0 {
+		refreshedDraft, refreshErr := s.repo.GetCurrentDraft(ctx, userID)
+		if refreshErr == nil {
+			currentDraft = refreshedDraft
+			currentDraftPtr = &currentDraft
+		} else if !errors.Is(refreshErr, ErrDraftNotFound) {
+			_ = s.recordFailedStep(ctx, userID, userMessage.ID, assistantMessage.ID, 1, AgentStepTypeModelDecision, "refresh_draft_failed", message.Text, refreshErr)
+			_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
+			return result, refreshErr
+		}
+	}
 	if currentDraftPtr == nil && len(output.ToolCalls) == 0 {
 		output, err = (RuleBasedAdviceRunner{}).Run(ctx, AdviceRunInput{
-			UserID:       userID,
-			Text:         message.Text,
-			SourceMsgID:  userMessage.ID,
-			CurrentDraft: nil,
+			UserID:         userID,
+			Text:           message.Text,
+			SourceMsgID:    userMessage.ID,
+			RecentMessages: recentMessages,
+			CurrentDraft:   nil,
 		})
 		if err != nil {
 			_ = s.recordFailedStep(ctx, userID, userMessage.ID, assistantMessage.ID, 1, AgentStepTypeModelDecision, "fallback_failed", message.Text, err)
@@ -322,6 +344,13 @@ func (s *Service) ConfirmDraft(ctx context.Context, userID int64, publicID strin
 		return Advice{}, ErrRepositoryUnsupported
 	}
 	return s.repo.ConfirmDraft(ctx, userID, strings.TrimSpace(publicID))
+}
+
+func (s *Service) DraftVersions(ctx context.Context, userID int64, publicID string) ([]DraftRevision, error) {
+	if s == nil || s.repo == nil {
+		return nil, ErrRepositoryUnsupported
+	}
+	return s.repo.ListDraftVersions(ctx, userID, strings.TrimSpace(publicID))
 }
 
 func (s *Service) DiscardDraft(ctx context.Context, userID int64, publicID string) error {

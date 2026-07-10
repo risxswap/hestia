@@ -157,6 +157,23 @@ func TestCurrentDraftRouteReturnsDraftCard(t *testing.T) {
 	}
 }
 
+func TestDraftVersionsRouteReturnsRevisionGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newAgentDraftRouter(agent.NewServiceWithRepository(newRouteAgentRepo()))
+	request := httptest.NewRequest(http.MethodGet, "/api/user/advice-drafts/drf_test/versions", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"versions"`) || !strings.Contains(body, `"draft_revision_no":1`) {
+		t.Fatalf("expected versions response, got %s", body)
+	}
+}
+
 func newAgentDraftRouter(service *agent.Service) *gin.Engine {
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -198,6 +215,10 @@ func (r *routeAgentRepo) UpdateChatMessage(_ context.Context, input agent.Update
 	return agent.ChatMessage{ID: input.ID, PublicID: "msg_assistant", Status: input.Status, MsgType: input.MsgType, ContentText: input.ContentText}, nil
 }
 
+func (r *routeAgentRepo) ListRecentChatMessages(context.Context, int64, int) ([]agent.ChatMessage, error) {
+	return nil, nil
+}
+
 func (r *routeAgentRepo) CreateAgentRunStep(context.Context, agent.AgentRunStepInput) error {
 	return nil
 }
@@ -214,6 +235,25 @@ func (r *routeAgentRepo) UpdateDraftSections(_ context.Context, input agent.Upda
 	draft := routeDraft(input.UserID)
 	draft.CurrentRevisionNo++
 	return draft, nil
+}
+
+func (r *routeAgentRepo) ListDraftVersions(_ context.Context, userID int64, publicID string) ([]agent.DraftRevision, error) {
+	if userID != 12 || publicID != "drf_test" {
+		return nil, agent.ErrDraftNotFound
+	}
+	return []agent.DraftRevision{{
+		DraftRevisionNo: 1,
+		UserIntent:      "创建建议",
+		Sections: []agent.DraftVersionSection{{
+			PublicID:             "adsv_test",
+			SectionType:          agent.SectionTypeOutfit,
+			SectionVersionNo:     1,
+			ContentSchemaVersion: "v1",
+			ContentJSON: map[string]any{
+				"title": "清爽通勤",
+			},
+		}},
+	}}, nil
 }
 
 func (r *routeAgentRepo) ConfirmDraft(_ context.Context, userID int64, publicID string) (agent.Advice, error) {

@@ -88,6 +88,32 @@ WHERE id = ?
 	}, nil
 }
 
+func (r *MySQLRepository) ListRecentChatMessages(ctx context.Context, userID int64, limit int) ([]ChatMessage, error) {
+	if r == nil || r.ext == nil {
+		return nil, ErrRepositoryUnsupported
+	}
+	if limit <= 0 || limit > 20 {
+		limit = 12
+	}
+	var rows []chatMessageRow
+	if err := sqlx.SelectContext(ctx, r.ext, &rows, `
+SELECT id, public_id, user_id, source_msg_id, role, msg_type, content_text, related_type, related_id, related_public_id, status
+FROM chat_msgs
+WHERE user_id = ?
+  AND status = ?
+  AND deleted_at IS NULL
+ORDER BY id DESC
+LIMIT ?
+`, userID, ChatStatusSent, limit); err != nil {
+		return nil, err
+	}
+	messages := make([]ChatMessage, 0, len(rows))
+	for i := len(rows) - 1; i >= 0; i-- {
+		messages = append(messages, rows[i].message())
+	}
+	return messages, nil
+}
+
 func (r *MySQLRepository) CreateAgentRunStep(ctx context.Context, input AgentRunStepInput) error {
 	if r == nil || r.ext == nil {
 		return ErrRepositoryUnsupported
@@ -104,6 +130,9 @@ VALUES
 func (r *MySQLRepository) CreateDraft(ctx context.Context, input CreateDraftInput) (Draft, error) {
 	if r == nil || r.ext == nil {
 		return Draft{}, ErrRepositoryUnsupported
+	}
+	if err := validateCreateDraftInput(input); err != nil {
+		return Draft{}, err
 	}
 	if starter, ok := r.ext.(txStarter); ok {
 		tx, err := starter.BeginTxx(ctx, nil)
@@ -143,6 +172,9 @@ func (r *MySQLRepository) UpdateDraftSections(ctx context.Context, input UpdateD
 	if r == nil || r.ext == nil {
 		return Draft{}, ErrRepositoryUnsupported
 	}
+	if err := validateUpdateDraftInput(input); err != nil {
+		return Draft{}, err
+	}
 	if starter, ok := r.ext.(txStarter); ok {
 		tx, err := starter.BeginTxx(ctx, nil)
 		if err != nil {
@@ -159,6 +191,51 @@ func (r *MySQLRepository) UpdateDraftSections(ctx context.Context, input UpdateD
 		return draft, nil
 	}
 	return r.updateDraftSections(ctx, input)
+}
+
+func (r *MySQLRepository) ListDraftVersions(ctx context.Context, userID int64, publicID string) ([]DraftRevision, error) {
+	if r == nil || r.ext == nil {
+		return nil, ErrRepositoryUnsupported
+	}
+	draft, err := r.findDraftForUser(ctx, userID, publicID)
+	if err != nil {
+		return nil, err
+	}
+	var rows []draftSectionVersionRow
+	if err := sqlx.SelectContext(ctx, r.ext, &rows, `
+SELECT public_id, section_type, section_version_no, draft_revision_no, source_msg_id, user_intent, revision_summary, content_schema_version, content_json, created_at
+FROM advice_draft_section_versions
+WHERE draft_id = ?
+  AND user_id = ?
+ORDER BY draft_revision_no ASC, FIELD(section_type, 'outfit', 'hair', 'makeup'), id ASC
+`, draft.ID, userID); err != nil {
+		return nil, err
+	}
+	revisions := make([]DraftRevision, 0)
+	revisionIndex := map[int]int{}
+	for _, row := range rows {
+		section, err := row.section()
+		if err != nil {
+			return nil, err
+		}
+		index, ok := revisionIndex[row.DraftRevisionNo]
+		if !ok {
+			revisions = append(revisions, DraftRevision{
+				DraftRevisionNo: row.DraftRevisionNo,
+				SourceMsgID:     row.SourceMsgID.Int64,
+				UserIntent:      row.UserIntent.String,
+				RevisionSummary: row.RevisionSummary.String,
+				CreatedAt:       row.CreatedAt.Time,
+			})
+			index = len(revisions) - 1
+			revisionIndex[row.DraftRevisionNo] = index
+		}
+		if revisions[index].CreatedAt.IsZero() && row.CreatedAt.Valid {
+			revisions[index].CreatedAt = row.CreatedAt.Time
+		}
+		revisions[index].Sections = append(revisions[index].Sections, section)
+	}
+	return revisions, nil
 }
 
 func (r *MySQLRepository) ConfirmDraft(ctx context.Context, userID int64, publicID string) (Advice, error) {
@@ -645,6 +722,36 @@ type draftRow struct {
 	UpdatedAt         sql.NullTime   `db:"updated_at"`
 }
 
+type chatMessageRow struct {
+	ID              int64          `db:"id"`
+	PublicID        string         `db:"public_id"`
+	UserID          int64          `db:"user_id"`
+	SourceMsgID     sql.NullInt64  `db:"source_msg_id"`
+	Role            string         `db:"role"`
+	MsgType         string         `db:"msg_type"`
+	ContentText     sql.NullString `db:"content_text"`
+	RelatedType     sql.NullString `db:"related_type"`
+	RelatedID       sql.NullInt64  `db:"related_id"`
+	RelatedPublicID sql.NullString `db:"related_public_id"`
+	Status          string         `db:"status"`
+}
+
+func (r chatMessageRow) message() ChatMessage {
+	return ChatMessage{
+		ID:              r.ID,
+		PublicID:        r.PublicID,
+		UserID:          r.UserID,
+		SourceMsgID:     r.SourceMsgID.Int64,
+		Role:            r.Role,
+		MsgType:         r.MsgType,
+		ContentText:     r.ContentText.String,
+		RelatedType:     r.RelatedType.String,
+		RelatedID:       r.RelatedID.Int64,
+		RelatedPublicID: r.RelatedPublicID.String,
+		Status:          r.Status,
+	}
+}
+
 func (r draftRow) draft() Draft {
 	draft := Draft{
 		ID:                r.ID,
@@ -688,6 +795,19 @@ type draftSectionRow struct {
 	ContentJSON             sql.NullString `db:"content_json"`
 	CreatedAt               sql.NullTime   `db:"created_at"`
 	UpdatedAt               sql.NullTime   `db:"updated_at"`
+}
+
+type draftSectionVersionRow struct {
+	PublicID             string         `db:"public_id"`
+	SectionType          string         `db:"section_type"`
+	SectionVersionNo     int            `db:"section_version_no"`
+	DraftRevisionNo      int            `db:"draft_revision_no"`
+	SourceMsgID          sql.NullInt64  `db:"source_msg_id"`
+	UserIntent           sql.NullString `db:"user_intent"`
+	RevisionSummary      sql.NullString `db:"revision_summary"`
+	ContentSchemaVersion string         `db:"content_schema_version"`
+	ContentJSON          sql.NullString `db:"content_json"`
+	CreatedAt            sql.NullTime   `db:"created_at"`
 }
 
 type adviceRow struct {
@@ -762,6 +882,26 @@ func (r draftSectionRow) section() (DraftSection, error) {
 	return section, nil
 }
 
+func (r draftSectionVersionRow) section() (DraftVersionSection, error) {
+	content := map[string]any{}
+	if r.ContentJSON.Valid && r.ContentJSON.String != "" {
+		if err := json.Unmarshal([]byte(r.ContentJSON.String), &content); err != nil {
+			return DraftVersionSection{}, err
+		}
+	}
+	section := DraftVersionSection{
+		PublicID:             r.PublicID,
+		SectionType:          r.SectionType,
+		SectionVersionNo:     r.SectionVersionNo,
+		ContentSchemaVersion: r.ContentSchemaVersion,
+		ContentJSON:          content,
+	}
+	if r.CreatedAt.Valid {
+		section.CreatedAt = r.CreatedAt.Time
+	}
+	return section, nil
+}
+
 type sectionState struct {
 	ID                      int64  `db:"id"`
 	SectionType             string `db:"section_type"`
@@ -815,6 +955,93 @@ func hasRequiredSections(sections []DraftSection) bool {
 		seen[section.SectionType] = true
 	}
 	return seen[SectionTypeOutfit] && seen[SectionTypeHair] && seen[SectionTypeMakeup]
+}
+
+func validateCreateDraftInput(input CreateDraftInput) error {
+	if len(input.Sections) == 0 {
+		return ErrDraftInvalid
+	}
+	seen := map[string]bool{}
+	for _, section := range input.Sections {
+		if err := validateDraftSectionInput(section); err != nil {
+			return err
+		}
+		if seen[section.SectionType] {
+			return ErrDraftInvalid
+		}
+		seen[section.SectionType] = true
+	}
+	if !seen[SectionTypeOutfit] || !seen[SectionTypeHair] || !seen[SectionTypeMakeup] {
+		return ErrDraftInvalid
+	}
+	return nil
+}
+
+func validateUpdateDraftInput(input UpdateDraftInput) error {
+	if len(input.Sections) == 0 {
+		return ErrDraftInvalid
+	}
+	seen := map[string]bool{}
+	for _, section := range input.Sections {
+		if err := validateDraftSectionInput(section); err != nil {
+			return err
+		}
+		if seen[section.SectionType] {
+			return ErrDraftInvalid
+		}
+		seen[section.SectionType] = true
+	}
+	return nil
+}
+
+func validateDraftSectionInput(section DraftSectionInput) error {
+	switch section.SectionType {
+	case SectionTypeOutfit, SectionTypeHair, SectionTypeMakeup:
+	default:
+		return ErrDraftInvalid
+	}
+	content := section.ContentJSON
+	if content == nil {
+		return ErrDraftInvalid
+	}
+	allowed := map[string]bool{
+		"title":            true,
+		"summary":          true,
+		"why_text":         true,
+		"avoid_text":       true,
+		"alternative_text": true,
+		"items":            true,
+	}
+	for key := range content {
+		if !allowed[key] {
+			return ErrDraftInvalid
+		}
+	}
+	for _, key := range []string{"title", "summary", "why_text", "avoid_text", "alternative_text"} {
+		if jsonString(content[key]) == "" {
+			return ErrDraftInvalid
+		}
+	}
+	if rawItems, ok := content["items"]; ok {
+		items, ok := rawItems.([]any)
+		if !ok {
+			return ErrDraftInvalid
+		}
+		for _, rawItem := range items {
+			item, ok := rawItem.(map[string]any)
+			if !ok {
+				return ErrDraftInvalid
+			}
+			for key := range item {
+				switch key {
+				case "role", "text", "source_type", "source_public_id", "reason_text":
+				default:
+					return ErrDraftInvalid
+				}
+			}
+		}
+	}
+	return nil
 }
 
 type confirmedOutfitRef struct {

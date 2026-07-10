@@ -640,6 +640,12 @@ function getCurrentAdviceDraft() {
   });
 }
 
+function getAdviceDraftVersions(publicID) {
+  return authorizedRequest({
+    path: `/api/user/advice-drafts/${publicID}/versions`
+  });
+}
+
 function confirmAdviceDraft(publicID) {
   return authorizedRequest({
     path: `/api/user/advice-drafts/${publicID}/confirm`,
@@ -873,6 +879,7 @@ module.exports = {
   sendAgentMessage,
   streamAgentChat,
   getCurrentAdviceDraft,
+  getAdviceDraftVersions,
   confirmAdviceDraft,
   discardAdviceDraft,
   parseSSEEvents

@@ -21,29 +21,26 @@ func TestRepositoryCreateDraftCreatesSectionsAndVersions(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advice_drafts")).
 		WillReturnResult(sqlmock.NewResult(10, 1))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advice_draft_sections")).
-		WillReturnResult(sqlmock.NewResult(20, 1))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advice_draft_section_versions")).
-		WillReturnResult(sqlmock.NewResult(30, 1))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE advice_draft_sections")).
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	for i := int64(0); i < 3; i++ {
+		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advice_draft_sections")).
+			WillReturnResult(sqlmock.NewResult(20+i, 1))
+		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advice_draft_section_versions")).
+			WillReturnResult(sqlmock.NewResult(30+i, 1))
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE advice_draft_sections")).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+	}
 	mock.ExpectCommit()
 
 	draft, err := repo.CreateDraft(context.Background(), CreateDraftInput{
 		UserID:     12,
 		SceneLabel: "明天见客户",
 		UserIntent: "创建建议",
-		Sections: []DraftSectionInput{{
-			SectionType:          SectionTypeOutfit,
-			ContentSchemaVersion: "v1",
-			ContentJSON:          requiredAdviceJSON("清爽通勤"),
-			RevisionSummary:      "生成穿搭",
-		}},
+		Sections:   validThreeSectionInputs(),
 	})
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
-	if draft.ID != 10 || draft.CurrentRevisionNo != 1 || len(draft.Sections) != 1 {
+	if draft.ID != 10 || draft.CurrentRevisionNo != 1 || len(draft.Sections) != 3 {
 		t.Fatalf("unexpected draft: %#v", draft)
 	}
 	if draft.Sections[0].ID != 20 || draft.Sections[0].CurrentSectionVersionID != 30 {
@@ -51,6 +48,55 @@ func TestRepositoryCreateDraftCreatesSectionsAndVersions(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestRepositoryCreateDraftRejectsIncompleteSections(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("new sqlmock: %v", err)
+	}
+	defer db.Close()
+	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
+
+	_, err = repo.CreateDraft(context.Background(), CreateDraftInput{
+		UserID: 12,
+		Sections: []DraftSectionInput{{
+			SectionType:          SectionTypeOutfit,
+			ContentSchemaVersion: "v1",
+			ContentJSON:          requiredAdviceJSON("清爽通勤"),
+		}},
+	})
+	if !errors.Is(err, ErrDraftInvalid) {
+		t.Fatalf("expected ErrDraftInvalid, got %v", err)
+	}
+}
+
+func TestRepositoryUpdateDraftRejectsUnknownSectionContent(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("new sqlmock: %v", err)
+	}
+	defer db.Close()
+	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
+
+	_, err = repo.UpdateDraftSections(context.Background(), UpdateDraftInput{
+		UserID:   12,
+		PublicID: "drf_test",
+		Sections: []DraftSectionInput{{
+			SectionType: SectionTypeOutfit,
+			ContentJSON: map[string]any{
+				"title":            "清爽通勤",
+				"summary":          "摘要",
+				"why_text":         "适合",
+				"avoid_text":       "避免",
+				"alternative_text": "替代",
+				"raw_prompt":       "不能入库",
+			},
+		}},
+	})
+	if !errors.Is(err, ErrDraftInvalid) {
+		t.Fatalf("expected ErrDraftInvalid, got %v", err)
 	}
 }
 
@@ -78,6 +124,35 @@ func TestRepositoryCreateChatMessageWritesSourceMessage(t *testing.T) {
 	}
 	if message.ID != 101 || message.SourceMsgID != 100 || message.Role != ChatRoleAssistant {
 		t.Fatalf("unexpected message: %#v", message)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestRepositoryListRecentChatMessagesReturnsChronologicalSentMessages(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("new sqlmock: %v", err)
+	}
+	defer db.Close()
+	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, public_id, user_id, source_msg_id, role, msg_type, content_text, related_type, related_id, related_public_id, status FROM chat_msgs")).
+		WithArgs(int64(12), ChatStatusSent, 12).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "public_id", "user_id", "source_msg_id", "role", "msg_type", "content_text", "related_type", "related_id", "related_public_id", "status"}).
+			AddRow(3, "msg_assistant", 12, 2, ChatRoleAssistant, ChatMsgTypeDraftCard, "已更新草稿", "advice_draft", 10, "drf_test", ChatStatusSent).
+			AddRow(2, "msg_user", 12, nil, ChatRoleUser, ChatMsgTypeText, "鞋子换舒服点", nil, nil, nil, ChatStatusSent))
+
+	messages, err := repo.ListRecentChatMessages(context.Background(), 12, 12)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 2 || messages[0].PublicID != "msg_user" || messages[1].PublicID != "msg_assistant" {
+		t.Fatalf("expected chronological messages, got %#v", messages)
+	}
+	if messages[1].RelatedPublicID != "drf_test" {
+		t.Fatalf("expected related draft public id, got %#v", messages[1])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
@@ -151,6 +226,40 @@ func TestRepositoryUpdateDraftOnlyVersionsChangedSections(t *testing.T) {
 	}
 	if draft.CurrentRevisionNo != 2 {
 		t.Fatalf("expected revision 2, got %#v", draft)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestRepositoryListDraftVersionsGroupsByDraftRevision(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("new sqlmock: %v", err)
+	}
+	defer db.Close()
+	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
+
+	expectDraftForConfirm(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT public_id, section_type, section_version_no, draft_revision_no, source_msg_id, user_intent, revision_summary, content_schema_version, content_json, created_at FROM advice_draft_section_versions")).
+		WithArgs(int64(10), int64(12)).
+		WillReturnRows(sqlmock.NewRows([]string{"public_id", "section_type", "section_version_no", "draft_revision_no", "source_msg_id", "user_intent", "revision_summary", "content_schema_version", "content_json", "created_at"}).
+			AddRow("adsv_outfit_1", SectionTypeOutfit, 1, 1, 100, "创建建议", "创建穿搭", "v1", `{"title":"清爽通勤","summary":"摘要"}`, nil).
+			AddRow("adsv_hair_1", SectionTypeHair, 1, 1, 100, "创建建议", "创建发型", "v1", `{"title":"低丸子头","summary":"摘要"}`, nil).
+			AddRow("adsv_outfit_2", SectionTypeOutfit, 2, 2, 101, "鞋子换舒服点", "更新鞋子", "v1", `{"title":"换成乐福鞋","summary":"摘要"}`, nil))
+
+	revisions, err := repo.ListDraftVersions(context.Background(), 12, "drf_test")
+	if err != nil {
+		t.Fatalf("list versions: %v", err)
+	}
+	if len(revisions) != 2 {
+		t.Fatalf("expected two revisions, got %#v", revisions)
+	}
+	if revisions[0].DraftRevisionNo != 1 || len(revisions[0].Sections) != 2 {
+		t.Fatalf("expected first revision to group two sections, got %#v", revisions[0])
+	}
+	if revisions[1].DraftRevisionNo != 2 || revisions[1].Sections[0].SectionVersionNo != 2 {
+		t.Fatalf("unexpected second revision: %#v", revisions[1])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
@@ -393,6 +502,29 @@ func requiredAdviceJSON(title string) map[string]any {
 		"why_text":         "适合",
 		"avoid_text":       "避免",
 		"alternative_text": "替代",
+	}
+}
+
+func validThreeSectionInputs() []DraftSectionInput {
+	return []DraftSectionInput{
+		{
+			SectionType:          SectionTypeOutfit,
+			ContentSchemaVersion: "v1",
+			ContentJSON:          requiredAdviceJSON("清爽通勤"),
+			RevisionSummary:      "生成穿搭",
+		},
+		{
+			SectionType:          SectionTypeHair,
+			ContentSchemaVersion: "v1",
+			ContentJSON:          requiredAdviceJSON("低丸子头"),
+			RevisionSummary:      "生成发型",
+		},
+		{
+			SectionType:          SectionTypeMakeup,
+			ContentSchemaVersion: "v1",
+			ContentJSON:          requiredAdviceJSON("清透妆"),
+			RevisionSummary:      "生成妆容",
+		},
 	}
 }
 
