@@ -157,15 +157,17 @@ chat_msgs(user)
 
 关键字段沿用已有设计：
 
-- `source`
-- `source_msg_id`
-- `status`
-- `input_text`
-- `input_assets`
-- `scenario`
-- `trigger_context`
-- `parent_request_id`
-- `parent_advice_id`
+| 字段 | 备注 |
+| --- | --- |
+| `source` | 请求来源，例如 `agent_chat`、`daily_scene`，用于区分触发渠道。 |
+| `source_msg_id` | 触发本次建议请求的用户消息 ID。 |
+| `status` | 请求状态，第一版用于区分草稿中、已确认、已废弃。 |
+| `input_text` | 用户原始请求文本，例如“明天见客户怎么穿”。 |
+| `input_assets` | 用户随请求上传的图片引用；沿用已有 JSON 字段，但不存草稿正文。 |
+| `scenario` | 请求级场景信息快照；只保存场景上下文，不承担草稿版本历史。 |
+| `trigger_context` | 触发请求时的轻量上下文快照；不存完整推荐内容。 |
+| `parent_request_id` | 关联上一条建议请求，用于后续重来、派生或追踪来源。 |
+| `parent_advice_id` | 关联上一条正式建议，用于基于历史建议继续调整。 |
 
 约束：
 
@@ -179,20 +181,22 @@ chat_msgs(user)
 
 关键字段和扩展字段：
 
-- `id`
-- `public_id`
-- `user_id`
-- `source_msg_id`：新增可空字段，仅助手消息用于指向触发本轮 Agent 的用户消息
-- `role`：`user` / `assistant`
-- `msg_type`：`text` / `draft_card` / `error`
-- `content_text`
-- `content_json`
-- `asset_refs`
-- `related_type`
-- `related_id`
-- `related_public_id`
-- `job_id`
-- `status`
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `public_id` | 对外暴露 ID，用于前端和接口引用。 |
+| `user_id` | 消息所属用户。 |
+| `source_msg_id` | 新增可空字段；仅助手消息使用，指向触发本轮 Agent 的用户消息。 |
+| `role` | 消息角色：`user` / `assistant`。 |
+| `msg_type` | 消息类型：`text` / `draft_card` / `error`。 |
+| `content_text` | 用户可见文本；草稿卡片消息中存助手引导文案。 |
+| `content_json` | 仅保留已有兼容字段；第一版不把草稿主数据塞入这里。 |
+| `asset_refs` | 消息关联的用户上传图片或素材引用。 |
+| `related_type` | 关联业务对象类型，例如 `advice_draft`。 |
+| `related_id` | 关联业务对象内部 ID。 |
+| `related_public_id` | 关联业务对象对外 ID，例如草稿 public id。 |
+| `job_id` | 关联异步任务 ID；Agent chat 第一版通常为空。 |
+| `status` | 消息状态：`sent` / `generating` / `failed` 等。 |
 
 约束：
 
@@ -210,32 +214,34 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 字段：
 
-- `id`
-- `public_id`
-- `user_id`
-- `source_msg_id`
-- `assistant_msg_id`
-- `step_no`
-- `step_type`：`model_decision` / `tool_call` / `tool_result` / `final_response` / `error`
-- `status`：`running` / `succeeded` / `failed` / `skipped`
-- `usage_key`
-- `provider_code`
-- `model_code`
-- `prompt_version`
-- `max_step`
-- `tool_name`
-- `tool_call_id`
-- `decision_label`：`answer` / `create_draft` / `update_draft` / `discard_draft` / `read_context` / `ask_clarification`
-- `input_summary`
-- `output_summary`
-- `related_type`：`advice_draft` / `advice_draft_version` / `chat_msg` / `memory` / `clothes_item`
-- `related_id`
-- `related_public_id`
-- `started_at`
-- `finished_at`
-- `duration_ms`
-- `error_message`
-- `created_at`
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `public_id` | 对外暴露 ID，便于排障定位。 |
+| `user_id` | 步骤所属用户，用于权限隔离和审计查询。 |
+| `source_msg_id` | 本轮用户消息 ID。 |
+| `assistant_msg_id` | 本轮 Agent 执行对应的助手占位消息 ID。 |
+| `step_no` | 步骤序号，在同一 `assistant_msg_id` 下递增。 |
+| `step_type` | 步骤类型：`model_decision` / `tool_call` / `tool_result` / `final_response` / `error`。 |
+| `status` | 步骤状态：`running` / `succeeded` / `failed` / `skipped`。 |
+| `usage_key` | LLM 使用场景，例如 `agent_chat`；至少第一条模型步骤写入。 |
+| `provider_code` | 模型供应商编码，例如 `qwen`、`openai`。 |
+| `model_code` | 实际调用的模型编码。 |
+| `prompt_version` | 本轮系统提示词版本，便于回溯效果。 |
+| `max_step` | 本轮 ReAct 最大步数配置。 |
+| `tool_name` | tool 调用或结果对应的工具名；非 tool 步骤为空。 |
+| `tool_call_id` | 模型生成的 tool call 标识，用于关联调用和结果。 |
+| `decision_label` | 后端压缩后的决策标签，例如 `answer`、`create_draft`、`update_draft`、`read_context`。 |
+| `input_summary` | 输入摘要；不存完整 prompt、图片内容或大段参数。 |
+| `output_summary` | 输出摘要；不存隐藏思维链或未经压缩的模型中间文本。 |
+| `related_type` | 关联业务对象类型，例如 `advice_draft`、`advice_draft_version`、`clothes_item`。 |
+| `related_id` | 关联业务对象内部 ID。 |
+| `related_public_id` | 关联业务对象对外 ID。 |
+| `started_at` | 步骤开始时间。 |
+| `finished_at` | 步骤结束时间。 |
+| `duration_ms` | 步骤耗时，单位毫秒。 |
+| `error_message` | 失败摘要，不写敏感原文或完整异常堆栈。 |
+| `created_at` | 记录创建时间。 |
 
 约束：
 
@@ -254,25 +260,27 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 字段：
 
-- `id`
-- `public_id`
-- `advice_request_id`
-- `user_id`
-- `source_msg_id`
-- `status`：`draft` / `confirmed` / `discarded`
-- `scene_key`
-- `scene_label`
-- `target_date`
-- `occasion`
-- `weather_text`
-- `mood_text`
-- `style_goal`
-- `avoid_goal`
-- `current_version_no`
-- `confirmed_advice_id`
-- `created_at`
-- `updated_at`
-- `deleted_at`
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `public_id` | 草稿对外 ID，用于卡片、确认和废弃接口。 |
+| `advice_request_id` | 关联原始建议请求。 |
+| `user_id` | 草稿所属用户。 |
+| `source_msg_id` | 创建该草稿的用户消息 ID。 |
+| `status` | 草稿状态：`draft` / `confirmed` / `discarded`。 |
+| `scene_key` | 标准化场景 key，例如 `work_meeting`、`date`；可为空。 |
+| `scene_label` | 用户可见场景文案，例如“明天见客户”。 |
+| `target_date` | 建议目标日期，例如今日、明日或用户指定日期。 |
+| `occasion` | 具体场合描述，例如“客户拜访”“朋友聚会”。 |
+| `weather_text` | 用户提供或系统获取的天气文本摘要。 |
+| `mood_text` | 用户想呈现的状态或情绪，例如“轻松但专业”。 |
+| `style_goal` | 本次方案目标，例如“更利落”“显得年轻一点”。 |
+| `avoid_goal` | 本次明确避雷，例如“不要露腿”“不要太正式”。 |
+| `current_version_no` | 当前草稿版本号，指向最新版。 |
+| `confirmed_advice_id` | 确认保存后关联的正式建议 ID。 |
+| `created_at` | 创建时间。 |
+| `updated_at` | 更新时间。 |
+| `deleted_at` | 软删除时间。 |
 
 约束：
 
@@ -286,18 +294,20 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 字段：
 
-- `id`
-- `public_id`
-- `draft_id`
-- `user_id`
-- `version_no`
-- `source_msg_id`
-- `user_intent`
-- `revision_summary`
-- `changed_outfit`
-- `changed_hair`
-- `changed_makeup`
-- `created_at`
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `public_id` | 草稿版本对外 ID。 |
+| `draft_id` | 所属草稿 ID。 |
+| `user_id` | 所属用户。 |
+| `version_no` | 版本号，从 1 开始递增。 |
+| `source_msg_id` | 触发本次版本创建或精修的用户消息 ID。 |
+| `user_intent` | 用户本轮修改意图摘要，例如“鞋子换舒服点”。 |
+| `revision_summary` | 本轮版本变化摘要，供卡片和审计展示。 |
+| `changed_outfit` | 本轮是否修改穿搭分段。 |
+| `changed_hair` | 本轮是否修改发型分段。 |
+| `changed_makeup` | 本轮是否修改妆容分段。 |
+| `created_at` | 版本创建时间。 |
 
 约束：
 
@@ -311,23 +321,25 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 字段：
 
-- `id`
-- `draft_version_id`
-- `title`
-- `summary`
-- `top_item_text`
-- `bottom_item_text`
-- `outer_item_text`
-- `shoe_item_text`
-- `bag_item_text`
-- `accessory_text`
-- `color_strategy`
-- `silhouette_strategy`
-- `material_strategy`
-- `why_text`
-- `avoid_text`
-- `alternative_text`
-- `created_at`
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `draft_version_id` | 所属草稿版本 ID。 |
+| `title` | 穿搭标题，用于卡片折叠区标题。 |
+| `summary` | 穿搭整体摘要。 |
+| `top_item_text` | 上装建议文本，可引用衣物或描述缺口单品。 |
+| `bottom_item_text` | 下装建议文本。 |
+| `outer_item_text` | 外套或外层建议文本。 |
+| `shoe_item_text` | 鞋履建议文本。 |
+| `bag_item_text` | 包袋建议文本。 |
+| `accessory_text` | 配饰建议文本。 |
+| `color_strategy` | 色彩策略，例如主色、辅助色、避雷色。 |
+| `silhouette_strategy` | 廓形策略，例如直线感、收腰、松紧关系。 |
+| `material_strategy` | 材质策略，例如挺括、柔软、轻薄或正式感。 |
+| `why_text` | 为什么适合当前用户和场景。 |
+| `avoid_text` | 本方案不建议做什么。 |
+| `alternative_text` | 替代方案，用于用户继续精修。 |
+| `created_at` | 记录创建时间。 |
 
 ### `advice_draft_hairs`
 
@@ -335,18 +347,20 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 字段：
 
-- `id`
-- `draft_version_id`
-- `title`
-- `length_direction`
-- `shape_direction`
-- `bangs_direction`
-- `styling_steps`
-- `hold_level`
-- `why_text`
-- `avoid_text`
-- `alternative_text`
-- `created_at`
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `draft_version_id` | 所属草稿版本 ID。 |
+| `title` | 发型建议标题。 |
+| `length_direction` | 长度方向，例如保持长度、扎起、半扎、露出颈部。 |
+| `shape_direction` | 轮廓方向，例如蓬松度、贴合度、头顶高度。 |
+| `bangs_direction` | 刘海或额前处理方向；没有刘海也可写额前处理。 |
+| `styling_steps` | 可执行打理步骤，使用短文本。 |
+| `hold_level` | 定型强度或持久度建议，例如低、中、高。 |
+| `why_text` | 为什么适合当前用户和场景。 |
+| `avoid_text` | 不建议的发型处理。 |
+| `alternative_text` | 替代发型方向。 |
+| `created_at` | 记录创建时间。 |
 
 ### `advice_draft_makeups`
 
@@ -354,21 +368,23 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 字段：
 
-- `id`
-- `draft_version_id`
-- `title`
-- `base_direction`
-- `brow_direction`
-- `eye_direction`
-- `lip_direction`
-- `cheek_direction`
-- `finish_level`
-- `step_text`
-- `why_text`
-- `avoid_text`
-- `alternative_text`
-- `safety_note`
-- `created_at`
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `draft_version_id` | 所属草稿版本 ID。 |
+| `title` | 妆容建议标题。 |
+| `base_direction` | 底妆方向，只描述妆效，不做肤质诊断。 |
+| `brow_direction` | 眉形和眉色方向。 |
+| `eye_direction` | 眼妆方向，例如色调、线条、浓淡。 |
+| `lip_direction` | 唇妆方向，例如色系、饱和度、质地。 |
+| `cheek_direction` | 腮红或修容方向，避免医疗或骨相诊断表达。 |
+| `finish_level` | 整体妆感强度，例如低调、自然、精致。 |
+| `step_text` | 可执行步骤摘要。 |
+| `why_text` | 为什么适合当前用户和场景。 |
+| `avoid_text` | 不建议的妆容处理。 |
+| `alternative_text` | 替代妆容方向。 |
+| `safety_note` | 安全边界提示，例如敏感不适时停止使用并咨询专业人士。 |
+| `created_at` | 记录创建时间。 |
 
 妆容边界：
 
@@ -381,13 +397,15 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 字段：
 
-- `id`
-- `draft_version_id`
-- `clothes_item_id`
-- `clothes_item_public_id`
-- `role`：`top` / `bottom` / `outer` / `shoe` / `bag` / `accessory`
-- `reason_text`
-- `created_at`
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `draft_version_id` | 所属草稿版本 ID。 |
+| `clothes_item_id` | 引用的衣物内部 ID。 |
+| `clothes_item_public_id` | 引用的衣物对外 ID，用于前端跳转或展示。 |
+| `role` | 衣物在方案中的角色：`top` / `bottom` / `outer` / `shoe` / `bag` / `accessory`。 |
+| `reason_text` | 选择该衣物的理由。 |
+| `created_at` | 记录创建时间。 |
 
 用途：
 
