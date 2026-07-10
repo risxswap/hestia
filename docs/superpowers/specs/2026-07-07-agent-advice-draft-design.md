@@ -50,8 +50,9 @@ miniapp pages/advisor
 
 用户点击保存草稿
   -> POST /api/user/advice-drafts/:public_id/confirm
-  -> 读取当前版本
+  -> 读取当前草稿内容分段
   -> 创建 advices(status=ready)
+  -> 创建 advice_sections
   -> advice_drafts.status = confirmed
 ```
 
@@ -156,7 +157,10 @@ chat_msgs(user)
   -> chat_msgs(assistant)
        -> agent_run_steps(assistant_msg_id)
   -> advice_drafts(source_msg_id)
-  -> advice_draft_versions(draft_id)
+       -> advice_draft_sections(draft_id)
+       -> advice_draft_section_versions(draft_id)
+       -> advices(source_draft_id)
+            -> advice_sections(advice_id)
 ```
 
 ### `chat_msgs`
@@ -218,7 +222,7 @@ Agent 可观察决策步骤表。记录 ADK 运行中的模型回合、tool 调�
 | `decision_label` | 后端压缩后的决策标签，例如 `answer`、`create_draft`、`update_draft`、`read_context`。 |
 | `input_summary` | 输入摘要；不存完整 prompt、图片内容或大段参数。 |
 | `output_summary` | 输出摘要；不存隐藏思维链或未经压缩的模型中间文本。 |
-| `related_type` | 关联业务对象类型，例如 `advice_draft`、`advice_draft_version`、`clothes_item`。 |
+| `related_type` | 关联业务对象类型，例如 `advice_draft`、`advice_draft_section`、`clothes_item`。 |
 | `related_id` | 关联业务对象内部 ID。 |
 | `related_public_id` | 关联业务对象对外 ID。 |
 | `started_at` | 步骤开始时间。 |
@@ -240,7 +244,7 @@ Agent 可观察决策步骤表。记录 ADK 运行中的模型回合、tool 调�
 
 ### `advice_drafts`
 
-草稿容器表。
+草稿容器表，只保存草稿级元信息，不保存穿搭、发型、妆容正文。
 
 字段：
 
@@ -259,11 +263,7 @@ Agent 可观察决策步骤表。记录 ADK 运行中的模型回合、tool 调�
 | `mood_text` | 用户想呈现的状态或情绪，例如“轻松但专业”。 |
 | `style_goal` | 本次方案目标，例如“更利落”“显得年轻一点”。 |
 | `avoid_goal` | 本次明确避雷，例如“不要露腿”“不要太正式”。 |
-| `current_version_no` | 当前草稿版本号，指向最新版。 |
-| `content_schema_version` | 三段建议 JSON 的 schema 版本，例如 `v1`。 |
-| `outfit_advice` | 当前版穿搭建议 JSON，结构由 schema 约束。 |
-| `hair_advice` | 当前版发型建议 JSON，结构由 schema 约束。 |
-| `makeup_advice` | 当前版妆容建议 JSON，结构由 schema 约束。 |
+| `current_revision_no` | 当前草稿修订号，用于卡片展示“第几版”和确认时锁定内容。 |
 | `confirmed_advice_id` | 确认保存后关联的正式建议 ID。 |
 | `created_at` | 创建时间。 |
 | `updated_at` | 更新时间。 |
@@ -273,44 +273,132 @@ Agent 可观察决策步骤表。记录 ADK 运行中的模型回合、tool 调�
 
 - 当前草稿通过 `user_id + status=draft + updated_at` 查询。
 - 第一版每个用户在 advisor 入口当前只操作最近一个 `draft` 草稿。
-- `outfit_advice`、`hair_advice`、`makeup_advice` 只承载建议正文，不存用户档案、聊天历史或 tool 原始结果。
-- 三段 JSON 必须由后端 tool 参数校验后写入，不能透传模型任意 JSON。
+- 穿搭、发型、妆容正文写入 `advice_draft_sections`，不放在 `advice_drafts`。
+- `current_revision_no` 每次有效创建或精修递增；它是草稿整体修订号，不代表每个内容分段都新增版本。
 - `confirmed_advice_id` 在确认保存后写入。
 
-### `advice_draft_versions`
+### `advice_draft_sections`
 
-草稿版本表，每轮创建或精修都新增一条。
+草稿当前内容分段表。每个草稿按 `section_type` 保存当前穿搭、发型、妆容正文。
 
 字段：
 
 | 字段 | 备注 |
 | --- | --- |
 | `id` | 内部自增 ID。 |
-| `public_id` | 草稿版本对外 ID。 |
+| `public_id` | 草稿内容分段对外 ID。 |
 | `draft_id` | 所属草稿 ID。 |
 | `user_id` | 所属用户。 |
-| `version_no` | 版本号，从 1 开始递增。 |
-| `source_msg_id` | 触发本次版本创建或精修的用户消息 ID。 |
+| `section_type` | 内容分段类型：`outfit` / `hair` / `makeup`。 |
+| `current_section_version_id` | 当前分段版本 ID，指向 `advice_draft_section_versions`。 |
+| `current_section_version_no` | 当前分段版本号，只在该分段被修改时递增。 |
+| `content_schema_version` | 当前分段 JSON 的 schema 版本，例如 `v1`。 |
+| `content_json` | 当前分段建议正文 JSON，结构由 schema 约束。 |
+| `created_at` | 创建时间。 |
+| `updated_at` | 更新时间。 |
+| `deleted_at` | 软删除时间。 |
+
+约束：
+
+- `(draft_id, section_type)` 唯一。
+- `section_type=outfit` 对应穿搭建议，`hair` 对应发型建议，`makeup` 对应妆容建议。
+- `content_json` 只承载该分段建议正文，不存用户档案、聊天历史、tool 原始结果或模型中间输出。
+- JSON 必须由后端 tool 参数校验后写入，不能透传模型任意 JSON。
+- `current_section_version_id` 和 `current_section_version_no` 必须与当前 `content_json` 对应。
+
+### `advice_draft_section_versions`
+
+草稿内容分段版本表。用户只修改其中一项时，只新增对应分段的版本，不复制未修改分段。
+
+字段：
+
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `public_id` | 草稿内容分段版本对外 ID。 |
+| `draft_id` | 所属草稿 ID。 |
+| `section_id` | 所属当前分段 ID。 |
+| `user_id` | 所属用户。 |
+| `section_type` | 内容分段类型：`outfit` / `hair` / `makeup`。 |
+| `section_version_no` | 分段版本号，从 1 开始递增。 |
+| `draft_revision_no` | 本次修改对应的草稿整体修订号。 |
+| `source_msg_id` | 触发本次分段版本创建或精修的用户消息 ID。 |
 | `user_intent` | 用户本轮修改意图摘要，例如“鞋子换舒服点”。 |
-| `revision_summary` | 本轮版本变化摘要，供卡片和审计展示。 |
-| `changed_outfit` | 本轮是否修改穿搭 JSON 分段。 |
-| `changed_hair` | 本轮是否修改发型 JSON 分段。 |
-| `changed_makeup` | 本轮是否修改妆容 JSON 分段。 |
-| `content_schema_version` | 本版本三段建议 JSON 的 schema 版本。 |
-| `outfit_advice` | 本版本穿搭建议 JSON 快照。 |
-| `hair_advice` | 本版本发型建议 JSON 快照。 |
-| `makeup_advice` | 本版本妆容建议 JSON 快照。 |
+| `revision_summary` | 本分段变化摘要，供卡片、历史和审计展示。 |
+| `content_schema_version` | 本分段 JSON 的 schema 版本。 |
+| `content_json` | 本分段建议正文 JSON 快照。 |
 | `created_at` | 版本创建时间。 |
 
 约束：
 
-- `(draft_id, version_no)` 唯一。
-- 当前版本由 `advice_drafts.current_version_no` 指向。
-- 每个版本必须保存穿搭、发型、妆容三段 JSON 快照。未修改 JSON 分段从上一版复制。
+- `(draft_id, section_type, section_version_no)` 唯一。
+- `(draft_id, draft_revision_no, section_type)` 唯一。
+- 创建草稿时，三个分段都创建 `section_version_no=1,draft_revision_no=1`。
+- 精修草稿时，`advice_drafts.current_revision_no + 1` 作为新的整体修订号；只为被修改的分段创建版本，并更新对应 `advice_draft_sections` 当前态。
+- 若一次用户消息同时修改穿搭和发型，则两个分段版本使用相同 `draft_revision_no`，但各自维护独立 `section_version_no`。
+- 回看某个草稿整体修订号时，按每个 `section_type` 查询 `draft_revision_no <= 目标修订号` 的最新分段版本组合得到完整草稿。
+
+### `advices`
+
+正式建议容器表。正式建议由用户确认草稿生成，不再依赖 `advice_requests`。
+
+字段：
+
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `public_id` | 正式建议对外 ID。 |
+| `user_id` | 建议所属用户。 |
+| `source_msg_id` | 创建草稿或触发确认链路的用户消息 ID。 |
+| `source_draft_id` | 来源草稿 ID。 |
+| `source_draft_revision_no` | 确认时采用的草稿整体修订号。 |
+| `status` | 正式建议状态，例如 `ready` / `archived`。 |
+| `scene_key` | 标准化场景 key。 |
+| `scene_label` | 用户可见场景文案。 |
+| `target_date` | 建议目标日期。 |
+| `occasion` | 具体场合描述。 |
+| `weather_text` | 天气文本摘要。 |
+| `mood_text` | 用户想呈现的状态或情绪。 |
+| `style_goal` | 本次方案目标。 |
+| `avoid_goal` | 本次明确避雷。 |
+| `created_at` | 创建时间。 |
+| `updated_at` | 更新时间。 |
+| `deleted_at` | 软删除时间。 |
+
+约束：
+
+- 新设计中删除 `advice_request_id`，新代码不得读写已移除的 `advice_requests`。
+- `source_draft_id + source_draft_revision_no` 用于追踪正式建议来自哪版草稿。
+- 正式建议正文写入 `advice_sections`，不放在 `advices` 容器表。
+
+### `advice_sections`
+
+正式建议内容分段表。保存用户确认后的穿搭、发型、妆容正文。
+
+字段：
+
+| 字段 | 备注 |
+| --- | --- |
+| `id` | 内部自增 ID。 |
+| `public_id` | 正式建议内容分段对外 ID。 |
+| `advice_id` | 所属正式建议 ID。 |
+| `user_id` | 所属用户。 |
+| `section_type` | 内容分段类型：`outfit` / `hair` / `makeup`。 |
+| `source_draft_section_version_id` | 来源草稿分段版本 ID。 |
+| `content_schema_version` | 本分段 JSON 的 schema 版本。 |
+| `content_json` | 正式建议分段正文 JSON。 |
+| `created_at` | 创建时间。 |
+| `updated_at` | 更新时间。 |
+
+约束：
+
+- `(advice_id, section_type)` 唯一。
+- 确认草稿时，从每个 `advice_draft_sections` 当前态读取内容，写入对应 `advice_sections`。
+- `source_draft_section_version_id` 记录正式分段来自哪个草稿分段版本，便于排查和后续展示来源。
 
 ### 三段建议 JSON schema
 
-`outfit_advice`、`hair_advice`、`makeup_advice` 使用 JSON 是为了保留内容表达弹性，不代表可以存任意数据。第一版由 tool 入参结构体和后端校验约束字段，后续 schema 稳定后再考虑拆表。
+`advice_draft_sections.content_json` 和 `advice_sections.content_json` 使用 JSON 是为了保留内容表达弹性，不代表可以存任意数据。第一版由 tool 入参结构体和后端校验约束字段，后续 schema 稳定后再考虑把稳定字段拆成独立列。
 
 共同约束：
 
@@ -407,25 +495,26 @@ Agent 可观察决策步骤表。记录 ADK 运行中的模型回合、tool 调�
 
 `get_current_advice_draft`
 
-- 读取当前用户最近 `status=draft` 草稿和当前版本。
-- 返回场景字段、版本号和三段建议 JSON。
+- 读取当前用户最近 `status=draft` 草稿和当前内容分段。
+- 返回场景字段、`current_revision_no` 和三个 `advice_draft_sections` 当前内容。
 
 ### 写草稿 tools
 
 `create_advice_draft`
 
 - 创建 `advice_drafts(status=draft)`。
-- 创建 `advice_draft_versions(version_no=1)`。
-- 写入 `outfit_advice`、`hair_advice`、`makeup_advice` 三段受控 JSON。
-- 返回草稿 public id、版本号和可渲染卡片数据。
+- 创建 `outfit`、`hair`、`makeup` 三条 `advice_draft_sections` 当前态。
+- 创建三条 `advice_draft_section_versions(section_version_no=1,draft_revision_no=1)`。
+- 写入三个分段的受控 `content_json`。
+- 返回草稿 public id、`current_revision_no` 和可渲染卡片数据。
 
 `update_advice_draft`
 
 - 读取当前用户自己的 `status=draft` 草稿。
-- 基于当前版本创建 `version_no + 1`。
-- 修改指定 JSON 分段，未修改 JSON 分段从上一版复制。
-- 更新 `advice_drafts.current_version_no`。
-- 同步更新 `advice_drafts` 当前三段 JSON。
+- 将 `advice_drafts.current_revision_no + 1` 作为新的整体修订号。
+- 只为被修改的内容分段创建 `advice_draft_section_versions`。
+- 更新被修改的 `advice_draft_sections` 当前态和 `current_section_version_no`。
+- 未修改分段不新增版本，也不复制 JSON。
 - 返回新版草稿卡片数据。
 
 `discard_advice_draft`
@@ -453,7 +542,7 @@ ADK Runner 的事件消费层负责记录运行和步骤，不把记录职责交
 
 记录内容：
 
-- 可以记录：调用了哪个 tool、输入摘要、输出摘要、关联草稿或版本、耗时、错误。
+- 可以记录：调用了哪个 tool、输入摘要、输出摘要、关联草稿、内容分段或分段版本、耗时、错误。
 - 不记录：隐藏思维链、完整 prompt、完整 tool 参数大对象、用户图片内容、未经压缩的模型中间文本。
 
 ### 非 Agent 接口
@@ -462,10 +551,12 @@ ADK Runner 的事件消费层负责记录运行和步骤，不把记录职责交
 
 - 前端按钮调用。
 - 校验草稿属于当前用户且 `status=draft`。
-- 读取 `current_version_no` 对应内容。
+- 读取 `advice_drafts.current_revision_no` 和三个 `advice_draft_sections` 当前内容。
 - 校验 `outfit_advice.items` 中临时引用的用户已有衣物是否仍有效。
-- 创建 `advices(status=ready)`。
+- 创建 `advices(status=ready,source_draft_id,source_draft_revision_no,source_msg_id)`。
+- 创建三条 `advice_sections`，并记录每个正式分段的 `source_draft_section_version_id`。
 - 更新 `advice_drafts.status=confirmed`。
+- 更新 `advice_drafts.confirmed_advice_id`。
 - 返回正式建议 public id。
 
 `GET /api/user/advice-drafts/current`
@@ -476,7 +567,7 @@ ADK Runner 的事件消费层负责记录运行和步骤，不把记录职责交
 `GET /api/user/advice-drafts/:public_id/versions`
 
 - 第一版可只实现后端能力，不一定展示 UI。
-- 用于后续版本历史、回滚或对比。
+- 返回按 `draft_revision_no` 聚合后的分段版本历史，用于后续版本对比、回滚或恢复。
 
 `POST /api/user/advice-drafts/:public_id/discard`
 
@@ -498,16 +589,18 @@ draft
 
 ```text
 create_advice_draft
-  -> version_no = 1
+  -> advice_drafts.current_revision_no = 1
+  -> outfit/hair/makeup 三个 section_version_no = 1
 
 update_advice_draft
-  -> version_no = current + 1
-  -> 未改 JSON 分段复制上一版
-  -> advice_drafts.current_version_no 更新
+  -> advice_drafts.current_revision_no = current + 1
+  -> 只为被修改 section 创建 section_version_no + 1
+  -> 未修改 section 不复制、不新增版本
 
 confirm_advice_draft
-  -> 读取 current_version_no
+  -> 读取 current_revision_no 和当前 sections
   -> 创建 advices
+  -> 创建 advice_sections
   -> draft.status = confirmed
 ```
 
@@ -518,7 +611,7 @@ confirm_advice_draft
 卡片展示：
 
 - 场景和日期，例如“明天见客户”。
-- 版本号，例如“第 3 版”。
+- 草稿修订号，例如“第 3 版”，来自 `advice_drafts.current_revision_no`。
 - 穿搭、发型、妆容三个折叠区。
 - 穿搭单品按 `outfit_advice.items` 展示；已有衣物可显示引用状态，缺口单品只显示文本。
 - 底部按钮：`保存为今日建议`、`继续调整`、`不要这版`。
@@ -538,7 +631,7 @@ confirm_advice_draft
 
 - `status`：处理中状态文案。
 - `message`：助手完整回复文本。第一版可以不做 token 级增量。
-- `draft`：草稿卡片 payload，包含 `draft_public_id`、`version_no`、三段展示内容和按钮状态。
+- `draft`：草稿卡片 payload，包含 `draft_public_id`、`revision_no`、三段展示内容和按钮状态。
 - `done`：结束，包含 `message_public_id`、`draft_public_id`。
 - `error`：错误状态和可展示文案。
 
@@ -575,9 +668,9 @@ Agent 决策步骤默认只写后端审计表，不直接展示给普通用户�
 - Agent run 测试：每条用户消息创建一条助手占位 `chat_msgs`，完成后更新状态、文本和业务关联。
 - Agent step 测试：模型决策、tool 调用、tool 结果和最终回复按顺序写入 `agent_run_steps`。
 - Agent step 失败测试：tool 失败时记录 `failed` 步骤和错误摘要，不丢失已完成步骤。
-- tool 单元测试：创建草稿、精修草稿、复制未修改 JSON 分段、废弃草稿。
-- repository 测试：版本号唯一、当前版本查询、用户隔离。
-- 确认接口测试：从最新版生成正式 `advices`，重复确认幂等。
+- tool 单元测试：创建草稿、精修草稿、只修改指定 section、废弃草稿。
+- repository 测试：分段版本号唯一、当前 section 查询、按 revision 回看完整草稿、用户隔离。
+- 确认接口测试：从当前 sections 生成正式 `advices` 和 `advice_sections`，重复确认幂等。
 - 确认接口测试：校验 `outfit_advice.items` 中已有衣物引用失效时不写入正式引用，并返回可展示提示。
 - 权限测试：不能读取或修改其他用户草稿。
 
