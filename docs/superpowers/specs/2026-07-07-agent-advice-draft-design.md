@@ -2,14 +2,14 @@
 
 ## 背景
 
-Hestia 的核心交互应从“填表生成一次性建议”逐步转向“通过智能体持续对话创建和精修形象建议”。用户可以说出场景、限制、偏好和临时想法，智能体用 ReAct 模式自主决定读取哪些上下文、是否创建草稿、是否基于当前草稿继续精修。
+Hestia 的核心交互应从“填表生成一次性建议”逐步转向“通过智能体持续对话创建和精修形象建议”。用户可以说出场景、限制、偏好和临时想法，智能体通过 Eino ADK 的工具调用循环自主决定读取哪些上下文、是否创建草稿、是否基于当前草稿继续精修。
 
-第一版建议使用 Eino 的 ReAct Agent 和受控 tools。大模型负责理解意图、规划步骤和生成建议内容；后端负责权限、状态机、结构化落库和隐私边界。
+第一版复用 Eino ADK 0.1 的 `ChatModelAgent`、`Runner`、Session Values、Tool 和事件流能力，不自研 Agent loop 或图编排。大模型负责理解意图、规划步骤和生成建议内容；后端负责权限、状态机、结构化落库和隐私边界。
 
 ## 目标
 
 - 使用聊天作为穿搭、发型、妆容建议的创建入口。
-- 使用 Eino `flow/agent/react` 实现 ReAct Agent。
+- 使用 Eino ADK `ChatModelAgent` + `Runner` 承载工具调用型 Agent。
 - 将用户档案、记忆、衣物查询和草稿写入封装为 Agent tools。
 - 支持用户通过后续对话精细化控制当前草稿。
 - 第一版不新增独立 chat session 表；当前草稿范围定义为当前用户在 advisor 入口下最近的 `draft` 草稿。
@@ -28,7 +28,7 @@ Hestia 的核心交互应从“填表生成一次性建议”逐步转向“通�
 
 ## 总体架构
 
-`server/internal/domain/agent` 作为聊天编排入口。每条用户消息先写入 `chat_msgs`，再构造带系统约束、历史消息和当前用户上下文的 Eino ReAct Agent 输入。
+`server/internal/domain/agent` 作为聊天编排入口。每条用户消息先写入 `chat_msgs`，再构造带系统约束、历史消息和当前用户上下文的 ADK `AgentInput`。
 
 Agent 只能调用白名单 tools。读上下文 tools 可以查询档案、记忆和衣物；写草稿 tools 只能创建、更新或废弃当前用户自己的草稿。正式保存不暴露给 Agent，只通过前端按钮调用确认接口。
 
@@ -37,7 +37,8 @@ miniapp pages/advisor
   -> POST /api/user/agent/chat
   -> 写 chat_msgs(user)
   -> 创建 chat_msgs(assistant,status=generating)
-  -> Eino ReAct Agent
+  -> Eino ADK Runner
+       -> ChatModelAgent
        -> get_profile_context
        -> get_memory_context
        -> get_wardrobe_context
@@ -53,6 +54,18 @@ miniapp pages/advisor
   -> 创建 advices(status=ready)
   -> advice_drafts.status = confirmed
 ```
+
+### Eino ADK 约束
+
+实现时优先复用 Eino ADK 0.1：
+
+- 参考官方文档：`https://www.cloudwego.io/zh/docs/eino/overview/eino_adk0_1/`。
+- 使用 `adk.NewChatModelAgent` 创建单 Agent，配置 `Name`、`Description`、`Instruction`、`Model`、`ToolsConfig`、`MaxIterations` 和必要 `Middlewares`。
+- 使用 `adk.NewRunner` 执行 Agent，通过 `Runner.Run` 或 `Runner.Query` 获取 `AgentEvent` 迭代器。
+- 使用 `adk.WithSessionValues` 注入当前用户、当前草稿摘要、助手消息 ID、上下文预算等运行时变量。
+- 业务 tools 实现为 Eino `tool.BaseTool` / `tool.InvokableTool`，由 ADK `ToolsConfig` 管理。
+- 使用 ADK middleware 或事件消费层记录模型决策、tool 调用、tool 结果和最终回复，不自行实现工具调用循环。
+- 第一版不直接使用 `flow/agent/react` 或手写 Graph/ToolsNode 编排，除非后续确认 ADK 无法满足明确需求。
 
 ## 上下文管理
 
@@ -77,7 +90,7 @@ system prompt
 - 聊天历史只保留用户可见文本和草稿卡片摘要，不重复注入完整草稿结构。
 - 当前草稿默认只注入轻量摘要：`draft_public_id`、当前版本号、场景、穿搭/发型/妆容短摘要。
 - 当前用户消息必须完整保留，不被摘要替代。
-- tool definitions 每轮提供给 ReAct Agent，但 tool 返回内容必须短、相关、可解释。
+- tool definitions 每轮通过 ADK `ToolsConfig` 提供给 `ChatModelAgent`，但 tool 返回内容必须短、相关、可解释。
 
 ### 按需读取
 
@@ -113,7 +126,7 @@ Agent 需要时通过 tools 读取：
 
 ## Agent 决策边界
 
-聊天意图由 LLM 在 ReAct 循环里判断，不单独实现一套后端规则引擎。
+聊天意图由 LLM 在 ADK `ChatModelAgent` 的工具调用循环里判断，不单独实现一套后端规则引擎。
 
 Agent 根据系统提示、用户消息、历史消息和当前草稿状态自主选择：
 
@@ -181,7 +194,7 @@ chat_msgs(user)
 
 ### `agent_run_steps`
 
-Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool 调用、tool 结果和最终输出。
+Agent 可观察决策步骤表。记录 ADK 运行中的模型回合、tool 调用、tool 结果和最终输出。
 
 字段：
 
@@ -199,7 +212,7 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 | `provider_code` | 模型供应商编码，例如 `qwen`、`openai`。 |
 | `model_code` | 实际调用的模型编码。 |
 | `prompt_version` | 本轮系统提示词版本，便于回溯效果。 |
-| `max_step` | 本轮 ReAct 最大步数配置。 |
+| `max_iterations` | 本轮 ADK `ChatModelAgent.MaxIterations` 配置。 |
 | `tool_name` | tool 调用或结果对应的工具名；非 tool 步骤为空。 |
 | `tool_call_id` | 模型生成的 tool call 标识，用于关联调用和结果。 |
 | `decision_label` | 后端压缩后的决策标签，例如 `answer`、`create_draft`、`update_draft`、`read_context`。 |
@@ -219,7 +232,7 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 - `(assistant_msg_id, step_no)` 唯一。
 - `source_msg_id` 指向本轮用户消息。
 - `assistant_msg_id` 指向本轮 Agent 执行对应的助手占位消息。
-- `usage_key`、`provider_code`、`model_code`、`prompt_version`、`max_step` 至少在第一条 `model_decision` 步骤写入。
+- `usage_key`、`provider_code`、`model_code`、`prompt_version`、`max_iterations` 至少在第一条 `model_decision` 步骤写入。
 - `tool_call` 和 `tool_result` 使用相同 `tool_call_id` 关联。
 - `input_summary` 和 `output_summary` 使用短文本，不存完整大段 prompt、图片内容或任意 JSON。
 - 写入型 tool 成功后必须写 `related_type` 和 `related_public_id`，方便追踪是哪一步创建或修改了草稿。
@@ -422,20 +435,21 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 ### 决策步骤记录
 
-Agent Runner 负责记录运行和步骤，不把记录职责交给 LLM。
+ADK Runner 的事件消费层负责记录运行和步骤，不把记录职责交给 LLM。
 
 记录流程：
 
 1. 收到用户消息并写入 `chat_msgs(role=user,status=sent)`。
 2. 创建本轮 Agent 对应的助手占位消息：`chat_msgs(role=assistant,status=generating,source_msg_id=用户消息 id)`。
-3. 每次进入模型前写 `agent_run_steps(step_type=model_decision,status=running)`，并关联 `source_msg_id` 和 `assistant_msg_id`。
-4. 第一条 `model_decision` 步骤写入 `usage_key`、`provider_code`、`model_code`、`prompt_version` 和 `max_step`。
-5. 模型返回 tool call 后，将该步骤更新为 `succeeded`，写入 `decision_label` 和 `output_summary`。
-6. 调用 tool 前写 `agent_run_steps(step_type=tool_call,status=running)`。
-7. tool 返回后写 `agent_run_steps(step_type=tool_result,status=succeeded|failed)`。
-8. 如果 tool 创建或修改草稿，步骤中写入 `related_type`、`related_id`、`related_public_id`。
-9. 写入最终回复后，补一条 `final_response` 步骤。
-10. 更新助手占位消息为 `status=sent` 或 `status=failed`，并写入 `content_text`、`msg_type` 和业务关联。
+3. 调用 ADK `Runner.Run`，并消费 `AgentEvent` 迭代器。
+4. 每次进入模型前写 `agent_run_steps(step_type=model_decision,status=running)`，并关联 `source_msg_id` 和 `assistant_msg_id`。
+5. 第一条 `model_decision` 步骤写入 `usage_key`、`provider_code`、`model_code`、`prompt_version` 和 `max_iterations`。
+6. 模型返回 tool call 后，将该步骤更新为 `succeeded`，写入 `decision_label` 和 `output_summary`。
+7. 调用 tool 前写 `agent_run_steps(step_type=tool_call,status=running)`。
+8. tool 返回后写 `agent_run_steps(step_type=tool_result,status=succeeded|failed)`。
+9. 如果 tool 创建或修改草稿，步骤中写入 `related_type`、`related_id`、`related_public_id`。
+10. 写入最终回复后，补一条 `final_response` 步骤。
+11. 更新助手占位消息为 `status=sent` 或 `status=failed`，并写入 `content_text`、`msg_type` 和业务关联。
 
 记录内容：
 
