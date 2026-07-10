@@ -195,6 +195,51 @@ func TestRepositoryConfirmDraftCreatesAdviceSections(t *testing.T) {
 	}
 }
 
+func TestRepositoryConfirmDraftSplitsOutfitItemsIntoRefs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("new sqlmock: %v", err)
+	}
+	defer db.Close()
+	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
+
+	mock.ExpectBegin()
+	expectDraftForConfirm(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, public_id, draft_id, user_id, section_type, current_section_version_id, current_section_version_no, content_schema_version, content_json, created_at, updated_at FROM advice_draft_sections")).
+		WillReturnRows(sqlmock.NewRows(sectionRowColumns()).
+			AddRow(20, "ads_outfit", 10, 12, SectionTypeOutfit, 30, 1, "v1", outfitAdviceWithRefsJSON(), nil, nil).
+			AddRow(21, "ads_hair", 10, 12, SectionTypeHair, 31, 1, "v1", `{"title":"低丸子头","summary":"摘要","why_text":"适合","avoid_text":"避免","alternative_text":"替代"}`, nil, nil).
+			AddRow(22, "ads_makeup", 10, 12, SectionTypeMakeup, 32, 1, "v1", `{"title":"清透妆","summary":"摘要","why_text":"适合","avoid_text":"避免","alternative_text":"替代"}`, nil, nil))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advices")).
+		WillReturnResult(sqlmock.NewResult(40, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advice_sections")).
+		WillReturnResult(sqlmock.NewResult(50, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM clothes")).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(70))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advice_clothes_refs")).
+		WillReturnResult(sqlmock.NewResult(80, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advice_gap_refs")).
+		WillReturnResult(sqlmock.NewResult(81, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advice_sections")).
+		WillReturnResult(sqlmock.NewResult(51, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO advice_sections")).
+		WillReturnResult(sqlmock.NewResult(52, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE advice_drafts")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	advice, err := repo.ConfirmDraft(context.Background(), 12, "drf_test")
+	if err != nil {
+		t.Fatalf("confirm draft: %v", err)
+	}
+	if len(advice.Sections) != 3 {
+		t.Fatalf("expected three sections, got %#v", advice)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestRepositoryConfirmDraftRejectsIncompleteSections(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -349,4 +394,18 @@ func requiredAdviceJSON(title string) map[string]any {
 		"avoid_text":       "避免",
 		"alternative_text": "替代",
 	}
+}
+
+func outfitAdviceWithRefsJSON() string {
+	return `{
+		"title":"清爽通勤",
+		"summary":"摘要",
+		"why_text":"适合",
+		"avoid_text":"避免",
+		"alternative_text":"替代",
+		"items":[
+			{"role":"top","text":"米白衬衫","source_type":"wardrobe_item","source_public_id":"wdi_shirt","reason_text":"清爽"},
+			{"role":"shoe","text":"低跟乐福鞋","source_type":"gap_item","source_public_id":"","reason_text":"更稳定"}
+		]
+	}`
 }

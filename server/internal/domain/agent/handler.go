@@ -34,9 +34,11 @@ func (h *Handler) Chat(c *gin.Context) {
 	response.StreamHeaders(c)
 	c.Status(http.StatusOK)
 	_ = response.WriteSSE(c.Writer, "status", h.service.StreamStatus(c.Request.Context(), user.UserID))
+	c.Writer.Flush()
 	result, err := h.service.Chat(c.Request.Context(), user.UserID, request.Text)
 	if err != nil {
 		_ = response.WriteSSE(c.Writer, "error", gin.H{"message": "智能体请求失败"})
+		c.Writer.Flush()
 		return
 	}
 	_ = response.WriteSSE(c.Writer, "message", result.Message)
@@ -46,6 +48,7 @@ func (h *Handler) Chat(c *gin.Context) {
 		done.DraftPublicID = result.Draft.DraftPublicID
 	}
 	_ = response.WriteSSE(c.Writer, "done", done)
+	c.Writer.Flush()
 }
 
 func (h *Handler) CurrentDraft(c *gin.Context) {

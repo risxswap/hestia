@@ -54,6 +54,20 @@ func TestAgentAdviceSectionsSchemaDefinesDraftSectionKeys(t *testing.T) {
 	mustContain(t, raw, "KEY `idx_advices_user_target_scene` (`user_id`, `target_date`, `scene_key`, `status`)")
 }
 
+func TestAgentAdviceSchemaDefinesConfirmedReferenceTables(t *testing.T) {
+	raw := readInitSchema(t)
+
+	mustContain(t, raw, "CREATE TABLE IF NOT EXISTS `advice_clothes_refs`")
+	mustContain(t, raw, "CREATE TABLE IF NOT EXISTS `advice_gap_refs`")
+	mustContain(t, raw, "UNIQUE KEY `uk_advice_clothes_refs_public_id` (`public_id`)")
+	mustContain(t, raw, "KEY `idx_advice_clothes_refs_advice` (`advice_id`)")
+	mustContain(t, raw, "KEY `idx_advice_clothes_refs_clothes` (`user_id`, `clothes_id`, `created_at`)")
+	mustContain(t, raw, "UNIQUE KEY `uk_advice_gap_refs_public_id` (`public_id`)")
+	mustContain(t, raw, "KEY `idx_advice_gap_refs_advice` (`advice_id`)")
+	clothes := tableSQL(t, raw, "clothes")
+	mustContain(t, clothes, "`recommendation_status` varchar(32) NOT NULL DEFAULT 'normal'")
+}
+
 func TestAgentAdviceContainerDoesNotStoreLargeAdviceJSON(t *testing.T) {
 	raw := readInitSchema(t)
 	advices := tableSQL(t, raw, "advices")

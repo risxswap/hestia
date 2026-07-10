@@ -551,18 +551,107 @@ async function sendImageRouteFeedback(publicID, action, reason) {
 }
 
 async function sendAgentMessage(text) {
-  await ensureDevSession();
-  const raw = await rawRequest({
-    path: "/api/user/agent/stream",
-    method: "POST",
-    data: {
-      text
-    },
-    header: {
-      Accept: "text/event-stream"
+  const stream = streamAgentChat(text);
+  return stream.promise;
+}
+
+function streamAgentChat(text, callbacks) {
+  const events = [];
+  const handlers = callbacks || {};
+  let requestTask = null;
+  let receivedChunk = false;
+
+  const promise = ensureDevSession().then(() => new Promise((resolve, reject) => {
+    const parser = createSSEParser((event) => {
+      events.push(event);
+      if (typeof handlers.onEvent === "function") {
+        handlers.onEvent(event);
+      }
+      const eventHandler = handlers[`on${upperFirst(event.event)}`];
+      if (typeof eventHandler === "function") {
+        eventHandler(event.data, event);
+      }
+    });
+    const chunkDecoder = createChunkDecoder();
+
+    requestTask = wx.request({
+      url: `${getApiBaseUrl()}${normalizePath("/api/user/agent/chat")}`,
+      method: "POST",
+      data: { text },
+      enableChunked: true,
+      header: agentStreamHeader(),
+      success(response) {
+        const statusCode = response && response.statusCode ? response.statusCode : 0;
+        if (statusCode < 200 || statusCode >= 300) {
+          reject(new ApiError("智能体请求失败", {
+            code: "api.request_failed",
+            statusCode,
+            data: response && response.data
+          }));
+          return;
+        }
+        if (!receivedChunk && typeof response.data === "string") {
+          parser.push(response.data);
+        }
+        parser.push(chunkDecoder.flush());
+        parser.flush();
+        resolve(events);
+      },
+      fail(error) {
+        reject(new ApiError(error && error.errMsg ? error.errMsg : "网络请求失败", {
+          code: "api.network_failed",
+          data: error
+        }));
+      }
+    });
+
+    if (requestTask && typeof requestTask.onChunkReceived === "function") {
+      requestTask.onChunkReceived((response) => {
+        receivedChunk = true;
+        parser.push(chunkDecoder.decode(response && response.data));
+      });
     }
+  }));
+
+  return {
+    promise,
+    abort() {
+      if (requestTask && typeof requestTask.abort === "function") {
+        requestTask.abort();
+      }
+    }
+  };
+}
+
+function agentStreamHeader() {
+  const token = storageToken();
+  const header = {
+    Accept: "text/event-stream"
+  };
+  if (token) {
+    header.Authorization = `Bearer ${token}`;
+  }
+  return header;
+}
+
+function getCurrentAdviceDraft() {
+  return authorizedRequest({
+    path: "/api/user/advice-drafts/current"
   });
-  return parseSSEEvents(raw);
+}
+
+function confirmAdviceDraft(publicID) {
+  return authorizedRequest({
+    path: `/api/user/advice-drafts/${publicID}/confirm`,
+    method: "POST"
+  });
+}
+
+function discardAdviceDraft(publicID) {
+  return authorizedRequest({
+    path: `/api/user/advice-drafts/${publicID}/discard`,
+    method: "POST"
+  });
 }
 
 function rawRequest(options) {
@@ -606,6 +695,101 @@ function parseSSEEvents(raw) {
     .split(/\n\n+/)
     .map((block) => parseSSEBlock(block))
     .filter(Boolean);
+}
+
+function createSSEParser(onEvent) {
+  let buffer = "";
+  return {
+    push(chunk) {
+      buffer += String(chunk || "");
+      const blocks = buffer.split(/\r?\n\r?\n/);
+      buffer = blocks.pop() || "";
+      blocks.forEach((block) => {
+        const event = parseSSEBlock(block);
+        if (event) {
+          onEvent(event);
+        }
+      });
+    },
+    flush() {
+      const event = parseSSEBlock(buffer);
+      buffer = "";
+      if (event) {
+        onEvent(event);
+      }
+    }
+  };
+}
+
+function createChunkDecoder() {
+  const decoder = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8") : null;
+  let pendingBytes = [];
+  return {
+    decode(data) {
+      if (!data) {
+        return "";
+      }
+      if (typeof data === "string") {
+        return data;
+      }
+      const bytes = new Uint8Array(data);
+      if (decoder) {
+        return decoder.decode(bytes, { stream: true });
+      }
+      const combined = pendingBytes.concat(Array.prototype.slice.call(bytes));
+      const splitAt = completeUTF8PrefixLength(combined);
+      pendingBytes = combined.slice(splitAt);
+      return decodeUTF8Bytes(combined.slice(0, splitAt));
+    },
+    flush() {
+      if (decoder) {
+        return decoder.decode();
+      }
+      const text = decodeUTF8Bytes(pendingBytes);
+      pendingBytes = [];
+      return text;
+    }
+  };
+}
+
+function completeUTF8PrefixLength(bytes) {
+  let index = 0;
+  let lastComplete = 0;
+  while (index < bytes.length) {
+    const byte = bytes[index];
+    const width = utf8SequenceWidth(byte);
+    if (width === 0 || index + width > bytes.length) {
+      break;
+    }
+    index += width;
+    lastComplete = index;
+  }
+  return lastComplete;
+}
+
+function utf8SequenceWidth(byte) {
+  if (byte <= 0x7f) return 1;
+  if (byte >= 0xc2 && byte <= 0xdf) return 2;
+  if (byte >= 0xe0 && byte <= 0xef) return 3;
+  if (byte >= 0xf0 && byte <= 0xf4) return 4;
+  return 0;
+}
+
+function decodeUTF8Bytes(bytes) {
+  if (!bytes.length) {
+    return "";
+  }
+  const encoded = bytes.map((byte) => `%${byte.toString(16).padStart(2, "0")}`).join("");
+  try {
+    return decodeURIComponent(encoded);
+  } catch (error) {
+    return bytes.map((byte) => String.fromCharCode(byte)).join("");
+  }
+}
+
+function upperFirst(value) {
+  const text = String(value || "");
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
 }
 
 function parseSSEBlock(block) {
@@ -687,5 +871,9 @@ module.exports = {
   submitOnboarding,
   sendImageRouteFeedback,
   sendAgentMessage,
+  streamAgentChat,
+  getCurrentAdviceDraft,
+  confirmAdviceDraft,
+  discardAdviceDraft,
   parseSSEEvents
 };

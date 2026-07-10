@@ -1,11 +1,14 @@
 package agent
 
 import (
+	"context"
 	"log/slog"
 
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/domain/clothes"
+	"hestia/server/internal/infra/llm"
 
+	"github.com/cloudwego/eino/adk"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,7 +23,20 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 	if deps != nil {
 		logger = deps.Logger
 	}
-	RegisterUserRoutesWithService(group, NewServiceWithDependencies(repo, clothesService), logger)
+	service := NewServiceWithDependencies(repo, clothesService)
+	if deps != nil && deps.DB != nil && deps.LLM != nil {
+		llmService := llm.NewService(llm.NewConfigResolver(llm.NewMySQLConfigRepository(deps.DB)), deps.LLM)
+		llmService.SetLogger(logger)
+		if chatModel, err := llmService.NewToolCallingChatModel(context.Background(), llm.Request{
+			UsageKey:     "agent_chat",
+			RequiredCaps: []string{"text"},
+		}); err == nil {
+			if runner, err := NewEinoADKChatModelAdviceRunner(context.Background(), chatModel, adk.ToolsConfig{}); err == nil {
+				service.SetAdviceRunner(runner)
+			}
+		}
+	}
+	RegisterUserRoutesWithService(group, service, logger)
 }
 
 func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service, logger ...*slog.Logger) {

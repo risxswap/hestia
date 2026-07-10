@@ -37,6 +37,11 @@ function requireFreshApi() {
   return require(apiPath);
 }
 
+function arrayBufferFromBytes(bytes) {
+  const array = Uint8Array.from(bytes);
+  return array.buffer.slice(array.byteOffset, array.byteOffset + array.byteLength);
+}
+
 async function main() {
   const api = requireFreshApi();
 
@@ -48,6 +53,10 @@ async function main() {
     "saveOnboardingDraft",
     "submitOnboarding",
     "sendAgentMessage",
+    "streamAgentChat",
+    "getCurrentAdviceDraft",
+    "confirmAdviceDraft",
+    "discardAdviceDraft",
     "parseSSEEvents",
     "getCollectionSummary",
     "getHairItems",
@@ -159,6 +168,91 @@ async function main() {
   assert(events.length === 2, "parseSSEEvents should parse two events");
   assert(events[0].event === "status", "first event should keep event name");
   assert(events[0].data.text === "准备好了", "first event should parse JSON data");
+
+  const agentCalls = [];
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "agent_token";
+      },
+      request(options) {
+        agentCalls.push(options);
+        if (options.url.endsWith("/api/user/agent/chat")) {
+          options.success({
+            statusCode: 200,
+            data: "event: message\n" +
+              "data: {\"text\":\"先给你一版草稿\"}\n\n" +
+              "event: draft\n" +
+              "data: {\"draft_public_id\":\"drf_test\",\"sections\":[]}\n\n"
+          });
+          return {};
+        }
+        options.success({
+          statusCode: 200,
+          data: {
+            code: "ok",
+            data: {
+              public_id: "drf_test"
+            }
+          }
+        });
+        return {};
+      }
+    }
+  }, async () => {
+    const chatEvents = await api.sendAgentMessage("今天怎么穿");
+    assert(chatEvents.length === 2, `sendAgentMessage should collect SSE events, got ${chatEvents.length}`);
+    await api.getCurrentAdviceDraft();
+    await api.confirmAdviceDraft("drf_test");
+    await api.discardAdviceDraft("drf_test");
+  });
+
+  const agentPaths = agentCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
+  assert(agentPaths[0] === "/api/user/agent/chat", `agent chat path mismatch: ${agentPaths[0]}`);
+  assert(agentCalls[0].method === "POST", "sendAgentMessage should use POST");
+  assert(agentCalls[0].enableChunked === true, "agent chat should enable chunked streaming");
+  assert(agentCalls[0].header.Accept === "text/event-stream", "agent chat should request SSE");
+  assert(agentCalls[0].header.Authorization === "Bearer agent_token", "agent chat should send bearer token");
+  assert(!agentPaths.some((apiPath) => apiPath.includes("/api/user/agent/stream")), `old agent stream path should not be used: ${agentPaths.join(",")}`);
+  assert(agentPaths[1] === "/api/user/advice-drafts/current", `current draft path mismatch: ${agentPaths[1]}`);
+  assert(agentPaths[2] === "/api/user/advice-drafts/drf_test/confirm", `confirm draft path mismatch: ${agentPaths[2]}`);
+  assert(agentPaths[3] === "/api/user/advice-drafts/drf_test/discard", `discard draft path mismatch: ${agentPaths[3]}`);
+
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: {
+      getStorageSync() {
+        return "chunk_token";
+      },
+      request(options) {
+        let chunkHandler = null;
+        const raw = "event: message\n" +
+          "data: {\"text\":\"准备好了\"}\n\n";
+        const bytes = Array.from(Buffer.from(raw, "utf8"));
+        const splitAt = bytes.findIndex((byte) => byte >= 0xe0);
+        const firstChunk = bytes.slice(0, splitAt + 1);
+        const secondChunk = bytes.slice(splitAt + 1);
+        return {
+          onChunkReceived(handler) {
+            chunkHandler = handler;
+            Promise.resolve().then(() => {
+              chunkHandler({ data: arrayBufferFromBytes(firstChunk) });
+              chunkHandler({ data: arrayBufferFromBytes(secondChunk) });
+              options.success({
+                statusCode: 200,
+                data: ""
+              });
+            });
+          }
+        };
+      }
+    }
+  }, async () => {
+    const chunkEvents = await api.streamAgentChat("测试分块").promise;
+    assert(chunkEvents.length === 1, `chunked stream should produce one event, got ${chunkEvents.length}`);
+    assert(chunkEvents[0].data.text === "准备好了", `chunked UTF-8 text mismatch: ${JSON.stringify(chunkEvents)}`);
+  });
 
   const collectionCalls = [];
   await withGlobals({

@@ -18,6 +18,11 @@ type Client interface {
 	NewOpenAIChatModel(ctx context.Context, config *einoopenai.ChatModelConfig) (EinoChatModel, error)
 }
 
+type ToolCallingClient interface {
+	NewQwenToolCallingChatModel(ctx context.Context, config *qwen.ChatModelConfig) (model.ToolCallingChatModel, error)
+	NewOpenAIToolCallingChatModel(ctx context.Context, config *einoopenai.ChatModelConfig) (model.ToolCallingChatModel, error)
+}
+
 type EinoQwenChatModelFactoryFunc func(ctx context.Context, config *qwen.ChatModelConfig) (EinoChatModel, error)
 
 func (f EinoQwenChatModelFactoryFunc) NewQwenChatModel(ctx context.Context, config *qwen.ChatModelConfig) (EinoChatModel, error) {
@@ -49,5 +54,13 @@ func (c *EinoClient) NewQwenChatModel(ctx context.Context, config *qwen.ChatMode
 }
 
 func (c *EinoClient) NewOpenAIChatModel(ctx context.Context, config *einoopenai.ChatModelConfig) (EinoChatModel, error) {
+	return einoopenai.NewChatModel(ctx, config)
+}
+
+func (c *EinoClient) NewQwenToolCallingChatModel(ctx context.Context, config *qwen.ChatModelConfig) (model.ToolCallingChatModel, error) {
+	return qwen.NewChatModel(ctx, config)
+}
+
+func (c *EinoClient) NewOpenAIToolCallingChatModel(ctx context.Context, config *einoopenai.ChatModelConfig) (model.ToolCallingChatModel, error) {
 	return einoopenai.NewChatModel(ctx, config)
 }

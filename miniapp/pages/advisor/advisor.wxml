@@ -1,42 +1,110 @@
 <view class="page advisor-page advisor-chat">
-  <t-chat-list
-    id="advisor-chat-list"
+  <scroll-view
     class="advisor-chat__list"
-    data="{{chatItems}}"
-    layout="both"
-    animation="moving"
-    reverse="{{false}}"
+    scroll-y
+    scroll-with-animation
+    scroll-into-view="{{scrollAnchor}}"
   >
-    <view slot="footer" class="advisor-chat__footer" style="{{footerStyle}}">
-      <scroll-view class="advisor-chat__scenes" scroll-x enable-flex>
-        <view
-          wx:for="{{quickScenes}}"
-          wx:key="*this"
-          class="scene-chip"
-          data-scene="{{item}}"
-          bind:tap="handleScene"
-        >
-          {{item}}
+    <view class="advisor-chat__content">
+      <view
+        wx:for="{{messages}}"
+        wx:key="id"
+        class="chat-message chat-message--{{item.role}} {{item.status === 'error' ? 'chat-message--error' : ''}}"
+      >
+        <view class="chat-message__meta">{{item.role === 'user' ? '你' : 'Hestia'}}</view>
+        <view class="chat-message__bubble">
+          <text class="chat-message__text">{{item.content}}</text>
+          <view wx:if="{{item.status === 'pending'}}" class="chat-message__pending">
+            <view class="pending-dot"></view>
+            <view class="pending-dot"></view>
+            <view class="pending-dot"></view>
+          </view>
         </view>
-      </scroll-view>
 
-      <t-config-provider global-config="{{tdesignConfig}}">
-        <view class="composer">
-          <t-chat-sender
-            value="{{inputValue}}"
-            placeholder="输入场景、衣服或今天想呈现的感觉"
-            loading="{{thinking}}"
-            adjust-position="{{false}}"
-            render-presets="{{renderPresets}}"
-            textarea-props="{{textareaProps}}"
-            bind:change="handleInputChange"
-            bind:send="handleSend"
-            bind:stop="handleStop"
-            bind:fileSelect="handleFileSelect"
-            bind:keyboardheightchange="handleKeyboardHeightChange"
-          />
+        <view wx:if="{{item.draft}}" class="draft-card">
+          <view class="draft-card__head">
+            <view>
+              <text class="draft-card__title">{{item.draft.scene_label || '形象建议草稿'}}</text>
+              <text class="draft-card__revision">v{{item.draft.revision_no}}</text>
+            </view>
+            <text class="draft-card__status draft-card__status--{{item.draft.status}}">
+              {{item.draft.status === 'confirmed' ? '已保存' : item.draft.status === 'discarded' ? '已丢弃' : '草稿'}}
+            </text>
+          </view>
+
+          <view
+            wx:for="{{item.draft.sections}}"
+            wx:for-item="section"
+            wx:key="public_id"
+            class="draft-section"
+          >
+            <view class="draft-section__label">{{section.label}}</view>
+            <view class="draft-section__body">
+              <text class="draft-section__title">{{section.title}}</text>
+              <text class="draft-section__summary">{{section.summary}}</text>
+              <text wx:if="{{section.why_text}}" class="draft-section__note">{{section.why_text}}</text>
+              <text wx:if="{{section.avoid_text}}" class="draft-section__avoid">{{section.avoid_text}}</text>
+              <text wx:if="{{section.alternative_text}}" class="draft-section__alt">{{section.alternative_text}}</text>
+            </view>
+          </view>
+
+          <view wx:if="{{item.draft.status === 'draft'}}" class="draft-actions">
+            <button
+              class="draft-action draft-action--primary"
+              loading="{{item.draft.actionLoading}}"
+              disabled="{{item.draft.actionLoading}}"
+              data-draft-id="{{item.draft.draft_public_id}}"
+              bind:tap="handleConfirmDraft"
+            >确认</button>
+            <button
+              class="draft-action"
+              disabled="{{item.draft.actionLoading || thinking}}"
+              data-draft-id="{{item.draft.draft_public_id}}"
+              bind:tap="handleContinueDraft"
+            >继续调整</button>
+            <button
+              class="draft-action draft-action--danger"
+              loading="{{item.draft.actionLoading}}"
+              disabled="{{item.draft.actionLoading}}"
+              data-draft-id="{{item.draft.draft_public_id}}"
+              bind:tap="handleDiscardDraft"
+            >丢弃</button>
+          </view>
         </view>
-      </t-config-provider>
+      </view>
+      <view id="chat-bottom" class="chat-bottom"></view>
     </view>
-  </t-chat-list>
+  </scroll-view>
+
+  <view class="advisor-chat__footer" style="{{footerStyle}}">
+    <scroll-view class="advisor-chat__scenes" scroll-x enable-flex>
+      <view
+        wx:for="{{quickScenes}}"
+        wx:key="*this"
+        class="scene-chip"
+        data-scene="{{item}}"
+        bind:tap="handleScene"
+      >
+        {{item}}
+      </view>
+    </scroll-view>
+
+    <t-config-provider global-config="{{tdesignConfig}}">
+      <view class="composer">
+        <t-chat-sender
+          value="{{inputValue}}"
+          placeholder="输入场景、衣服或今天想呈现的感觉"
+          loading="{{thinking}}"
+          adjust-position="{{false}}"
+          render-presets="{{renderPresets}}"
+          textarea-props="{{textareaProps}}"
+          bind:change="handleInputChange"
+          bind:send="handleSend"
+          bind:stop="handleStop"
+          bind:fileSelect="handleFileSelect"
+          bind:keyboardheightchange="handleKeyboardHeightChange"
+        />
+      </view>
+    </t-config-provider>
+  </view>
 </view>

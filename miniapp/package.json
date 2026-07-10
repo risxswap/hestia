@@ -8,6 +8,7 @@
     "postinstall": "node scripts/patch-tdesign-icon-font.js",
     "verify:api-client": "node scripts/verify-api-client.js",
     "verify:api-integration": "node scripts/verify-miniapp-api-integration.js",
+    "verify:advisor-page": "node scripts/verify-advisor-page.js",
     "verify:memory-page": "node scripts/verify-memory-page.js",
     "verify:profile-page": "node scripts/verify-profile-page.js",
     "verify:private-tab-naming": "node scripts/verify-private-tab-naming.js",

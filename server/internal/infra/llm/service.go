@@ -10,6 +10,7 @@ import (
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino-ext/components/model/qwen"
 	"github.com/cloudwego/eino-ext/libs/acl/openai"
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -89,6 +90,35 @@ func (s *Service) Generate(ctx context.Context, request Request) (Response, erro
 		s.logger.InfoContext(ctx, "llm generate completed", successAttrs...)
 	}
 	return Response{Text: text, Usage: resolved}, nil
+}
+
+func (s *Service) NewToolCallingChatModel(ctx context.Context, request Request) (einomodel.ToolCallingChatModel, error) {
+	if s == nil || s.client == nil {
+		return nil, ErrClientUnavailable
+	}
+	resolved, err := s.resolver.ResolveUsage(ctx, request.UsageKey, request.RequiredCaps)
+	if err != nil {
+		return nil, err
+	}
+	if toolClient, ok := s.client.(ToolCallingClient); ok {
+		switch strings.ToLower(strings.TrimSpace(resolved.Provider.Code)) {
+		case "qwen":
+			return toolClient.NewQwenToolCallingChatModel(ctx, qwenChatModelConfig(resolved, request))
+		case "siliconflow", "openai":
+			return toolClient.NewOpenAIToolCallingChatModel(ctx, openAIChatModelConfig(resolved, request))
+		default:
+			return nil, fmt.Errorf("unsupported llm provider %q", resolved.Provider.Code)
+		}
+	}
+	chatModel, err := s.newChatModel(ctx, resolved, request)
+	if err != nil {
+		return nil, err
+	}
+	toolModel, ok := chatModel.(einomodel.ToolCallingChatModel)
+	if !ok {
+		return nil, ErrClientUnavailable
+	}
+	return toolModel, nil
 }
 
 func (s *Service) generateLogAttrs(request Request, resolved ResolvedUsage) []any {

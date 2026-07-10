@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS `clothes` (
   `ai_attrs` json DEFAULT NULL,
   `user_notes` text,
   `is_core` tinyint(1) NOT NULL DEFAULT 0,
+  `recommendation_status` varchar(32) NOT NULL DEFAULT 'normal',
   `recognition_status` varchar(32) NOT NULL DEFAULT 'succeeded',
   `status` varchar(32) NOT NULL DEFAULT 'active',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -633,6 +634,44 @@ CREATE TABLE IF NOT EXISTS `advice_sections` (
   UNIQUE KEY `uk_advice_sections_advice_type` (`advice_id`, `section_type`),
   KEY `idx_advice_sections_user` (`user_id`),
   KEY `idx_advice_sections_source_version` (`source_draft_section_version_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `advice_clothes_refs` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(32) NOT NULL,
+  `advice_id` bigint unsigned NOT NULL,
+  `advice_section_id` bigint unsigned NOT NULL,
+  `user_id` bigint unsigned NOT NULL,
+  `clothes_id` bigint unsigned NOT NULL,
+  `role` varchar(64) DEFAULT NULL,
+  `display_text` varchar(180) DEFAULT NULL,
+  `reason_text` text,
+  `sort_order` int NOT NULL DEFAULT 0,
+  `source_draft_section_version_id` bigint unsigned DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_advice_clothes_refs_public_id` (`public_id`),
+  KEY `idx_advice_clothes_refs_advice` (`advice_id`),
+  KEY `idx_advice_clothes_refs_section_order` (`advice_section_id`, `sort_order`),
+  KEY `idx_advice_clothes_refs_clothes` (`user_id`, `clothes_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `advice_gap_refs` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(32) NOT NULL,
+  `advice_id` bigint unsigned NOT NULL,
+  `advice_section_id` bigint unsigned NOT NULL,
+  `user_id` bigint unsigned NOT NULL,
+  `role` varchar(64) DEFAULT NULL,
+  `display_text` varchar(180) NOT NULL,
+  `reason_text` text,
+  `sort_order` int NOT NULL DEFAULT 0,
+  `source_draft_section_version_id` bigint unsigned DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_advice_gap_refs_public_id` (`public_id`),
+  KEY `idx_advice_gap_refs_advice` (`advice_id`),
+  KEY `idx_advice_gap_refs_section_order` (`advice_section_id`, `sort_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `feedbacks` (

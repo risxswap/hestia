@@ -15,8 +15,11 @@ const (
 	ChatStatusFailed     = "failed"
 
 	AgentStepTypeModelDecision = "model_decision"
+	AgentStepTypeToolCall      = "tool_call"
+	AgentStepTypeToolResult    = "tool_result"
 	AgentStepTypeFinalResponse = "final_response"
 	AgentStepStatusSucceeded   = "succeeded"
+	AgentStepStatusFailed      = "failed"
 
 	DraftStatusDraft     = "draft"
 	DraftStatusConfirmed = "confirmed"
@@ -54,6 +57,26 @@ type ChatResult struct {
 	UserMessagePublicID      string
 	AssistantMessageID       int64
 	AssistantMessagePublicID string
+}
+
+type AdviceRunInput struct {
+	UserID       int64
+	Text         string
+	SourceMsgID  int64
+	CurrentDraft *Draft
+}
+
+type AdviceRunOutput struct {
+	AssistantText string
+	DecisionLabel string
+	ToolCalls     []AdviceToolCall
+}
+
+type AdviceToolCall struct {
+	Name             string
+	InputSummary     string
+	CreateDraftInput *CreateDraftInput
+	UpdateDraftInput *UpdateDraftInput
 }
 
 type ChatMessage struct {
@@ -105,6 +128,7 @@ type AgentRunStepInput struct {
 	RelatedType     string
 	RelatedID       int64
 	RelatedPublicID string
+	ErrorMessage    string
 }
 
 type Draft struct {

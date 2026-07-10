@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"hestia/server/internal/common/dbutil"
@@ -93,10 +94,10 @@ func (r *MySQLRepository) CreateAgentRunStep(ctx context.Context, input AgentRun
 	}
 	_, err := r.ext.ExecContext(ctx, `
 INSERT INTO agent_run_steps
-  (public_id, user_id, source_msg_id, assistant_msg_id, step_no, step_type, status, decision_label, input_summary, output_summary, related_type, related_id, related_public_id, started_at, finished_at)
+  (public_id, user_id, source_msg_id, assistant_msg_id, step_no, step_type, status, decision_label, input_summary, output_summary, related_type, related_id, related_public_id, started_at, finished_at, error_message)
 VALUES
-  (?, ?, NULLIF(?, 0), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?)
-`, id.NewPublicID("ars"), input.UserID, input.SourceMsgID, input.AssistantMsgID, input.StepNo, input.StepType, input.Status, input.DecisionLabel, input.InputSummary, input.OutputSummary, input.RelatedType, input.RelatedID, input.RelatedPublicID, time.Now().UTC(), time.Now().UTC())
+  (?, ?, NULLIF(?, 0), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?, NULLIF(?, ''))
+`, id.NewPublicID("ars"), input.UserID, input.SourceMsgID, input.AssistantMsgID, input.StepNo, input.StepType, input.Status, input.DecisionLabel, input.InputSummary, input.OutputSummary, input.RelatedType, input.RelatedID, input.RelatedPublicID, time.Now().UTC(), time.Now().UTC(), input.ErrorMessage)
 	return err
 }
 
@@ -420,6 +421,11 @@ VALUES
 		if err != nil {
 			return Advice{}, err
 		}
+		if section.SectionType == SectionTypeOutfit {
+			if err := r.createConfirmedOutfitRefs(ctx, userID, adviceID, adviceSectionID, section); err != nil {
+				return Advice{}, err
+			}
+		}
 		advice.Sections = append(advice.Sections, AdviceSection{
 			ID:                          adviceSectionID,
 			AdviceID:                    adviceID,
@@ -441,6 +447,64 @@ WHERE id = ?
 		return Advice{}, err
 	}
 	return advice, nil
+}
+
+func (r *MySQLRepository) createConfirmedOutfitRefs(ctx context.Context, userID, adviceID, adviceSectionID int64, section DraftSection) error {
+	items, ok := outfitItems(section.ContentJSON)
+	if !ok {
+		return nil
+	}
+	for index, item := range items {
+		ref := outfitItemRef(item)
+		switch ref.SourceType {
+		case "wardrobe_item":
+			if ref.SourcePublicID == "" {
+				continue
+			}
+			clothesID, err := r.findActiveClothesID(ctx, userID, ref.SourcePublicID)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if _, err := r.ext.ExecContext(ctx, `
+INSERT INTO advice_clothes_refs
+  (public_id, advice_id, advice_section_id, user_id, clothes_id, role, display_text, reason_text, sort_order, source_draft_section_version_id)
+VALUES
+  (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)
+`, id.NewPublicID("acr"), adviceID, adviceSectionID, userID, clothesID, ref.Role, ref.Text, ref.ReasonText, index+1, section.CurrentSectionVersionID); err != nil {
+				return err
+			}
+		case "gap_item":
+			if ref.Text == "" {
+				continue
+			}
+			if _, err := r.ext.ExecContext(ctx, `
+INSERT INTO advice_gap_refs
+  (public_id, advice_id, advice_section_id, user_id, role, display_text, reason_text, sort_order, source_draft_section_version_id)
+VALUES
+  (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)
+`, id.NewPublicID("agr"), adviceID, adviceSectionID, userID, ref.Role, ref.Text, ref.ReasonText, index+1, section.CurrentSectionVersionID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (r *MySQLRepository) findActiveClothesID(ctx context.Context, userID int64, publicID string) (int64, error) {
+	var clothesID int64
+	err := sqlx.GetContext(ctx, r.ext, &clothesID, `
+SELECT id FROM clothes
+WHERE user_id = ?
+  AND public_id = ?
+  AND status = 'active'
+  AND recommendation_status <> 'paused'
+  AND deleted_at IS NULL
+LIMIT 1
+`, userID, publicID)
+	return clothesID, err
 }
 
 func (r *MySQLRepository) findCurrentDraft(ctx context.Context, userID int64) (Draft, error) {
@@ -751,4 +815,49 @@ func hasRequiredSections(sections []DraftSection) bool {
 		seen[section.SectionType] = true
 	}
 	return seen[SectionTypeOutfit] && seen[SectionTypeHair] && seen[SectionTypeMakeup]
+}
+
+type confirmedOutfitRef struct {
+	Role           string
+	Text           string
+	SourceType     string
+	SourcePublicID string
+	ReasonText     string
+}
+
+func outfitItems(content map[string]any) ([]map[string]any, bool) {
+	rawItems, ok := content["items"].([]any)
+	if !ok || len(rawItems) == 0 {
+		return nil, false
+	}
+	items := make([]map[string]any, 0, len(rawItems))
+	for _, rawItem := range rawItems {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, len(items) > 0
+}
+
+func outfitItemRef(item map[string]any) confirmedOutfitRef {
+	return confirmedOutfitRef{
+		Role:           jsonString(item["role"]),
+		Text:           jsonString(item["text"]),
+		SourceType:     jsonString(item["source_type"]),
+		SourcePublicID: jsonString(item["source_public_id"]),
+		ReasonText:     jsonString(item["reason_text"]),
+	}
+}
+
+func jsonString(value any) string {
+	if value == nil {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(text)
 }

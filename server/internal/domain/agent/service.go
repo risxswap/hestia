@@ -35,6 +35,7 @@ type Repository interface {
 type Service struct {
 	clothes ClothesAdviceService
 	repo    Repository
+	runner  AdviceRunner
 }
 
 func NewService() *Service {
@@ -51,6 +52,17 @@ func NewServiceWithRepository(repo Repository) *Service {
 
 func NewServiceWithDependencies(repo Repository, clothesService ClothesAdviceService) *Service {
 	return &Service{repo: repo, clothes: clothesService}
+}
+
+func NewServiceWithRunner(repo Repository, clothesService ClothesAdviceService, runner AdviceRunner) *Service {
+	return &Service{repo: repo, clothes: clothesService, runner: runner}
+}
+
+func (s *Service) SetAdviceRunner(runner AdviceRunner) {
+	if s == nil {
+		return
+	}
+	s.runner = runner
 }
 
 func (s *Service) StreamStatus(ctx context.Context, userID int64) StreamStatus {
@@ -104,43 +116,124 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string) (ChatResu
 		return ChatResult{}, err
 	}
 	result := ChatResult{
-		Message:                  message,
 		UserMessageID:            userMessage.ID,
 		UserMessagePublicID:      userMessage.PublicID,
 		AssistantMessageID:       assistantMessage.ID,
 		AssistantMessagePublicID: assistantMessage.PublicID,
 	}
-	if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
-		UserID:         userID,
-		SourceMsgID:    userMessage.ID,
-		AssistantMsgID: assistantMessage.ID,
-		StepNo:         1,
-		StepType:       AgentStepTypeModelDecision,
-		Status:         AgentStepStatusSucceeded,
-		DecisionLabel:  "draft",
-		InputSummary:   message.Text,
-	}); err != nil {
-		return result, err
-	}
-	draft, err := s.repo.GetCurrentDraft(ctx, userID)
+	currentDraft, err := s.repo.GetCurrentDraft(ctx, userID)
+	var currentDraftPtr *Draft
 	if errors.Is(err, ErrDraftNotFound) {
-		input := defaultCreateDraftInput(userID, message.Text)
-		input.SourceMsgID = userMessage.ID
-		draft, err = s.repo.CreateDraft(ctx, input)
+		err = nil
 	} else if err == nil {
-		draft, err = s.repo.UpdateDraftSections(ctx, defaultUpdateDraftInput(userID, draft.PublicID, userMessage.ID, message.Text))
+		currentDraftPtr = &currentDraft
 	}
 	if err != nil {
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
 		return result, err
 	}
+	runner := s.runner
+	if runner == nil {
+		runner = RuleBasedAdviceRunner{}
+	}
+	output, err := runner.Run(ctx, AdviceRunInput{
+		UserID:       userID,
+		Text:         message.Text,
+		SourceMsgID:  userMessage.ID,
+		CurrentDraft: currentDraftPtr,
+	})
+	if err != nil {
+		_ = s.recordFailedStep(ctx, userID, userMessage.ID, assistantMessage.ID, 1, AgentStepTypeModelDecision, "runner_failed", message.Text, err)
+		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
+		return result, err
+	}
+	if currentDraftPtr == nil && len(output.ToolCalls) == 0 {
+		output, err = (RuleBasedAdviceRunner{}).Run(ctx, AdviceRunInput{
+			UserID:       userID,
+			Text:         message.Text,
+			SourceMsgID:  userMessage.ID,
+			CurrentDraft: nil,
+		})
+		if err != nil {
+			_ = s.recordFailedStep(ctx, userID, userMessage.ID, assistantMessage.ID, 1, AgentStepTypeModelDecision, "fallback_failed", message.Text, err)
+			_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
+			return result, err
+		}
+	}
+	if strings.TrimSpace(output.AssistantText) == "" {
+		output.AssistantText = "我已生成一版可继续调整的形象建议草稿。"
+	}
+	result.Message = StreamMessage{Text: output.AssistantText}
+	stepNo := 1
+	if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
+		UserID:         userID,
+		SourceMsgID:    userMessage.ID,
+		AssistantMsgID: assistantMessage.ID,
+		StepNo:         stepNo,
+		StepType:       AgentStepTypeModelDecision,
+		Status:         AgentStepStatusSucceeded,
+		DecisionLabel:  firstNonEmpty(output.DecisionLabel, "draft"),
+		InputSummary:   message.Text,
+		OutputSummary:  output.AssistantText,
+	}); err != nil {
+		return result, err
+	}
+	var draft Draft
+	for _, call := range output.ToolCalls {
+		stepNo++
+		if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
+			UserID:         userID,
+			SourceMsgID:    userMessage.ID,
+			AssistantMsgID: assistantMessage.ID,
+			StepNo:         stepNo,
+			StepType:       AgentStepTypeToolCall,
+			Status:         AgentStepStatusSucceeded,
+			DecisionLabel:  call.Name,
+			InputSummary:   call.InputSummary,
+		}); err != nil {
+			return result, err
+		}
+		draft, err = s.executeAdviceToolCall(ctx, userID, userMessage.ID, currentDraftPtr, call)
+		if err != nil {
+			stepNo++
+			_ = s.recordFailedStep(ctx, userID, userMessage.ID, assistantMessage.ID, stepNo, AgentStepTypeToolResult, call.Name, call.InputSummary, err)
+			break
+		}
+		currentDraft = draft
+		currentDraftPtr = &currentDraft
+		stepNo++
+		if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
+			UserID:          userID,
+			SourceMsgID:     userMessage.ID,
+			AssistantMsgID:  assistantMessage.ID,
+			StepNo:          stepNo,
+			StepType:        AgentStepTypeToolResult,
+			Status:          AgentStepStatusSucceeded,
+			DecisionLabel:   call.Name,
+			OutputSummary:   "草稿已更新",
+			RelatedType:     "advice_draft",
+			RelatedID:       draft.ID,
+			RelatedPublicID: draft.PublicID,
+		}); err != nil {
+			return result, err
+		}
+	}
+	if err != nil {
+		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
+		return result, err
+	}
+	if currentDraftPtr == nil {
+		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
+		return result, ErrDraftNotFound
+	}
+	draft = *currentDraftPtr
 	card := draftCard(draft)
 	result.Draft = &card
 	_, err = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{
 		ID:              assistantMessage.ID,
 		Status:          ChatStatusSent,
 		MsgType:         ChatMsgTypeDraftCard,
-		ContentText:     message.Text,
+		ContentText:     output.AssistantText,
 		RelatedType:     "advice_draft",
 		RelatedID:       draft.ID,
 		RelatedPublicID: draft.PublicID,
@@ -152,11 +245,11 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string) (ChatResu
 		UserID:          userID,
 		SourceMsgID:     userMessage.ID,
 		AssistantMsgID:  assistantMessage.ID,
-		StepNo:          2,
+		StepNo:          stepNo + 1,
 		StepType:        AgentStepTypeFinalResponse,
 		Status:          AgentStepStatusSucceeded,
 		DecisionLabel:   "final_response",
-		OutputSummary:   message.Text,
+		OutputSummary:   output.AssistantText,
 		RelatedType:     "advice_draft",
 		RelatedID:       draft.ID,
 		RelatedPublicID: draft.PublicID,
@@ -164,6 +257,53 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string) (ChatResu
 		return result, err
 	}
 	return result, nil
+}
+
+func (s *Service) recordFailedStep(ctx context.Context, userID, sourceMsgID, assistantMsgID int64, stepNo int, stepType, decisionLabel, inputSummary string, stepErr error) error {
+	if s == nil || s.repo == nil {
+		return ErrRepositoryUnsupported
+	}
+	errorText := ""
+	if stepErr != nil {
+		errorText = stepErr.Error()
+	}
+	return s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
+		UserID:         userID,
+		SourceMsgID:    sourceMsgID,
+		AssistantMsgID: assistantMsgID,
+		StepNo:         stepNo,
+		StepType:       stepType,
+		Status:         AgentStepStatusFailed,
+		DecisionLabel:  decisionLabel,
+		InputSummary:   inputSummary,
+		ErrorMessage:   errorText,
+	})
+}
+
+func (s *Service) executeAdviceToolCall(ctx context.Context, userID, sourceMsgID int64, currentDraft *Draft, call AdviceToolCall) (Draft, error) {
+	switch call.Name {
+	case AdviceToolCreateDraft:
+		if call.CreateDraftInput == nil {
+			return Draft{}, ErrDraftNotFound
+		}
+		input := *call.CreateDraftInput
+		input.UserID = userID
+		input.SourceMsgID = sourceMsgID
+		return s.repo.CreateDraft(ctx, input)
+	case AdviceToolUpdateDraft:
+		if call.UpdateDraftInput == nil {
+			return Draft{}, ErrDraftNotFound
+		}
+		input := *call.UpdateDraftInput
+		input.UserID = userID
+		input.SourceMsgID = sourceMsgID
+		if input.PublicID == "" && currentDraft != nil {
+			input.PublicID = currentDraft.PublicID
+		}
+		return s.repo.UpdateDraftSections(ctx, input)
+	default:
+		return Draft{}, ErrDraftNotFound
+	}
 }
 
 func (s *Service) CurrentDraft(ctx context.Context, userID int64) (DraftCard, error) {

@@ -61,7 +61,7 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	if !containsStatement(exec.queries, "CREATE TABLE IF NOT EXISTS `jobs`") {
 		t.Fatalf("expected jobs table creation statement")
 	}
-	if !containsStatement(exec.queries, "ALTER TABLE clothes ADD COLUMN recommendation_status") {
+	if !containsStatement(exec.queries, "ALTER TABLE `clothes` ADD COLUMN `recommendation_status`") {
 		t.Fatalf("expected wardrobe recommendation status migration statement")
 	}
 	if !containsStatement(exec.queries, "clothes.item_options") {
@@ -127,15 +127,15 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	}
 }
 
-func TestApplyMySQLSchemaIgnoresDuplicateColumnForIncrementalAddColumn(t *testing.T) {
-	exec := &duplicateColumnSQLExecutor{}
+func TestApplyMySQLSchemaExecutesIdempotentWardrobeColumnMigrations(t *testing.T) {
+	exec := &recordingWardrobeColumnSQLExecutor{}
 
 	if err := ApplyMySQLSchema(context.Background(), exec); err != nil {
-		t.Fatalf("expected duplicate column migration to be ignored, got %v", err)
+		t.Fatalf("apply mysql schema: %v", err)
 	}
 
 	if !exec.sawRecommendationStatusMigration {
-		t.Fatalf("expected wardrobe recommendation status migration to be executed")
+		t.Fatalf("expected idempotent wardrobe recommendation status migration to be executed")
 	}
 }
 
@@ -298,19 +298,18 @@ func (f *fakeSQLExecutor) GetContext(_ context.Context, _ any, query string, _ .
 	return sql.ErrNoRows
 }
 
-type duplicateColumnSQLExecutor struct {
+type recordingWardrobeColumnSQLExecutor struct {
 	sawRecommendationStatusMigration bool
 }
 
-func (f *duplicateColumnSQLExecutor) ExecContext(_ context.Context, query string, _ ...any) (sql.Result, error) {
-	if strings.Contains(query, "ALTER TABLE clothes ADD COLUMN recommendation_status") {
+func (f *recordingWardrobeColumnSQLExecutor) ExecContext(_ context.Context, query string, _ ...any) (sql.Result, error) {
+	if strings.Contains(query, "recommendation_status") {
 		f.sawRecommendationStatusMigration = true
-		return nil, &mysql.MySQLError{Number: 1060, Message: "Duplicate column name 'recommendation_status'"}
 	}
 	return nil, nil
 }
 
-func (f *duplicateColumnSQLExecutor) GetContext(_ context.Context, _ any, _ string, _ ...any) error {
+func (f *recordingWardrobeColumnSQLExecutor) GetContext(_ context.Context, _ any, _ string, _ ...any) error {
 	return sql.ErrNoRows
 }
 
