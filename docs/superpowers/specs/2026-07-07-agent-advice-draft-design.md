@@ -14,7 +14,7 @@ Hestia 的核心交互应从“填表生成一次性建议”逐步转向“通�
 - 支持用户通过后续对话精细化控制当前草稿。
 - 第一版不新增独立 chat session 表；当前草稿范围定义为当前用户在 advisor 入口下最近的 `draft` 草稿。
 - 草稿先落库，用户点击按钮确认后才创建正式建议。
-- 草稿版本使用独立表和明确字段，尽量避免 JSON 垃圾堆。
+- 草稿使用受控 JSON 承载穿搭、发型、妆容正文，并通过 schema 版本和 tool 校验避免变成垃圾堆。
 - 穿搭、发型、妆容三类内容都结构化进入草稿和正式建议。
 
 ## 非目标
@@ -145,9 +145,6 @@ chat_msgs(user)
   -> advice_requests(source_msg_id)
   -> advice_drafts(advice_request_id)
   -> advice_draft_versions(draft_id)
-       -> advice_draft_outfits
-       -> advice_draft_hairs
-       -> advice_draft_makeups
        -> advice_draft_wardrobe_refs
 ```
 
@@ -277,6 +274,10 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 | `style_goal` | 本次方案目标，例如“更利落”“显得年轻一点”。 |
 | `avoid_goal` | 本次明确避雷，例如“不要露腿”“不要太正式”。 |
 | `current_version_no` | 当前草稿版本号，指向最新版。 |
+| `content_schema_version` | 三段建议 JSON 的 schema 版本，例如 `v1`。 |
+| `outfit_advice` | 当前版穿搭建议 JSON，结构由 schema 约束。 |
+| `hair_advice` | 当前版发型建议 JSON，结构由 schema 约束。 |
+| `makeup_advice` | 当前版妆容建议 JSON，结构由 schema 约束。 |
 | `confirmed_advice_id` | 确认保存后关联的正式建议 ID。 |
 | `created_at` | 创建时间。 |
 | `updated_at` | 更新时间。 |
@@ -286,6 +287,8 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 - 当前草稿通过 `user_id + status=draft + updated_at` 查询。
 - 第一版每个用户在 advisor 入口当前只操作最近一个 `draft` 草稿。
+- `outfit_advice`、`hair_advice`、`makeup_advice` 只承载建议正文，不存用户档案、聊天历史或 tool 原始结果。
+- 三段 JSON 必须由后端 tool 参数校验后写入，不能透传模型任意 JSON。
 - `confirmed_advice_id` 在确认保存后写入。
 
 ### `advice_draft_versions`
@@ -304,92 +307,75 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 | `source_msg_id` | 触发本次版本创建或精修的用户消息 ID。 |
 | `user_intent` | 用户本轮修改意图摘要，例如“鞋子换舒服点”。 |
 | `revision_summary` | 本轮版本变化摘要，供卡片和审计展示。 |
-| `changed_outfit` | 本轮是否修改穿搭分段。 |
-| `changed_hair` | 本轮是否修改发型分段。 |
-| `changed_makeup` | 本轮是否修改妆容分段。 |
+| `changed_outfit` | 本轮是否修改穿搭 JSON 分段。 |
+| `changed_hair` | 本轮是否修改发型 JSON 分段。 |
+| `changed_makeup` | 本轮是否修改妆容 JSON 分段。 |
+| `content_schema_version` | 本版本三段建议 JSON 的 schema 版本。 |
+| `outfit_advice` | 本版本穿搭建议 JSON 快照。 |
+| `hair_advice` | 本版本发型建议 JSON 快照。 |
+| `makeup_advice` | 本版本妆容建议 JSON 快照。 |
 | `created_at` | 版本创建时间。 |
 
 约束：
 
 - `(draft_id, version_no)` 唯一。
 - 当前版本由 `advice_drafts.current_version_no` 指向。
-- 每个版本必须有穿搭、发型、妆容三段内容记录。未修改分段从上一版复制。
+- 每个版本必须保存穿搭、发型、妆容三段 JSON 快照。未修改 JSON 分段从上一版复制。
 
-### `advice_draft_outfits`
+### 三段建议 JSON schema
 
-穿搭草稿表。
+`outfit_advice`、`hair_advice`、`makeup_advice` 使用 JSON 是为了保留内容表达弹性，不代表可以存任意数据。第一版由 tool 入参结构体和后端校验约束字段，后续 schema 稳定后再考虑拆表。
 
-字段：
+共同约束：
 
-| 字段 | 备注 |
-| --- | --- |
-| `id` | 内部自增 ID。 |
-| `draft_version_id` | 所属草稿版本 ID。 |
-| `title` | 穿搭标题，用于卡片折叠区标题。 |
-| `summary` | 穿搭整体摘要。 |
-| `top_item_text` | 上装建议文本，可引用衣物或描述缺口单品。 |
-| `bottom_item_text` | 下装建议文本。 |
-| `outer_item_text` | 外套或外层建议文本。 |
-| `shoe_item_text` | 鞋履建议文本。 |
-| `bag_item_text` | 包袋建议文本。 |
-| `accessory_text` | 配饰建议文本。 |
-| `color_strategy` | 色彩策略，例如主色、辅助色、避雷色。 |
-| `silhouette_strategy` | 廓形策略，例如直线感、收腰、松紧关系。 |
-| `material_strategy` | 材质策略，例如挺括、柔软、轻薄或正式感。 |
-| `why_text` | 为什么适合当前用户和场景。 |
-| `avoid_text` | 本方案不建议做什么。 |
-| `alternative_text` | 替代方案，用于用户继续精修。 |
-| `created_at` | 记录创建时间。 |
+- 每段 JSON 必须包含 `title`、`summary`、`why_text`、`avoid_text`、`alternative_text`。
+- 每段 JSON 只存建议正文，不存用户档案、聊天历史、tool 原始结果或模型中间输出。
+- 每段 JSON 的字段由 `content_schema_version` 解释；schema 变更必须升级版本。
+- 写入前做白名单字段校验，未知字段拒绝或丢弃并记录错误摘要。
+- 返回前端前由后端转换成稳定卡片 payload，前端不直接依赖模型原始字段。
 
-### `advice_draft_hairs`
+穿搭建议字段：
 
-发型草稿表。
+- `title`：穿搭标题。
+- `summary`：整体摘要。
+- `items`：单品建议数组，每项包含 `role`、`text`、`reason_text`。
+- `color_strategy`：色彩策略。
+- `silhouette_strategy`：廓形策略。
+- `material_strategy`：材质策略。
+- `why_text`：为什么适合。
+- `avoid_text`：不建议做什么。
+- `alternative_text`：替代方案。
 
-字段：
+发型建议字段：
 
-| 字段 | 备注 |
-| --- | --- |
-| `id` | 内部自增 ID。 |
-| `draft_version_id` | 所属草稿版本 ID。 |
-| `title` | 发型建议标题。 |
-| `length_direction` | 长度方向，例如保持长度、扎起、半扎、露出颈部。 |
-| `shape_direction` | 轮廓方向，例如蓬松度、贴合度、头顶高度。 |
-| `bangs_direction` | 刘海或额前处理方向；没有刘海也可写额前处理。 |
-| `styling_steps` | 可执行打理步骤，使用短文本。 |
-| `hold_level` | 定型强度或持久度建议，例如低、中、高。 |
-| `why_text` | 为什么适合当前用户和场景。 |
-| `avoid_text` | 不建议的发型处理。 |
-| `alternative_text` | 替代发型方向。 |
-| `created_at` | 记录创建时间。 |
+- `title`：发型标题。
+- `summary`：整体摘要。
+- `length_direction`：长度或扎发方向。
+- `shape_direction`：轮廓方向。
+- `bangs_direction`：刘海或额前处理方向。
+- `styling_steps`：可执行打理步骤。
+- `hold_level`：定型强度。
+- `why_text`：为什么适合。
+- `avoid_text`：不建议做什么。
+- `alternative_text`：替代方案。
 
-### `advice_draft_makeups`
+妆容建议字段：
 
-妆容草稿表。
+- `title`：妆容标题。
+- `summary`：整体摘要。
+- `base_direction`：底妆方向，只描述妆效，不做肤质诊断。
+- `brow_direction`：眉形和眉色方向。
+- `eye_direction`：眼妆方向。
+- `lip_direction`：唇妆方向。
+- `cheek_direction`：腮红或修容方向，避免医疗或骨相诊断表达。
+- `finish_level`：整体妆感强度。
+- `step_text`：可执行步骤摘要。
+- `why_text`：为什么适合。
+- `avoid_text`：不建议做什么。
+- `alternative_text`：替代方案。
+- `safety_note`：安全边界提示，例如敏感不适时停止使用并咨询专业人士。
 
-字段：
-
-| 字段 | 备注 |
-| --- | --- |
-| `id` | 内部自增 ID。 |
-| `draft_version_id` | 所属草稿版本 ID。 |
-| `title` | 妆容建议标题。 |
-| `base_direction` | 底妆方向，只描述妆效，不做肤质诊断。 |
-| `brow_direction` | 眉形和眉色方向。 |
-| `eye_direction` | 眼妆方向，例如色调、线条、浓淡。 |
-| `lip_direction` | 唇妆方向，例如色系、饱和度、质地。 |
-| `cheek_direction` | 腮红或修容方向，避免医疗或骨相诊断表达。 |
-| `finish_level` | 整体妆感强度，例如低调、自然、精致。 |
-| `step_text` | 可执行步骤摘要。 |
-| `why_text` | 为什么适合当前用户和场景。 |
-| `avoid_text` | 不建议的妆容处理。 |
-| `alternative_text` | 替代妆容方向。 |
-| `safety_note` | 安全边界提示，例如敏感不适时停止使用并咨询专业人士。 |
-| `created_at` | 记录创建时间。 |
-
-妆容边界：
-
-- 只做场景表达、色彩、浓淡、步骤和避雷。
-- 不做肤质诊断、过敏判断、治疗建议或医疗结论。
+妆容边界：只做场景表达、色彩、浓淡、步骤和避雷；不做肤质诊断、过敏判断、治疗建议或医疗结论。
 
 ### `advice_draft_wardrobe_refs`
 
@@ -447,15 +433,17 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 - 创建 `advice_requests`。
 - 创建 `advice_drafts(status=draft)`。
 - 创建 `advice_draft_versions(version_no=1)`。
-- 创建穿搭、发型、妆容和衣物引用记录。
+- 写入 `outfit_advice`、`hair_advice`、`makeup_advice` 三段受控 JSON。
+- 创建衣物引用记录。
 - 返回草稿 public id、版本号和可渲染卡片数据。
 
 `update_advice_draft`
 
 - 读取当前用户自己的 `status=draft` 草稿。
 - 基于当前版本创建 `version_no + 1`。
-- 修改指定分段，未修改分段从上一版复制。
+- 修改指定 JSON 分段，未修改 JSON 分段从上一版复制。
 - 更新 `advice_drafts.current_version_no`。
+- 同步更新 `advice_drafts` 当前三段 JSON。
 - 返回新版草稿卡片数据。
 
 `discard_advice_draft`
@@ -533,7 +521,7 @@ create_advice_draft
 
 update_advice_draft
   -> version_no = current + 1
-  -> 未改分段复制上一版
+  -> 未改 JSON 分段复制上一版
   -> advice_drafts.current_version_no 更新
 
 confirm_advice_draft
@@ -607,7 +595,7 @@ Agent 决策步骤默认只写后端审计表，不直接展示给普通用户�
 - Agent run 测试：每条用户消息创建一条助手占位 `chat_msgs`，完成后更新状态、文本和业务关联。
 - Agent step 测试：模型决策、tool 调用、tool 结果和最终回复按顺序写入 `agent_run_steps`。
 - Agent step 失败测试：tool 失败时记录 `failed` 步骤和错误摘要，不丢失已完成步骤。
-- tool 单元测试：创建草稿、精修草稿、复制未修改分段、废弃草稿。
+- tool 单元测试：创建草稿、精修草稿、复制未修改 JSON 分段、废弃草稿。
 - repository 测试：版本号唯一、当前版本查询、用户隔离。
 - 确认接口测试：从最新版生成正式 `advices`，重复确认幂等。
 - 权限测试：不能读取或修改其他用户草稿。
