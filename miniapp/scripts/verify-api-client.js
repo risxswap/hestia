@@ -208,6 +208,11 @@ async function main() {
     await api.getAdviceDraftVersions("drf_test");
     await api.confirmAdviceDraft("drf_test");
     await api.discardAdviceDraft("drf_test");
+    const directStream = api.streamAgentChat({
+      text: "看这张照片",
+      assetRefs: [{ asset_public_id: "ast_photo", asset_type: "chat_image", note: "聊天上传图" }]
+    });
+    await directStream.promise;
   });
 
   const agentPaths = agentCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
@@ -216,6 +221,8 @@ async function main() {
   assert(agentCalls[0].enableChunked === true, "agent chat should enable chunked streaming");
   assert(agentCalls[0].header.Accept === "text/event-stream", "agent chat should request SSE");
   assert(agentCalls[0].header.Authorization === "Bearer agent_token", "agent chat should send bearer token");
+  assert(agentCalls[5].data.text === "看这张照片", "streamAgentChat object input should send text");
+  assert(agentCalls[5].data.asset_refs[0].asset_public_id === "ast_photo", "streamAgentChat should send asset_refs");
   assert(!agentPaths.some((apiPath) => apiPath.includes("/api/user/agent/stream")), `old agent stream path should not be used: ${agentPaths.join(",")}`);
   assert(agentPaths[1] === "/api/user/advice-drafts/current", `current draft path mismatch: ${agentPaths[1]}`);
   assert(agentPaths[2] === "/api/user/advice-drafts/drf_test/versions", `draft versions path mismatch: ${agentPaths[2]}`);

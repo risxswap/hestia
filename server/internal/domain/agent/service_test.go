@@ -100,6 +100,46 @@ func TestServiceChatUsesAdviceRunnerToolCalls(t *testing.T) {
 	}
 }
 
+func TestServiceChatPassesAssetRefsToUserMessageAndRunner(t *testing.T) {
+	repo := &spyAgentRepo{}
+	runner := &spyAdviceRunner{
+		output: AdviceRunOutput{
+			AssistantText: "已根据照片生成建议。",
+			DecisionLabel: "create_draft",
+			ToolCalls: []AdviceToolCall{{
+				Name:         AdviceToolCreateDraft,
+				InputSummary: "根据照片创建建议",
+				CreateDraftInput: &CreateDraftInput{
+					Sections: []DraftSectionInput{{
+						SectionType:          SectionTypeOutfit,
+						ContentSchemaVersion: "v1",
+						ContentJSON:          defaultAdviceContent("照片穿搭", "根据照片调整搭配"),
+					}},
+				},
+			}},
+		},
+	}
+	service := NewServiceWithRunner(repo, nil, runner)
+
+	_, err := service.Chat(context.Background(), 12, "看看这张照片适合怎么搭", ChatAssetRef{
+		AssetPublicID: "ast_photo",
+		AssetType:     "chat_image",
+		Note:          "用户聊天上传图",
+	})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if len(repo.createdMessages) == 0 || len(repo.createdMessages[0].AssetRefs) != 1 {
+		t.Fatalf("expected user message asset refs, got %#v", repo.createdMessages)
+	}
+	if repo.createdMessages[0].AssetRefs[0].AssetPublicID != "ast_photo" {
+		t.Fatalf("unexpected message asset refs: %#v", repo.createdMessages[0].AssetRefs)
+	}
+	if len(runner.input.AssetRefs) != 1 || runner.input.AssetRefs[0].AssetPublicID != "ast_photo" {
+		t.Fatalf("expected runner asset refs, got %#v", runner.input.AssetRefs)
+	}
+}
+
 func TestServiceChatRecordsRunnerMetadataAndToolStepDetails(t *testing.T) {
 	repo := &spyAgentRepo{}
 	runner := &spyAdviceRunner{
@@ -291,6 +331,7 @@ func (r *spyAgentRepo) CreateChatMessage(_ context.Context, input CreateChatMess
 		Role:            input.Role,
 		MsgType:         input.MsgType,
 		ContentText:     input.ContentText,
+		AssetRefs:       input.AssetRefs,
 		RelatedType:     input.RelatedType,
 		RelatedID:       input.RelatedID,
 		RelatedPublicID: input.RelatedPublicID,

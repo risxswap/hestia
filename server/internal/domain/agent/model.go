@@ -33,7 +33,8 @@ const (
 )
 
 type ChatRequest struct {
-	Text string `json:"text"`
+	Text      string         `json:"text"`
+	AssetRefs []ChatAssetRef `json:"asset_refs,omitempty"`
 }
 
 type StreamDone struct {
@@ -63,6 +64,7 @@ type AdviceRunInput struct {
 	UserID         int64
 	Text           string
 	SourceMsgID    int64
+	AssetRefs      []ChatAssetRef
 	RecentMessages []ChatMessage
 	CurrentDraft   *Draft
 }
@@ -114,10 +116,17 @@ type ChatMessage struct {
 	Role            string
 	MsgType         string
 	ContentText     string
+	AssetRefs       []ChatAssetRef
 	RelatedType     string
 	RelatedID       int64
 	RelatedPublicID string
 	Status          string
+}
+
+type ChatAssetRef struct {
+	AssetPublicID string `json:"asset_public_id"`
+	AssetType     string `json:"asset_type,omitempty"`
+	Note          string `json:"note,omitempty"`
 }
 
 type CreateChatMessageInput struct {
@@ -126,6 +135,7 @@ type CreateChatMessageInput struct {
 	Role            string
 	MsgType         string
 	ContentText     string
+	AssetRefs       []ChatAssetRef
 	RelatedType     string
 	RelatedID       int64
 	RelatedPublicID string

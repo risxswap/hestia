@@ -97,6 +97,12 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	if !containsStatement(exec.queries, "DROP COLUMN `provider_id`") {
 		t.Fatalf("expected llm provider_id to provider_code migration statement")
 	}
+	if !containsStatement(exec.queries, "ALTER TABLE `chat_msgs` ADD COLUMN `asset_refs`") {
+		t.Fatalf("expected agent chat asset refs schema migration statement")
+	}
+	if !containsStatement(exec.queries, "ALTER TABLE `agent_run_steps` ADD COLUMN `duration_ms`") {
+		t.Fatalf("expected agent run step duration schema migration statement")
+	}
 	if !containsStatement(exec.queries, "INSERT INTO `llm_providers`") || !containsStatement(exec.queries, "'qwen'") {
 		t.Fatalf("expected llm provider example config migration statement")
 	}

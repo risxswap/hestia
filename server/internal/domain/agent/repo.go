@@ -31,12 +31,16 @@ func (r *MySQLRepository) CreateChatMessage(ctx context.Context, input CreateCha
 		return ChatMessage{}, ErrRepositoryUnsupported
 	}
 	publicID := id.NewPublicID("msg")
+	assetRefsJSON, err := marshalChatAssetRefs(input.AssetRefs)
+	if err != nil {
+		return ChatMessage{}, err
+	}
 	result, err := r.ext.ExecContext(ctx, `
 INSERT INTO chat_msgs
-  (public_id, user_id, source_msg_id, role, msg_type, content_text, related_type, related_id, related_public_id, status)
+  (public_id, user_id, source_msg_id, role, msg_type, content_text, asset_refs, related_type, related_id, related_public_id, status)
 VALUES
-  (?, ?, NULLIF(?, 0), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?)
-`, publicID, input.UserID, input.SourceMsgID, input.Role, input.MsgType, input.ContentText, input.RelatedType, input.RelatedID, input.RelatedPublicID, input.Status)
+  (?, ?, NULLIF(?, 0), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?)
+`, publicID, input.UserID, input.SourceMsgID, input.Role, input.MsgType, input.ContentText, assetRefsJSON, input.RelatedType, input.RelatedID, input.RelatedPublicID, input.Status)
 	if err != nil {
 		return ChatMessage{}, err
 	}
@@ -52,6 +56,7 @@ VALUES
 		Role:            input.Role,
 		MsgType:         input.MsgType,
 		ContentText:     input.ContentText,
+		AssetRefs:       normalizeChatAssetRefs(input.AssetRefs),
 		RelatedType:     input.RelatedType,
 		RelatedID:       input.RelatedID,
 		RelatedPublicID: input.RelatedPublicID,
@@ -97,7 +102,7 @@ func (r *MySQLRepository) ListRecentChatMessages(ctx context.Context, userID int
 	}
 	var rows []chatMessageRow
 	if err := sqlx.SelectContext(ctx, r.ext, &rows, `
-SELECT id, public_id, user_id, source_msg_id, role, msg_type, content_text, related_type, related_id, related_public_id, status
+SELECT id, public_id, user_id, source_msg_id, role, msg_type, content_text, asset_refs, related_type, related_id, related_public_id, status
 FROM chat_msgs
 WHERE user_id = ?
   AND status = ?
@@ -137,6 +142,29 @@ VALUES
   (?, ?, NULLIF(?, 0), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?, NULLIF(?, 0), NULLIF(?, ''))
 `, id.NewPublicID("ars"), input.UserID, input.SourceMsgID, input.AssistantMsgID, input.StepNo, input.StepType, input.Status, input.UsageKey, input.ProviderCode, input.ModelCode, input.PromptVersion, input.MaxIterations, input.ToolName, input.ToolCallID, input.DecisionLabel, input.InputSummary, input.OutputSummary, input.RelatedType, input.RelatedID, input.RelatedPublicID, startedAt, finishedAt, duration, input.ErrorMessage)
 	return err
+}
+
+func marshalChatAssetRefs(refs []ChatAssetRef) (string, error) {
+	normalized := normalizeChatAssetRefs(refs)
+	if len(normalized) == 0 {
+		return "", nil
+	}
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func unmarshalChatAssetRefs(raw string) []ChatAssetRef {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var refs []ChatAssetRef
+	if err := json.Unmarshal([]byte(raw), &refs); err != nil {
+		return nil
+	}
+	return normalizeChatAssetRefs(refs)
 }
 
 func (r *MySQLRepository) CreateDraft(ctx context.Context, input CreateDraftInput) (Draft, error) {
@@ -742,6 +770,7 @@ type chatMessageRow struct {
 	Role            string         `db:"role"`
 	MsgType         string         `db:"msg_type"`
 	ContentText     sql.NullString `db:"content_text"`
+	AssetRefs       sql.NullString `db:"asset_refs"`
 	RelatedType     sql.NullString `db:"related_type"`
 	RelatedID       sql.NullInt64  `db:"related_id"`
 	RelatedPublicID sql.NullString `db:"related_public_id"`
@@ -757,6 +786,7 @@ func (r chatMessageRow) message() ChatMessage {
 		Role:            r.Role,
 		MsgType:         r.MsgType,
 		ContentText:     r.ContentText.String,
+		AssetRefs:       unmarshalChatAssetRefs(r.AssetRefs.String),
 		RelatedType:     r.RelatedType.String,
 		RelatedID:       r.RelatedID.Int64,
 		RelatedPublicID: r.RelatedPublicID.String,

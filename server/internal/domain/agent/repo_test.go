@@ -110,6 +110,7 @@ func TestRepositoryCreateChatMessageWritesSourceMessage(t *testing.T) {
 	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
 
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO chat_msgs")).
+		WithArgs(sqlmock.AnyArg(), int64(12), int64(100), ChatRoleAssistant, ChatMsgTypeText, "处理中", sqlmock.AnyArg(), "", int64(0), "", ChatStatusGenerating).
 		WillReturnResult(sqlmock.NewResult(101, 1))
 
 	message, err := repo.CreateChatMessage(context.Background(), CreateChatMessageInput{
@@ -118,13 +119,21 @@ func TestRepositoryCreateChatMessageWritesSourceMessage(t *testing.T) {
 		Role:        ChatRoleAssistant,
 		MsgType:     ChatMsgTypeText,
 		ContentText: "处理中",
-		Status:      ChatStatusGenerating,
+		AssetRefs: []ChatAssetRef{{
+			AssetPublicID: "ast_photo",
+			AssetType:     "chat_image",
+			Note:          "用户上传图",
+		}},
+		Status: ChatStatusGenerating,
 	})
 	if err != nil {
 		t.Fatalf("create chat message: %v", err)
 	}
 	if message.ID != 101 || message.SourceMsgID != 100 || message.Role != ChatRoleAssistant {
 		t.Fatalf("unexpected message: %#v", message)
+	}
+	if len(message.AssetRefs) != 1 || message.AssetRefs[0].AssetPublicID != "ast_photo" {
+		t.Fatalf("expected asset refs on created message, got %#v", message.AssetRefs)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
@@ -139,11 +148,11 @@ func TestRepositoryListRecentChatMessagesReturnsChronologicalSentMessages(t *tes
 	defer db.Close()
 	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
 
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, public_id, user_id, source_msg_id, role, msg_type, content_text, related_type, related_id, related_public_id, status FROM chat_msgs")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, public_id, user_id, source_msg_id, role, msg_type, content_text, asset_refs, related_type, related_id, related_public_id, status FROM chat_msgs")).
 		WithArgs(int64(12), ChatStatusSent, 12).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "public_id", "user_id", "source_msg_id", "role", "msg_type", "content_text", "related_type", "related_id", "related_public_id", "status"}).
-			AddRow(3, "msg_assistant", 12, 2, ChatRoleAssistant, ChatMsgTypeDraftCard, "已更新草稿", "advice_draft", 10, "drf_test", ChatStatusSent).
-			AddRow(2, "msg_user", 12, nil, ChatRoleUser, ChatMsgTypeText, "鞋子换舒服点", nil, nil, nil, ChatStatusSent))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "public_id", "user_id", "source_msg_id", "role", "msg_type", "content_text", "asset_refs", "related_type", "related_id", "related_public_id", "status"}).
+			AddRow(3, "msg_assistant", 12, 2, ChatRoleAssistant, ChatMsgTypeDraftCard, "已更新草稿", nil, "advice_draft", 10, "drf_test", ChatStatusSent).
+			AddRow(2, "msg_user", 12, nil, ChatRoleUser, ChatMsgTypeText, "鞋子换舒服点", `[{"asset_public_id":"ast_photo","asset_type":"chat_image","note":"用户上传图"}]`, nil, nil, nil, ChatStatusSent))
 
 	messages, err := repo.ListRecentChatMessages(context.Background(), 12, 12)
 	if err != nil {
@@ -154,6 +163,9 @@ func TestRepositoryListRecentChatMessagesReturnsChronologicalSentMessages(t *tes
 	}
 	if messages[1].RelatedPublicID != "drf_test" {
 		t.Fatalf("expected related draft public id, got %#v", messages[1])
+	}
+	if len(messages[0].AssetRefs) != 1 || messages[0].AssetRefs[0].AssetPublicID != "ast_photo" {
+		t.Fatalf("expected asset refs on recent user message, got %#v", messages[0].AssetRefs)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

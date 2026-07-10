@@ -107,11 +107,12 @@ func (s *Service) StreamStatus(ctx context.Context, userID int64) StreamStatus {
 	return StreamStatus{Text: text + "；核心衣服：" + strings.Join(names, "、")}
 }
 
-func (s *Service) Chat(ctx context.Context, userID int64, text string) (ChatResult, error) {
+func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs ...ChatAssetRef) (ChatResult, error) {
 	message := StreamMessage{Text: strings.TrimSpace(text)}
 	if message.Text == "" {
 		message.Text = "我会先根据你的场景生成一个可调整的形象建议草稿。"
 	}
+	assetRefs = normalizeChatAssetRefs(assetRefs)
 	if s == nil || s.repo == nil {
 		return ChatResult{Message: message}, nil
 	}
@@ -120,6 +121,7 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string) (ChatResu
 		Role:        ChatRoleUser,
 		MsgType:     ChatMsgTypeText,
 		ContentText: message.Text,
+		AssetRefs:   assetRefs,
 		Status:      ChatStatusSent,
 	})
 	if err != nil {
@@ -179,6 +181,7 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string) (ChatResu
 		UserID:         userID,
 		Text:           message.Text,
 		SourceMsgID:    userMessage.ID,
+		AssetRefs:      assetRefs,
 		RecentMessages: recentMessages,
 		CurrentDraft:   currentDraftPtr,
 	})
@@ -227,6 +230,7 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string) (ChatResu
 			UserID:         userID,
 			Text:           message.Text,
 			SourceMsgID:    userMessage.ID,
+			AssetRefs:      assetRefs,
 			RecentMessages: recentMessages,
 			CurrentDraft:   nil,
 		})
@@ -507,6 +511,27 @@ func draftCard(draft Draft) DraftCard {
 		SceneLabel:    draft.SceneLabel,
 		Sections:      draft.Sections,
 	}
+}
+
+func normalizeChatAssetRefs(refs []ChatAssetRef) []ChatAssetRef {
+	seen := map[string]bool{}
+	normalized := make([]ChatAssetRef, 0, len(refs))
+	for _, ref := range refs {
+		publicID := strings.TrimSpace(ref.AssetPublicID)
+		if publicID == "" || seen[publicID] {
+			continue
+		}
+		seen[publicID] = true
+		normalized = append(normalized, ChatAssetRef{
+			AssetPublicID: publicID,
+			AssetType:     strings.TrimSpace(ref.AssetType),
+			Note:          strings.TrimSpace(ref.Note),
+		})
+		if len(normalized) >= 6 {
+			break
+		}
+	}
+	return normalized
 }
 
 func defaultCreateDraftInput(userID int64, text string) CreateDraftInput {

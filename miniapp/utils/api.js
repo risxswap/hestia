@@ -555,7 +555,8 @@ async function sendAgentMessage(text) {
   return stream.promise;
 }
 
-function streamAgentChat(text, callbacks) {
+function streamAgentChat(input, callbacks) {
+  const payload = normalizeAgentChatPayload(input);
   const events = [];
   const handlers = callbacks || {};
   let requestTask = null;
@@ -577,7 +578,7 @@ function streamAgentChat(text, callbacks) {
     requestTask = wx.request({
       url: `${getApiBaseUrl()}${normalizePath("/api/user/agent/chat")}`,
       method: "POST",
-      data: { text },
+      data: payload,
       enableChunked: true,
       header: agentStreamHeader(),
       success(response) {
@@ -621,6 +622,27 @@ function streamAgentChat(text, callbacks) {
       }
     }
   };
+}
+
+function normalizeAgentChatPayload(input) {
+  if (typeof input === "string") {
+    return { text: input };
+  }
+  const source = input || {};
+  const refs = source.asset_refs || source.assetRefs || [];
+  const payload = {
+    text: source.text || ""
+  };
+  if (Array.isArray(refs) && refs.length) {
+    payload.asset_refs = refs
+      .map((ref) => ({
+        asset_public_id: ref.asset_public_id || ref.assetPublicID || "",
+        asset_type: ref.asset_type || ref.assetType || "",
+        note: ref.note || ""
+      }))
+      .filter((ref) => ref.asset_public_id);
+  }
+  return payload;
 }
 
 function agentStreamHeader() {

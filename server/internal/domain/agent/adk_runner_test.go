@@ -8,6 +8,11 @@ import (
 func TestADKRunnerQueryUsesLightDraftSummary(t *testing.T) {
 	query := adkRunnerQuery(AdviceRunInput{
 		Text: "鞋子换舒服点",
+		AssetRefs: []ChatAssetRef{{
+			AssetPublicID: "ast_photo",
+			AssetType:     "chat_image",
+			Note:          "用户穿搭照片",
+		}},
 		RecentMessages: []ChatMessage{{
 			Role:        ChatRoleUser,
 			ContentText: "明天见客户",
@@ -30,6 +35,9 @@ func TestADKRunnerQueryUsesLightDraftSummary(t *testing.T) {
 	})
 	if !containsAll(query, []string{"最近聊天", "明天见客户", "drf_test", "清爽通勤", "鞋子换舒服点"}) {
 		t.Fatalf("expected query to include light context, got %s", query)
+	}
+	if !containsAll(query, []string{"本轮图片", "ast_photo", "用户穿搭照片"}) {
+		t.Fatalf("expected query to include asset refs, got %s", query)
 	}
 	if containsAll(query, []string{"这段完整理由不应默认进入 prompt"}) {
 		t.Fatalf("expected query to omit full draft body, got %s", query)

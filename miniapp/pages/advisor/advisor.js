@@ -90,11 +90,48 @@ Page({
     });
     this.appendUserMessage(value);
   },
-  handleFileSelect(event) {
+  async handleFileSelect(event) {
     const files = event.detail.files || [];
     if (this.data.thinking) return;
     if (!files.length) return;
-    this.appendUserMessage("我想用这张照片提问");
+    const file = files[0] || {};
+    const previewURL = file.url || file.path || file.tempFilePath || "";
+    const uploadMessageID = this.appendUserMessage("正在上传照片...", {
+      images: previewURL ? [{ url: previewURL }] : [],
+      skipSend: true
+    });
+    this.setData({ thinking: true });
+    try {
+      const uploaded = await api.uploadFileToQiniu(file, { assetType: "chat_image" });
+      const assetRef = {
+        asset_public_id: uploaded.asset_public_id || uploaded.file_public_id || "",
+        asset_type: "chat_image",
+        note: "聊天上传图"
+      };
+      this.updateMessage(uploadMessageID, (message) => Object.assign({}, message, {
+        content: "我想用这张照片提问",
+        assetRefs: [assetRef]
+      }));
+      const assistantMessage = {
+        id: nextMessageID("assistant"),
+        role: "assistant",
+        status: "pending",
+        content: "正在理解你的照片和需求..."
+      };
+      this.activeAssistantID = assistantMessage.id;
+      this.setData({
+        messages: this.data.messages.concat(assistantMessage)
+      }, () => {
+        this.scrollToBottom();
+      });
+      this.sendToAgent("我想用这张照片提问", assistantMessage.id, [assetRef]);
+    } catch (error) {
+      this.updateMessage(uploadMessageID, (message) => Object.assign({}, message, {
+        status: "error",
+        content: error && error.message ? error.message : "照片上传失败"
+      }));
+      this.setData({ thinking: false });
+    }
   },
   handleStop() {
     this.abortActiveRequest();
@@ -147,13 +184,24 @@ Page({
       this.setData({ scrollAnchor: "chat-bottom" });
     });
   },
-  appendUserMessage(content) {
+  appendUserMessage(content, options) {
     if (!content) return;
+    const config = options || {};
     const userMessage = {
       id: nextMessageID("user"),
       role: "user",
-      content
+      content,
+      images: config.images || [],
+      assetRefs: config.assetRefs || []
     };
+    if (config.skipSend) {
+      this.setData({
+        messages: this.data.messages.concat(userMessage)
+      }, () => {
+        this.scrollToBottom();
+      });
+      return userMessage.id;
+    }
     const assistantMessage = {
       id: nextMessageID("assistant"),
       role: "assistant",
@@ -167,7 +215,8 @@ Page({
     }, () => {
       this.scrollToBottom();
     });
-    this.sendToAgent(content, assistantMessage.id);
+    this.sendToAgent(content, assistantMessage.id, config.assetRefs || []);
+    return userMessage.id;
   },
   appendAssistantMessage(content, status, draft) {
     const message = {
@@ -183,10 +232,13 @@ Page({
       this.scrollToBottom();
     });
   },
-  async sendToAgent(content, assistantID) {
+  async sendToAgent(content, assistantID, assetRefs) {
     this.abortActiveRequest();
     let receivedMessage = false;
-    const stream = api.streamAgentChat(content, {
+    const stream = api.streamAgentChat({
+      text: content,
+      assetRefs: assetRefs || []
+    }, {
       onStatus: (data) => {
         const text = data && data.text ? data.text : "正在准备建议...";
         if (!receivedMessage) {

@@ -13,6 +13,16 @@
       >
         <view class="chat-message__meta">{{item.role === 'user' ? '你' : 'Hestia'}}</view>
         <view class="chat-message__bubble">
+          <view wx:if="{{item.images && item.images.length}}" class="chat-message__images">
+            <image
+              wx:for="{{item.images}}"
+              wx:for-item="image"
+              wx:key="url"
+              class="chat-message__image"
+              src="{{image.url}}"
+              mode="aspectFill"
+            />
+          </view>
           <text class="chat-message__text">{{item.content}}</text>
           <view wx:if="{{item.status === 'pending'}}" class="chat-message__pending">
             <view class="pending-dot"></view>

@@ -107,6 +107,36 @@ func TestChatRouteReturnsDraftEventWhenDraftExists(t *testing.T) {
 	}
 }
 
+func TestChatRouteAcceptsAssetRefs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
+		c.Next()
+	})
+	repo := newRouteAgentRepo()
+	service := agent.NewServiceWithDependencies(repo, nil)
+	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
+	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{
+		"text":"看看这张照片怎么搭",
+		"asset_refs":[{"asset_public_id":"ast_photo","asset_type":"chat_image","note":"聊天上传图"}]
+	}`))
+	request.Header.Set("Accept", "text/event-stream")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(repo.createdMessages) == 0 || len(repo.createdMessages[0].AssetRefs) != 1 {
+		t.Fatalf("expected request asset refs to be persisted, got %#v", repo.createdMessages)
+	}
+	if repo.createdMessages[0].AssetRefs[0].AssetPublicID != "ast_photo" {
+		t.Fatalf("unexpected asset refs: %#v", repo.createdMessages[0].AssetRefs)
+	}
+}
+
 func TestConfirmDraftRouteReturnsAdvicePublicID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newAgentDraftRouter(agent.NewServiceWithRepository(newRouteAgentRepo()))
@@ -185,8 +215,9 @@ func newAgentDraftRouter(service *agent.Service) *gin.Engine {
 }
 
 type routeAgentRepo struct {
-	discarded bool
-	nextID    int64
+	discarded       bool
+	nextID          int64
+	createdMessages []agent.ChatMessage
 }
 
 func newRouteAgentRepo() *routeAgentRepo {
@@ -202,12 +233,14 @@ func (r *routeAgentRepo) CreateChatMessage(_ context.Context, input agent.Create
 		Role:            input.Role,
 		MsgType:         input.MsgType,
 		ContentText:     input.ContentText,
+		AssetRefs:       input.AssetRefs,
 		RelatedType:     input.RelatedType,
 		RelatedID:       input.RelatedID,
 		RelatedPublicID: input.RelatedPublicID,
 		Status:          input.Status,
 	}
 	r.nextID++
+	r.createdMessages = append(r.createdMessages, item)
 	return item, nil
 }
 

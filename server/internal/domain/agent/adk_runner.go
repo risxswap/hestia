@@ -127,7 +127,31 @@ func adkRunnerQuery(input AdviceRunInput) string {
 	}
 	builder.WriteString("\n用户输入：")
 	builder.WriteString(strings.TrimSpace(input.Text))
+	if len(input.AssetRefs) > 0 {
+		builder.WriteString("\n本轮图片：")
+		builder.WriteString(assetRefsPromptSummary(input.AssetRefs))
+	}
 	return builder.String()
+}
+
+func assetRefsPromptSummary(refs []ChatAssetRef) string {
+	normalized := normalizeChatAssetRefs(refs)
+	if len(normalized) == 0 {
+		return "无"
+	}
+	payload := make([]map[string]string, 0, len(normalized))
+	for _, ref := range normalized {
+		payload = append(payload, map[string]string{
+			"asset_public_id": ref.AssetPublicID,
+			"asset_type":      ref.AssetType,
+			"note":            ref.Note,
+		})
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "无"
+	}
+	return string(raw)
 }
 
 func draftPromptSummary(draft Draft) string {

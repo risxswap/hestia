@@ -85,6 +85,21 @@
   word-break: break-word;
 }
 
+.chat-message__images {
+  display: flex;
+  max-width: 100%;
+  margin-bottom: 14rpx;
+  gap: 12rpx;
+  flex-wrap: wrap;
+}
+
+.chat-message__image {
+  width: 180rpx;
+  height: 180rpx;
+  border-radius: 8rpx;
+  background: rgba(255, 255, 255, 0.18);
+}
+
 .chat-message__pending {
   display: flex;
   height: 18rpx;

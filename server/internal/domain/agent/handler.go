@@ -35,7 +35,7 @@ func (h *Handler) Chat(c *gin.Context) {
 	c.Status(http.StatusOK)
 	_ = response.WriteSSE(c.Writer, "status", h.service.StreamStatus(c.Request.Context(), user.UserID))
 	c.Writer.Flush()
-	result, err := h.service.Chat(c.Request.Context(), user.UserID, request.Text)
+	result, err := h.service.Chat(c.Request.Context(), user.UserID, request.Text, request.AssetRefs...)
 	if err != nil {
 		_ = response.WriteSSE(c.Writer, "error", gin.H{"message": "智能体请求失败"})
 		c.Writer.Flush()
