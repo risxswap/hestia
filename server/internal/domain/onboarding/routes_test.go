@@ -805,6 +805,42 @@ func (r *memoryProfileRepo) UpdateExplicitPreferences(_ context.Context, userID 
 	return r.Summary(context.Background(), userID)
 }
 
+func (r *memoryProfileRepo) CreateProfilePhoto(_ context.Context, _ int64, input profile.CreateProfilePhotoInput) (profile.ProfilePhoto, error) {
+	return profile.ProfilePhoto{
+		PublicID:      "pph_test",
+		AssetPublicID: input.AssetPublicID,
+		PhotoType:     input.PhotoType,
+		Angle:         input.Angle,
+		Note:          input.Note,
+		SortOrder:     input.SortOrder,
+		Status:        "active",
+	}, nil
+}
+
+func (r *memoryProfileRepo) UpdateProfilePhoto(_ context.Context, _ int64, publicID string, input profile.UpdateProfilePhotoInput) (profile.ProfilePhoto, error) {
+	item := profile.ProfilePhoto{PublicID: publicID, Status: "active"}
+	if input.PhotoType.Present {
+		item.PhotoType = input.PhotoType.Value
+	}
+	if input.Angle.Present {
+		item.Angle = input.Angle.Value
+	}
+	if input.Note.Present {
+		item.Note = input.Note.Value
+	}
+	if input.SortOrder.Present && input.SortOrder.Value != nil {
+		item.SortOrder = *input.SortOrder.Value
+	}
+	if input.Status.Present {
+		item.Status = input.Status.Value
+	}
+	return item, nil
+}
+
+func (r *memoryProfileRepo) DeleteProfilePhoto(context.Context, int64, string) error {
+	return nil
+}
+
 func (r *memoryProfileRepo) ReplaceFacts(context.Context, int64, int64, []profile.Fact) error {
 	return nil
 }

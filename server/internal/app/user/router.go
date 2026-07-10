@@ -35,6 +35,7 @@ func NewRouter(deps *baseapp.Deps) *gin.Engine {
 	}
 	registerFileRoutes(protected.Group("/files"), deps)
 	agent.RegisterUserRoutes(protected.Group("/agent"), deps)
+	agent.RegisterAdviceDraftRoutes(protected.Group("/advice-drafts"), deps)
 	onboarding.RegisterUserRoutes(protected.Group("/onboarding"), deps)
 	profile.RegisterUserRoutes(protected.Group("/profile"), deps)
 	job.RegisterUserRoutes(protected.Group("/jobs"), deps)

@@ -18,8 +18,12 @@ import (
 func TestStreamReturnsSSEEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
+		c.Next()
+	})
 	agent.RegisterUserRoutes(router.Group("/api/user/agent"), &baseapp.Deps{})
-	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/stream", strings.NewReader(`{"text":"今天怎么穿"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{"text":"今天怎么穿"}`))
 	request.Header.Set("Accept", "text/event-stream")
 	recorder := httptest.NewRecorder()
 
@@ -56,7 +60,7 @@ func TestStreamStatusIncludesActiveClothesAdviceContext(t *testing.T) {
 	}}
 	service := agent.NewServiceWithClothes(clothes.NewService(repo))
 	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
-	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/stream", strings.NewReader(`{"text":"今天怎么穿"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{"text":"今天怎么穿"}`))
 	request.Header.Set("Accept", "text/event-stream")
 	recorder := httptest.NewRecorder()
 
@@ -73,6 +77,179 @@ func TestStreamStatusIncludesActiveClothesAdviceContext(t *testing.T) {
 		if strings.Contains(body, excluded) {
 			t.Fatalf("expected status to exclude %s, got %q", excluded, body)
 		}
+	}
+}
+
+func TestChatRouteReturnsDraftEventWhenDraftExists(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
+		c.Next()
+	})
+	service := agent.NewServiceWithDependencies(newRouteAgentRepo(), nil)
+	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
+	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{"text":"鞋子换舒服点"}`))
+	request.Header.Set("Accept", "text/event-stream")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "event: draft\n") {
+		t.Fatalf("expected draft event, got %q", body)
+	}
+	if !strings.Contains(body, `"draft_public_id":"drf_test"`) {
+		t.Fatalf("expected draft payload, got %q", body)
+	}
+}
+
+func TestConfirmDraftRouteReturnsAdvicePublicID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newAgentDraftRouter(agent.NewServiceWithRepository(newRouteAgentRepo()))
+	request := httptest.NewRequest(http.MethodPost, "/api/user/advice-drafts/drf_test/confirm", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"advice_public_id":"adv_test"`) {
+		t.Fatalf("expected advice public id response, got %s", recorder.Body.String())
+	}
+}
+
+func TestDiscardDraftRouteMarksDraftDiscarded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newRouteAgentRepo()
+	router := newAgentDraftRouter(agent.NewServiceWithRepository(repo))
+	request := httptest.NewRequest(http.MethodPost, "/api/user/advice-drafts/drf_test/discard", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !repo.discarded {
+		t.Fatalf("expected draft to be discarded")
+	}
+}
+
+func TestCurrentDraftRouteReturnsDraftCard(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newAgentDraftRouter(agent.NewServiceWithRepository(newRouteAgentRepo()))
+	request := httptest.NewRequest(http.MethodGet, "/api/user/advice-drafts/current", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"draft_public_id":"drf_test"`) || !strings.Contains(body, `"revision_no":2`) {
+		t.Fatalf("expected current draft card, got %s", body)
+	}
+}
+
+func newAgentDraftRouter(service *agent.Service) *gin.Engine {
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
+		c.Next()
+	})
+	agent.RegisterAdviceDraftRoutesWithService(router.Group("/api/user/advice-drafts"), service)
+	return router
+}
+
+type routeAgentRepo struct {
+	discarded bool
+	nextID    int64
+}
+
+func newRouteAgentRepo() *routeAgentRepo {
+	return &routeAgentRepo{nextID: 1}
+}
+
+func (r *routeAgentRepo) CreateChatMessage(_ context.Context, input agent.CreateChatMessageInput) (agent.ChatMessage, error) {
+	item := agent.ChatMessage{
+		ID:              r.nextID,
+		PublicID:        "msg_test",
+		UserID:          input.UserID,
+		SourceMsgID:     input.SourceMsgID,
+		Role:            input.Role,
+		MsgType:         input.MsgType,
+		ContentText:     input.ContentText,
+		RelatedType:     input.RelatedType,
+		RelatedID:       input.RelatedID,
+		RelatedPublicID: input.RelatedPublicID,
+		Status:          input.Status,
+	}
+	r.nextID++
+	return item, nil
+}
+
+func (r *routeAgentRepo) UpdateChatMessage(_ context.Context, input agent.UpdateChatMessageInput) (agent.ChatMessage, error) {
+	return agent.ChatMessage{ID: input.ID, PublicID: "msg_assistant", Status: input.Status, MsgType: input.MsgType, ContentText: input.ContentText}, nil
+}
+
+func (r *routeAgentRepo) CreateAgentRunStep(context.Context, agent.AgentRunStepInput) error {
+	return nil
+}
+
+func (r *routeAgentRepo) CreateDraft(_ context.Context, input agent.CreateDraftInput) (agent.Draft, error) {
+	return routeDraft(input.UserID), nil
+}
+
+func (r *routeAgentRepo) GetCurrentDraft(_ context.Context, userID int64) (agent.Draft, error) {
+	return routeDraft(userID), nil
+}
+
+func (r *routeAgentRepo) UpdateDraftSections(_ context.Context, input agent.UpdateDraftInput) (agent.Draft, error) {
+	draft := routeDraft(input.UserID)
+	draft.CurrentRevisionNo++
+	return draft, nil
+}
+
+func (r *routeAgentRepo) ConfirmDraft(_ context.Context, userID int64, publicID string) (agent.Advice, error) {
+	if userID != 12 || publicID != "drf_test" {
+		return agent.Advice{}, agent.ErrDraftNotFound
+	}
+	return agent.Advice{PublicID: "adv_test", UserID: userID, Status: agent.AdviceStatusReady}, nil
+}
+
+func (r *routeAgentRepo) DiscardDraft(_ context.Context, userID int64, publicID string) error {
+	if userID != 12 || publicID != "drf_test" {
+		return agent.ErrDraftNotFound
+	}
+	r.discarded = true
+	return nil
+}
+
+func routeDraft(userID int64) agent.Draft {
+	return agent.Draft{
+		PublicID:          "drf_test",
+		UserID:            userID,
+		Status:            agent.DraftStatusDraft,
+		SceneLabel:        "明天见客户",
+		CurrentRevisionNo: 2,
+		Sections: []agent.DraftSection{{
+			PublicID:             "ads_outfit",
+			SectionType:          agent.SectionTypeOutfit,
+			ContentSchemaVersion: "v1",
+			ContentJSON: map[string]any{
+				"title":            "清爽通勤",
+				"summary":          "米白衬衫配直筒裤",
+				"why_text":         "利落但不紧绷",
+				"avoid_text":       "避免太厚重",
+				"alternative_text": "可换针织衫",
+			},
+		}},
 	}
 }
 
