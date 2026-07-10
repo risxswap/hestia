@@ -145,7 +145,6 @@ chat_msgs(user)
   -> advice_requests(source_msg_id)
   -> advice_drafts(advice_request_id)
   -> advice_draft_versions(draft_id)
-       -> advice_draft_wardrobe_refs
 ```
 
 ### `advice_requests`
@@ -338,7 +337,7 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 - `title`：穿搭标题。
 - `summary`：整体摘要。
-- `items`：单品建议数组，每项包含 `role`、`text`、`reason_text`。
+- `items`：单品建议数组，每项包含 `role`、`text`、`source_type`、`source_public_id`、`reason_text`。
 - `color_strategy`：色彩策略。
 - `silhouette_strategy`：廓形策略。
 - `material_strategy`：材质策略。
@@ -377,27 +376,25 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 
 妆容边界：只做场景表达、色彩、浓淡、步骤和避雷；不做肤质诊断、过敏判断、治疗建议或医疗结论。
 
-### `advice_draft_wardrobe_refs`
+### 草稿衣物引用
 
-草稿引用衣物表。
+草稿阶段不建立独立衣物引用表。衣物引用只是临时方案内容，先放在 `outfit_advice.items` JSON 中；只有用户确认草稿成为正式建议时，后端才校验并写入正式建议的结构化引用。
 
-字段：
+`outfit_advice.items` 每项建议字段：
 
-| 字段 | 备注 |
-| --- | --- |
-| `id` | 内部自增 ID。 |
-| `draft_version_id` | 所属草稿版本 ID。 |
-| `clothes_item_id` | 引用的衣物内部 ID。 |
-| `clothes_item_public_id` | 引用的衣物对外 ID，用于前端跳转或展示。 |
-| `role` | 衣物在方案中的角色：`top` / `bottom` / `outer` / `shoe` / `bag` / `accessory`。 |
-| `reason_text` | 选择该衣物的理由。 |
-| `created_at` | 记录创建时间。 |
+- `role`：衣物角色，例如 `top`、`bottom`、`outer`、`shoe`、`bag`、`accessory`。
+- `text`：前端展示文本，例如“米白衬衫”或“低跟乐福鞋”。
+- `source_type`：来源类型，`wardrobe_item` 表示用户已有衣物，`gap_item` 表示缺口单品或泛化建议。
+- `source_public_id`：当 `source_type=wardrobe_item` 时填写衣物 public id；缺口单品为空。
+- `reason_text`：选择该衣物或单品方向的理由。
 
-用途：
+约束：
 
-- 查询哪些衣服被建议过。
-- 支持用户后续反馈“这件不要再推荐”。
-- 为正式建议生成 `wardrobe_item_refs` 提供结构化来源。
+- 草稿阶段不把衣物引用计入长期统计。
+- 草稿阶段不因衣物引用失效而阻断用户继续精修；前端可按文本展示。
+- 确认保存时，后端重新校验 `source_type=wardrobe_item` 的 `source_public_id` 是否属于当前用户、未删除、未暂停推荐。
+- 校验失败的衣物引用不写入正式建议引用，确认接口返回可展示提示或让用户回到草稿继续调整。
+- `source_type=gap_item` 不生成正式衣物引用，只进入正式建议的缺口单品建议。
 
 ## Agent Tools
 
@@ -424,7 +421,7 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 `get_current_advice_draft`
 
 - 读取当前用户最近 `status=draft` 草稿和当前版本。
-- 返回场景字段、版本号、三段建议和衣物引用。
+- 返回场景字段、版本号和三段建议 JSON。
 
 ### 写草稿 tools
 
@@ -434,7 +431,6 @@ Agent 可观察决策步骤表。记录 ReAct 循环里的模型回合、tool �
 - 创建 `advice_drafts(status=draft)`。
 - 创建 `advice_draft_versions(version_no=1)`。
 - 写入 `outfit_advice`、`hair_advice`、`makeup_advice` 三段受控 JSON。
-- 创建衣物引用记录。
 - 返回草稿 public id、版本号和可渲染卡片数据。
 
 `update_advice_draft`
@@ -481,6 +477,7 @@ Agent Runner 负责记录运行和步骤，不把记录职责交给 LLM。
 - 前端按钮调用。
 - 校验草稿属于当前用户且 `status=draft`。
 - 读取 `current_version_no` 对应内容。
+- 校验 `outfit_advice.items` 中临时引用的用户已有衣物是否仍有效。
 - 创建 `advices(status=ready)`。
 - 更新 `advice_drafts.status=confirmed`。
 - 更新 `advice_requests.status=confirmed`。
@@ -540,7 +537,7 @@ confirm_advice_draft
 - 场景和日期，例如“明天见客户”。
 - 版本号，例如“第 3 版”。
 - 穿搭、发型、妆容三个折叠区。
-- 关联衣物名称和角色。
+- 穿搭单品按 `outfit_advice.items` 展示；已有衣物可显示引用状态，缺口单品只显示文本。
 - 底部按钮：`保存为今日建议`、`继续调整`、`不要这版`。
 
 交互：
@@ -585,7 +582,7 @@ Agent 决策步骤默认只写后端审计表，不直接展示给普通用户�
 - 当前草稿不存在：`update_advice_draft` 返回错误，Agent 可改为创建草稿或询问是否新建。
 - 草稿已确认或废弃：禁止更新，提示用户新建方案。
 - 确认接口重复调用：如果已确认，直接返回已有 `confirmed_advice_id`，保持幂等。
-- 衣物引用不存在或不属于当前用户：拒绝写入该引用，并让 Agent 改用文本描述或重新查询。
+- 确认保存时衣物引用不存在或不属于当前用户：不写入该正式引用，返回可展示提示或让用户回到草稿继续调整。
 
 ## 测试策略
 
@@ -598,6 +595,7 @@ Agent 决策步骤默认只写后端审计表，不直接展示给普通用户�
 - tool 单元测试：创建草稿、精修草稿、复制未修改 JSON 分段、废弃草稿。
 - repository 测试：版本号唯一、当前版本查询、用户隔离。
 - 确认接口测试：从最新版生成正式 `advices`，重复确认幂等。
+- 确认接口测试：校验 `outfit_advice.items` 中已有衣物引用失效时不写入正式引用，并返回可展示提示。
 - 权限测试：不能读取或修改其他用户草稿。
 
 小程序：
