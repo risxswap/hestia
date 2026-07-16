@@ -21,7 +21,7 @@ func TestServiceChatPersistsMessagesStepsAndUpdatesCurrentDraft(t *testing.T) {
 			ContentJSON:          defaultAdviceContent("旧穿搭", "旧摘要"),
 		}},
 	}}
-	service := NewServiceWithRepository(repo)
+	service := NewServiceWithRunner(repo, nil, RuleBasedAdviceRunner{})
 
 	result, err := service.Chat(context.Background(), 12, "鞋子换舒服点")
 	if err != nil {
@@ -107,16 +107,16 @@ func TestServiceChatFallsBackWhenAdviceRunnerFails(t *testing.T) {
 
 	result, err := service.Chat(context.Background(), 12, "明天通勤怎么穿")
 	if err != nil {
-		t.Fatalf("chat should fall back when ADK runner fails: %v", err)
+		t.Fatalf("chat should return text guidance when ADK runner fails: %v", err)
 	}
-	if !repo.createdDraft {
-		t.Fatalf("expected rule-based fallback to create a draft")
+	if repo.createdDraft || result.Draft != nil {
+		t.Fatalf("expected no automatic draft after ADK failure, got %#v", result)
 	}
-	if result.Draft == nil || result.Message.Text == "" {
-		t.Fatalf("expected fallback chat result, got %#v", result)
+	if result.Message.Text != "我暂时无法生成建议，请补充具体场景后再试。" {
+		t.Fatalf("unexpected fallback guidance: %#v", result.Message)
 	}
 	if len(repo.steps) < 2 {
-		t.Fatalf("expected failed ADK and fallback steps, got %#v", repo.steps)
+		t.Fatalf("expected failed ADK and text fallback steps, got %#v", repo.steps)
 	}
 	failed := repo.steps[0]
 	if failed.StepType != AgentStepTypeModelDecision || failed.Status != AgentStepStatusFailed || failed.DecisionLabel != "runner_failed" || failed.ErrorMessage != "adk request failed" {
@@ -124,6 +124,41 @@ func TestServiceChatFallsBackWhenAdviceRunnerFails(t *testing.T) {
 	}
 	if repo.steps[1].StepNo != 2 || repo.steps[1].Status != AgentStepStatusSucceeded {
 		t.Fatalf("expected fallback model decision after failed ADK step, got %#v", repo.steps[1])
+	}
+}
+
+func TestServiceChatKeepsTextResponseWhenRunnerDoesNotCallTools(t *testing.T) {
+	repo := &spyAgentRepo{currentDraft: routeLikeDraft(12)}
+	runner := &spyAdviceRunner{output: AdviceRunOutput{
+		AssistantText: "可以，先告诉我明天的场景和想呈现的感觉。",
+		DecisionLabel: "clarify_scene",
+	}}
+	service := NewServiceWithRunner(repo, nil, runner)
+
+	result, err := service.Chat(context.Background(), 12, "你好")
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if result.Draft != nil || repo.createdDraft || repo.updatedDraft {
+		t.Fatalf("expected text-only response without draft changes, got %#v", result)
+	}
+	if result.Message.Text != "可以，先告诉我明天的场景和想呈现的感觉。" {
+		t.Fatalf("unexpected text response: %#v", result.Message)
+	}
+}
+
+func TestServiceChatReturnsTextWhenAdviceRunnerIsUnavailable(t *testing.T) {
+	service := NewServiceWithRepository(&spyAgentRepo{})
+
+	result, err := service.Chat(context.Background(), 12, "你好")
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if result.Draft != nil {
+		t.Fatalf("expected no automatic draft without an advice runner, got %#v", result.Draft)
+	}
+	if result.Message.Text != "我暂时无法生成建议，请补充具体场景后再试。" {
+		t.Fatalf("unexpected unavailable-runner guidance: %#v", result.Message)
 	}
 }
 
@@ -139,8 +174,8 @@ func TestServiceChatSetsDeadlineForAdviceRunner(t *testing.T) {
 	if !runner.hasDeadline {
 		t.Fatal("expected advice runner context to have a deadline")
 	}
-	if result.Draft == nil {
-		t.Fatalf("expected fallback draft, got %#v", result)
+	if result.Draft != nil {
+		t.Fatalf("expected no draft when the runner only returns text, got %#v", result.Draft)
 	}
 }
 
@@ -301,14 +336,11 @@ func TestServiceChatFallsBackWhenRunnerReturnsNoToolCallsForFirstDraft(t *testin
 		t.Fatalf("chat: %v", err)
 	}
 
-	if !repo.createdDraft {
-		t.Fatalf("expected fallback runner to create draft")
+	if repo.createdDraft || result.Draft != nil {
+		t.Fatalf("expected no draft without an explicit tool call, got %#v", result)
 	}
-	if result.Draft == nil || result.Draft.DraftPublicID != "drf_test" {
-		t.Fatalf("expected draft card from fallback, got %#v", result.Draft)
-	}
-	if repo.steps[0].DecisionLabel != "create_draft" {
-		t.Fatalf("expected fallback decision step, got %#v", repo.steps)
+	if result.Message.Text != "自然语言回复，没有工具调用。" || repo.steps[0].DecisionLabel != "final_response" {
+		t.Fatalf("expected runner text decision to be retained, got %#v", result)
 	}
 }
 

@@ -88,6 +88,7 @@ func TestChatRouteReturnsDraftEventWhenDraftExists(t *testing.T) {
 		c.Next()
 	})
 	service := agent.NewServiceWithDependencies(newRouteAgentRepo(), nil)
+	service.SetAdviceRunner(agent.RuleBasedAdviceRunner{})
 	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
 	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{"text":"鞋子换舒服点"}`))
 	request.Header.Set("Accept", "text/event-stream")

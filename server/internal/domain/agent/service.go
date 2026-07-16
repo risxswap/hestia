@@ -14,6 +14,7 @@ import (
 const (
 	defaultStreamStatusText    = "agent stream ready"
 	defaultAdviceRunnerTimeout = 15 * time.Second
+	runnerFallbackText         = "我暂时无法生成建议，请补充具体场景后再试。"
 )
 
 var (
@@ -113,7 +114,7 @@ func (s *Service) StreamStatus(ctx context.Context, userID int64) StreamStatus {
 func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs ...ChatAssetRef) (ChatResult, error) {
 	message := StreamMessage{Text: strings.TrimSpace(text)}
 	if message.Text == "" {
-		message.Text = "我会先根据你的场景生成一个可调整的形象建议草稿。"
+		message.Text = "请告诉我想咨询的场景或想解决的问题。"
 	}
 	assetRefs = normalizeChatAssetRefs(assetRefs)
 	if s == nil || s.repo == nil {
@@ -175,24 +176,27 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
 		return result, err
 	}
-	runner := s.runner
-	if runner == nil {
-		runner = RuleBasedAdviceRunner{}
-	}
 	runnerStartedAt := time.Now().UTC()
-	runnerCtx, cancelRunner := context.WithTimeout(ctx, defaultAdviceRunnerTimeout)
-	output, err := runner.Run(runnerCtx, AdviceRunInput{
+	runnerInput := AdviceRunInput{
 		UserID:         userID,
 		Text:           message.Text,
 		SourceMsgID:    userMessage.ID,
 		AssetRefs:      assetRefs,
 		RecentMessages: recentMessages,
 		CurrentDraft:   currentDraftPtr,
-	})
-	cancelRunner()
+	}
+	output := AdviceRunOutput{}
+	var runnerErr error
+	if s.runner == nil {
+		runnerErr = ErrAdviceRunnerUnavailable
+	} else {
+		runnerCtx, cancelRunner := context.WithTimeout(ctx, defaultAdviceRunnerTimeout)
+		output, runnerErr = s.runner.Run(runnerCtx, runnerInput)
+		cancelRunner()
+	}
 	runnerFinishedAt := time.Now().UTC()
 	stepOffset := 0
-	if err != nil {
+	if runnerErr != nil {
 		_ = s.recordFailedStep(ctx, AgentRunStepInput{
 			UserID:         userID,
 			SourceMsgID:    userMessage.ID,
@@ -204,88 +208,15 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 			StartedAt:      runnerStartedAt,
 			FinishedAt:     runnerFinishedAt,
 			DurationMS:     durationMS(runnerStartedAt, runnerFinishedAt),
-		}, err)
-		fallbackStartedAt := time.Now().UTC()
-		output, err = (RuleBasedAdviceRunner{}).Run(ctx, AdviceRunInput{
-			UserID:         userID,
-			Text:           message.Text,
-			SourceMsgID:    userMessage.ID,
-			AssetRefs:      assetRefs,
-			RecentMessages: recentMessages,
-			CurrentDraft:   currentDraftPtr,
-		})
-		runnerStartedAt = fallbackStartedAt
-		runnerFinishedAt = time.Now().UTC()
+		}, runnerErr)
+		output = AdviceRunOutput{
+			AssistantText: runnerFallbackText,
+			DecisionLabel: "runner_fallback_text",
+		}
 		stepOffset = 1
-		if err != nil {
-			_ = s.recordFailedStep(ctx, AgentRunStepInput{
-				UserID:         userID,
-				SourceMsgID:    userMessage.ID,
-				AssistantMsgID: assistantMessage.ID,
-				StepNo:         2,
-				StepType:       AgentStepTypeModelDecision,
-				DecisionLabel:  "fallback_failed",
-				InputSummary:   message.Text,
-				StartedAt:      fallbackStartedAt,
-				FinishedAt:     runnerFinishedAt,
-				DurationMS:     durationMS(fallbackStartedAt, runnerFinishedAt),
-			}, err)
-			_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
-			return result, err
-		}
-	}
-	if len(output.ToolCalls) == 0 {
-		refreshedDraft, refreshErr := s.repo.GetCurrentDraft(ctx, userID)
-		if refreshErr == nil {
-			currentDraft = refreshedDraft
-			currentDraftPtr = &currentDraft
-		} else if !errors.Is(refreshErr, ErrDraftNotFound) {
-			now := time.Now().UTC()
-			_ = s.recordFailedStep(ctx, AgentRunStepInput{
-				UserID:         userID,
-				SourceMsgID:    userMessage.ID,
-				AssistantMsgID: assistantMessage.ID,
-				StepNo:         1,
-				StepType:       AgentStepTypeModelDecision,
-				DecisionLabel:  "refresh_draft_failed",
-				InputSummary:   message.Text,
-				StartedAt:      now,
-				FinishedAt:     now,
-				DurationMS:     1,
-			}, refreshErr)
-			_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
-			return result, refreshErr
-		}
-	}
-	if currentDraftPtr == nil && len(output.ToolCalls) == 0 {
-		output, err = (RuleBasedAdviceRunner{}).Run(ctx, AdviceRunInput{
-			UserID:         userID,
-			Text:           message.Text,
-			SourceMsgID:    userMessage.ID,
-			AssetRefs:      assetRefs,
-			RecentMessages: recentMessages,
-			CurrentDraft:   nil,
-		})
-		if err != nil {
-			now := time.Now().UTC()
-			_ = s.recordFailedStep(ctx, AgentRunStepInput{
-				UserID:         userID,
-				SourceMsgID:    userMessage.ID,
-				AssistantMsgID: assistantMessage.ID,
-				StepNo:         1,
-				StepType:       AgentStepTypeModelDecision,
-				DecisionLabel:  "fallback_failed",
-				InputSummary:   message.Text,
-				StartedAt:      now,
-				FinishedAt:     now,
-				DurationMS:     1,
-			}, err)
-			_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
-			return result, err
-		}
 	}
 	if strings.TrimSpace(output.AssistantText) == "" {
-		output.AssistantText = "我已生成一版可继续调整的形象建议草稿。"
+		output.AssistantText = "请告诉我具体场景、已有单品或想调整的方向。"
 	}
 	result.Message = StreamMessage{Text: output.AssistantText}
 	stepNo := 1 + stepOffset
@@ -301,7 +232,7 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		ModelCode:      output.Metadata.ModelCode,
 		PromptVersion:  output.Metadata.PromptVersion,
 		MaxIterations:  output.Metadata.MaxIterations,
-		DecisionLabel:  firstNonEmpty(output.DecisionLabel, "draft"),
+		DecisionLabel:  firstNonEmpty(output.DecisionLabel, "chat_response"),
 		InputSummary:   message.Text,
 		OutputSummary:  output.AssistantText,
 		StartedAt:      runnerStartedAt,
@@ -311,6 +242,30 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		return result, err
 	}
 	var draft Draft
+	draftUpdated := false
+	if hasCompletedAdviceDraftAudit(output.AuditSteps) {
+		refreshedDraft, refreshErr := s.repo.GetCurrentDraft(ctx, userID)
+		if refreshErr != nil {
+			now := time.Now().UTC()
+			_ = s.recordFailedStep(ctx, AgentRunStepInput{
+				UserID:         userID,
+				SourceMsgID:    userMessage.ID,
+				AssistantMsgID: assistantMessage.ID,
+				StepNo:         stepNo + 1,
+				StepType:       AgentStepTypeToolResult,
+				DecisionLabel:  "refresh_audited_draft_failed",
+				InputSummary:   message.Text,
+				StartedAt:      now,
+				FinishedAt:     now,
+				DurationMS:     1,
+			}, refreshErr)
+			_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
+			return result, refreshErr
+		}
+		draft = refreshedDraft
+		currentDraftPtr = &draft
+		draftUpdated = true
+	}
 	for _, auditStep := range output.AuditSteps {
 		stepNo++
 		if err := s.repo.CreateAgentRunStep(ctx, agentRunStepFromAudit(userID, userMessage.ID, assistantMessage.ID, stepNo, auditStep)); err != nil {
@@ -357,6 +312,7 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		}
 		currentDraft = draft
 		currentDraftPtr = &currentDraft
+		draftUpdated = true
 		stepNo++
 		if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
 			UserID:          userID,
@@ -383,38 +339,38 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
 		return result, err
 	}
-	if currentDraftPtr == nil {
-		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
-		return result, ErrDraftNotFound
+	messageUpdate := UpdateChatMessageInput{
+		ID:          assistantMessage.ID,
+		Status:      ChatStatusSent,
+		MsgType:     ChatMsgTypeText,
+		ContentText: output.AssistantText,
 	}
-	draft = *currentDraftPtr
-	card := draftCard(draft)
-	result.Draft = &card
-	_, err = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{
-		ID:              assistantMessage.ID,
-		Status:          ChatStatusSent,
-		MsgType:         ChatMsgTypeDraftCard,
-		ContentText:     output.AssistantText,
-		RelatedType:     "advice_draft",
-		RelatedID:       draft.ID,
-		RelatedPublicID: draft.PublicID,
-	})
+	finalStep := AgentRunStepInput{
+		UserID:         userID,
+		SourceMsgID:    userMessage.ID,
+		AssistantMsgID: assistantMessage.ID,
+		StepNo:         stepNo + 1,
+		StepType:       AgentStepTypeFinalResponse,
+		Status:         AgentStepStatusSucceeded,
+		DecisionLabel:  "final_response",
+		OutputSummary:  output.AssistantText,
+	}
+	if draftUpdated {
+		card := draftCard(draft)
+		result.Draft = &card
+		messageUpdate.MsgType = ChatMsgTypeDraftCard
+		messageUpdate.RelatedType = "advice_draft"
+		messageUpdate.RelatedID = draft.ID
+		messageUpdate.RelatedPublicID = draft.PublicID
+		finalStep.RelatedType = "advice_draft"
+		finalStep.RelatedID = draft.ID
+		finalStep.RelatedPublicID = draft.PublicID
+	}
+	_, err = s.repo.UpdateChatMessage(ctx, messageUpdate)
 	if err != nil {
 		return result, err
 	}
-	if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
-		UserID:          userID,
-		SourceMsgID:     userMessage.ID,
-		AssistantMsgID:  assistantMessage.ID,
-		StepNo:          stepNo + 1,
-		StepType:        AgentStepTypeFinalResponse,
-		Status:          AgentStepStatusSucceeded,
-		DecisionLabel:   "final_response",
-		OutputSummary:   output.AssistantText,
-		RelatedType:     "advice_draft",
-		RelatedID:       draft.ID,
-		RelatedPublicID: draft.PublicID,
-	}); err != nil {
+	if err := s.repo.CreateAgentRunStep(ctx, finalStep); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -442,6 +398,18 @@ func durationMS(startedAt, finishedAt time.Time) int {
 		return 1
 	}
 	return int(elapsed)
+}
+
+func hasCompletedAdviceDraftAudit(steps []AdviceRunAuditStep) bool {
+	for _, step := range steps {
+		if step.StepType != AgentStepTypeToolResult || step.Status != AgentStepStatusSucceeded {
+			continue
+		}
+		if step.ToolName == AdviceToolCreateDraft || step.ToolName == AdviceToolUpdateDraft {
+			return true
+		}
+	}
+	return false
 }
 
 func agentRunStepFromAudit(userID, sourceMsgID, assistantMsgID int64, stepNo int, auditStep AdviceRunAuditStep) AgentRunStepInput {
