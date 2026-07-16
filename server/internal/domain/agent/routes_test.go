@@ -187,6 +187,24 @@ func TestCurrentDraftRouteReturnsDraftCard(t *testing.T) {
 	}
 }
 
+func TestCurrentDraftRouteReturnsEmptyResultWhenNoDraftExists(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newRouteAgentRepo()
+	repo.noCurrentDraft = true
+	router := newAgentDraftRouter(agent.NewServiceWithRepository(repo))
+	request := httptest.NewRequest(http.MethodGet, "/api/user/advice-drafts/current", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200 when no draft exists, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"code":"ok"`) || !strings.Contains(recorder.Body.String(), `"data":null`) {
+		t.Fatalf("expected empty success result, got %s", recorder.Body.String())
+	}
+}
+
 func TestDraftVersionsRouteReturnsRevisionGroups(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newAgentDraftRouter(agent.NewServiceWithRepository(newRouteAgentRepo()))
@@ -216,6 +234,7 @@ func newAgentDraftRouter(service *agent.Service) *gin.Engine {
 
 type routeAgentRepo struct {
 	discarded       bool
+	noCurrentDraft  bool
 	nextID          int64
 	createdMessages []agent.ChatMessage
 }
@@ -261,6 +280,9 @@ func (r *routeAgentRepo) CreateDraft(_ context.Context, input agent.CreateDraftI
 }
 
 func (r *routeAgentRepo) GetCurrentDraft(_ context.Context, userID int64) (agent.Draft, error) {
+	if r.noCurrentDraft {
+		return agent.Draft{}, agent.ErrDraftNotFound
+	}
 	return routeDraft(userID), nil
 }
 

@@ -59,6 +59,10 @@ func (h *Handler) CurrentDraft(c *gin.Context) {
 	}
 	card, err := h.service.CurrentDraft(c.Request.Context(), user.UserID)
 	if err != nil {
+		if errors.Is(err, ErrDraftNotFound) {
+			response.OK(c, nil)
+			return
+		}
 		h.writeError(c, err, "get current advice draft failed", user.UserID, "")
 		return
 	}
