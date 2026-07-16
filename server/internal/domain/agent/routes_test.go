@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/common/auth"
@@ -105,6 +106,73 @@ func TestChatRouteReturnsDraftEventWhenDraftExists(t *testing.T) {
 	}
 	if !strings.Contains(body, `"draft_public_id":"drf_test"`) {
 		t.Fatalf("expected draft payload, got %q", body)
+	}
+}
+
+func TestChatRouteStreamsProcessEventsWithResponseTimes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
+		c.Next()
+	})
+	service := agent.NewServiceWithDependencies(newRouteAgentRepo(), nil)
+	service.SetAdviceRunner(agent.RuleBasedAdviceRunner{})
+	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
+	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{"text":"明天见客户"}`))
+	request.Header.Set("Accept", "text/event-stream")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, "event: process\n") {
+		t.Fatalf("expected process event, got %q", body)
+	}
+	if !strings.Contains(body, `"summary":"理解你的需求"`) || !strings.Contains(body, `"response_started_at"`) {
+		t.Fatalf("expected safe process payload with start time, got %q", body)
+	}
+	firstProcess := strings.SplitN(strings.SplitN(body, "event: process\n", 2)[1], "\n\n", 2)[0]
+	if strings.Contains(firstProcess, `"finished_at"`) {
+		t.Fatalf("expected running process to omit finished_at, got %q", firstProcess)
+	}
+	if !strings.Contains(body, "event: done\n") || !strings.Contains(body, `"finished_at"`) {
+		t.Fatalf("expected done payload with finish time, got %q", body)
+	}
+}
+
+func TestChatMessagesRouteReturnsSafeProcessHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
+		c.Next()
+	})
+	startedAt := time.Date(2026, 7, 16, 9, 30, 0, 0, time.UTC)
+	repo := newRouteAgentRepo()
+	repo.history = []agent.ChatMessage{{
+		ID: 2, PublicID: "msg_assistant", UserID: 12, Role: agent.ChatRoleAssistant,
+		MsgType: agent.ChatMsgTypeText, ContentText: "已整理好建议。", Status: agent.ChatStatusSent, CreatedAt: startedAt,
+	}}
+	repo.historySteps = []agent.AgentRunStep{{
+		AssistantMsgID: 2, StepNo: 1, StepType: agent.AgentStepTypeModelDecision, Status: agent.AgentStepStatusSucceeded,
+		StartedAt: startedAt, FinishedAt: startedAt.Add(time.Second),
+	}}
+	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), agent.NewServiceWithRepository(repo))
+	request := httptest.NewRequest(http.MethodGet, "/api/user/agent/messages", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"public_id":"msg_assistant"`) || !strings.Contains(body, `"summary":"查看处理过程"`) {
+		t.Fatalf("expected visible message and process summary, got %q", body)
+	}
+	if strings.Contains(body, "input_summary") || strings.Contains(body, "raw model prompt") {
+		t.Fatalf("expected no raw audit payload, got %q", body)
 	}
 }
 
@@ -238,6 +306,8 @@ type routeAgentRepo struct {
 	noCurrentDraft  bool
 	nextID          int64
 	createdMessages []agent.ChatMessage
+	history         []agent.ChatMessage
+	historySteps    []agent.AgentRunStep
 }
 
 func newRouteAgentRepo() *routeAgentRepo {
@@ -258,6 +328,7 @@ func (r *routeAgentRepo) CreateChatMessage(_ context.Context, input agent.Create
 		RelatedID:       input.RelatedID,
 		RelatedPublicID: input.RelatedPublicID,
 		Status:          input.Status,
+		CreatedAt:       input.CreatedAt,
 	}
 	r.nextID++
 	r.createdMessages = append(r.createdMessages, item)
@@ -270,6 +341,14 @@ func (r *routeAgentRepo) UpdateChatMessage(_ context.Context, input agent.Update
 
 func (r *routeAgentRepo) ListRecentChatMessages(context.Context, int64, int) ([]agent.ChatMessage, error) {
 	return nil, nil
+}
+
+func (r *routeAgentRepo) ListChatMessages(context.Context, int64, int) ([]agent.ChatMessage, error) {
+	return r.history, nil
+}
+
+func (r *routeAgentRepo) ListAgentRunSteps(context.Context, int64, []int64) ([]agent.AgentRunStep, error) {
+	return r.historySteps, nil
 }
 
 func (r *routeAgentRepo) CreateAgentRunStep(context.Context, agent.AgentRunStepInput) error {

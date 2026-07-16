@@ -662,6 +662,12 @@ function getCurrentAdviceDraft() {
   });
 }
 
+function getAgentMessages() {
+  return authorizedRequest({
+    path: "/api/user/agent/messages"
+  });
+}
+
 function getAdviceDraftVersions(publicID) {
   return authorizedRequest({
     path: `/api/user/advice-drafts/${publicID}/versions`
@@ -900,6 +906,7 @@ module.exports = {
   sendImageRouteFeedback,
   sendAgentMessage,
   streamAgentChat,
+  getAgentMessages,
   getCurrentAdviceDraft,
   getAdviceDraftVersions,
   confirmAdviceDraft,

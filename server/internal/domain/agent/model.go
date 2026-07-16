@@ -38,9 +38,11 @@ type ChatRequest struct {
 }
 
 type StreamDone struct {
-	JobPublicID     string `json:"job_public_id"`
-	MessagePublicID string `json:"message_public_id"`
-	DraftPublicID   string `json:"draft_public_id,omitempty"`
+	JobPublicID       string     `json:"job_public_id"`
+	MessagePublicID   string     `json:"message_public_id"`
+	DraftPublicID     string     `json:"draft_public_id,omitempty"`
+	ResponseStartedAt time.Time  `json:"response_started_at,omitempty"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty"`
 }
 
 type StreamStatus struct {
@@ -58,6 +60,56 @@ type ChatResult struct {
 	UserMessagePublicID      string
 	AssistantMessageID       int64
 	AssistantMessagePublicID string
+	ResponseStartedAt        time.Time
+	FinishedAt               time.Time
+}
+
+type ChatProcessEvent struct {
+	StepNo            int        `json:"step_no"`
+	Status            string     `json:"status"`
+	Summary           string     `json:"summary"`
+	Detail            string     `json:"detail,omitempty"`
+	ResponseStartedAt time.Time  `json:"response_started_at"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty"`
+}
+
+type ChatProcessStep struct {
+	StepNo     int        `json:"step_no"`
+	Status     string     `json:"status"`
+	Summary    string     `json:"summary"`
+	Detail     string     `json:"detail,omitempty"`
+	StartedAt  time.Time  `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+}
+
+type ChatProcess struct {
+	Status            string            `json:"status"`
+	Summary           string            `json:"summary"`
+	ResponseStartedAt time.Time         `json:"response_started_at"`
+	FinishedAt        *time.Time        `json:"finished_at,omitempty"`
+	Steps             []ChatProcessStep `json:"steps,omitempty"`
+}
+
+type ChatHistoryMessage struct {
+	PublicID  string         `json:"public_id"`
+	Role      string         `json:"role"`
+	MsgType   string         `json:"msg_type"`
+	Content   string         `json:"content"`
+	Status    string         `json:"status"`
+	AssetRefs []ChatAssetRef `json:"asset_refs,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+	Process   *ChatProcess   `json:"process,omitempty"`
+}
+
+type AgentRunStep struct {
+	AssistantMsgID int64
+	StepNo         int
+	StepType       string
+	Status         string
+	ToolName       string
+	DecisionLabel  string
+	StartedAt      time.Time
+	FinishedAt     time.Time
 }
 
 type AdviceRunInput struct {
@@ -121,6 +173,8 @@ type ChatMessage struct {
 	RelatedID       int64
 	RelatedPublicID string
 	Status          string
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
 }
 
 type ChatAssetRef struct {
@@ -140,6 +194,7 @@ type CreateChatMessageInput struct {
 	RelatedID       int64
 	RelatedPublicID string
 	Status          string
+	CreatedAt       time.Time
 }
 
 type UpdateChatMessageInput struct {

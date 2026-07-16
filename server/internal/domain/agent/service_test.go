@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestServiceChatPersistsMessagesStepsAndUpdatesCurrentDraft(t *testing.T) {
@@ -383,6 +384,56 @@ func TestServiceChatRecordsFailedToolResult(t *testing.T) {
 	}
 }
 
+func TestServiceChatHistoryUsesPersistedStartTimeForGeneratingAssistantMessage(t *testing.T) {
+	startedAt := time.Date(2026, 7, 16, 9, 30, 0, 0, time.UTC)
+	repo := &spyAgentRepo{history: []ChatMessage{
+		{ID: 1, PublicID: "msg_user", UserID: 12, Role: ChatRoleUser, MsgType: ChatMsgTypeText, ContentText: "明天见客户", Status: ChatStatusSent, CreatedAt: startedAt.Add(-time.Minute)},
+		{ID: 2, PublicID: "msg_assistant", UserID: 12, Role: ChatRoleAssistant, MsgType: ChatMsgTypeText, Status: ChatStatusGenerating, CreatedAt: startedAt},
+	}}
+	service := NewServiceWithRepository(repo)
+
+	messages, err := service.ChatHistory(context.Background(), 12, 50)
+	if err != nil {
+		t.Fatalf("chat history: %v", err)
+	}
+	if len(messages) != 2 || messages[1].Process == nil {
+		t.Fatalf("expected assistant process in history, got %#v", messages)
+	}
+	process := messages[1].Process
+	if process.Summary != "理解你的需求" || process.Status != "running" || !process.ResponseStartedAt.Equal(startedAt) {
+		t.Fatalf("expected persisted start time and safe running summary, got %#v", process)
+	}
+}
+
+func TestServiceChatWithProcessEventsPublishesSafeProgressAndResponseTimes(t *testing.T) {
+	repo := &spyAgentRepo{}
+	service := NewServiceWithRunner(repo, nil, &spyAdviceRunner{output: AdviceRunOutput{
+		AssistantText: "明天见客户可以穿浅色衬衫配直筒裤。",
+		DecisionLabel: "chat_response",
+	}})
+	var events []ChatProcessEvent
+
+	result, err := service.ChatWithProcessEvents(context.Background(), 12, "明天见客户", func(event ChatProcessEvent) {
+		events = append(events, event)
+	})
+	if err != nil {
+		t.Fatalf("chat with process events: %v", err)
+	}
+	if len(events) < 2 {
+		t.Fatalf("expected process events, got %#v", events)
+	}
+	if events[0].Summary != "理解你的需求" || events[0].Status != "running" || events[0].ResponseStartedAt.IsZero() {
+		t.Fatalf("unexpected first process event: %#v", events[0])
+	}
+	last := events[len(events)-1]
+	if last.Summary != "完成回复" || last.Status != AgentStepStatusSucceeded {
+		t.Fatalf("unexpected completed process event: %#v", last)
+	}
+	if !result.ResponseStartedAt.Equal(events[0].ResponseStartedAt) || result.FinishedAt.IsZero() {
+		t.Fatalf("expected result timestamps from process stream, got %#v", result)
+	}
+}
+
 type spyAgentRepo struct {
 	nextID          int64
 	currentDraft    Draft
@@ -393,6 +444,7 @@ type spyAgentRepo struct {
 	updatedDraft    bool
 	lastUpdate      UpdateDraftInput
 	updateErr       error
+	history         []ChatMessage
 }
 
 func (r *spyAgentRepo) CreateChatMessage(_ context.Context, input CreateChatMessageInput) (ChatMessage, error) {
@@ -412,6 +464,7 @@ func (r *spyAgentRepo) CreateChatMessage(_ context.Context, input CreateChatMess
 		RelatedID:       input.RelatedID,
 		RelatedPublicID: input.RelatedPublicID,
 		Status:          input.Status,
+		CreatedAt:       input.CreatedAt,
 	}
 	r.nextID++
 	r.createdMessages = append(r.createdMessages, item)
@@ -423,6 +476,14 @@ func (r *spyAgentRepo) UpdateChatMessage(_ context.Context, input UpdateChatMess
 }
 
 func (r *spyAgentRepo) ListRecentChatMessages(context.Context, int64, int) ([]ChatMessage, error) {
+	return nil, nil
+}
+
+func (r *spyAgentRepo) ListChatMessages(context.Context, int64, int) ([]ChatMessage, error) {
+	return r.history, nil
+}
+
+func (r *spyAgentRepo) ListAgentRunSteps(context.Context, int64, []int64) ([]AgentRunStep, error) {
 	return nil, nil
 }
 

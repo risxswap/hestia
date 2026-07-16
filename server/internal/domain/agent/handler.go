@@ -35,20 +35,41 @@ func (h *Handler) Chat(c *gin.Context) {
 	c.Status(http.StatusOK)
 	_ = response.WriteSSE(c.Writer, "status", h.service.StreamStatus(c.Request.Context(), user.UserID))
 	c.Writer.Flush()
-	result, err := h.service.Chat(c.Request.Context(), user.UserID, request.Text, request.AssetRefs...)
+	result, err := h.service.ChatWithProcessEvents(c.Request.Context(), user.UserID, request.Text, func(event ChatProcessEvent) {
+		_ = response.WriteSSE(c.Writer, "process", event)
+		c.Writer.Flush()
+	}, request.AssetRefs...)
 	if err != nil {
 		_ = response.WriteSSE(c.Writer, "error", gin.H{"message": "智能体请求失败"})
 		c.Writer.Flush()
 		return
 	}
 	_ = response.WriteSSE(c.Writer, "message", result.Message)
-	done := StreamDone{MessagePublicID: result.AssistantMessagePublicID}
+	done := StreamDone{
+		MessagePublicID:   result.AssistantMessagePublicID,
+		ResponseStartedAt: result.ResponseStartedAt,
+		FinishedAt:        optionalTime(result.FinishedAt),
+	}
 	if result.Draft != nil {
 		_ = response.WriteSSE(c.Writer, "draft", result.Draft)
 		done.DraftPublicID = result.Draft.DraftPublicID
 	}
 	_ = response.WriteSSE(c.Writer, "done", done)
 	c.Writer.Flush()
+}
+
+func (h *Handler) Messages(c *gin.Context) {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "auth.unauthorized", "请先登录")
+		return
+	}
+	messages, err := h.service.ChatHistory(c.Request.Context(), user.UserID, 50)
+	if err != nil {
+		h.writeError(c, err, "list agent chat messages failed", user.UserID, "")
+		return
+	}
+	response.OK(c, gin.H{"messages": messages})
 }
 
 func (h *Handler) CurrentDraft(c *gin.Context) {

@@ -17,11 +17,70 @@ Page({
       }
     ]
   },
-  onLoad() {
-    this.restoreCurrentDraft();
+  async onLoad() {
+    this.startProcessTimer();
+    await this.restoreAgentMessages();
+    await this.restoreCurrentDraft();
   },
   onUnload() {
     this.abortActiveRequest();
+    this.stopProcessTimer();
+  },
+  async restoreAgentMessages() {
+    try {
+      const result = await api.getAgentMessages();
+      const records = result && Array.isArray(result.messages) ? result.messages : [];
+      if (!records.length) {
+        return;
+      }
+      this.setData({
+        messages: records.map((message) => normalizeChatMessage(message))
+      }, () => {
+        this.scrollToBottom();
+      });
+    } catch (error) {
+      // A history request should not prevent a user from starting a new chat.
+    }
+  },
+  startProcessTimer() {
+    this.stopProcessTimer();
+    this.processTimer = setInterval(() => {
+      this.refreshProcessElapsed();
+    }, 1000);
+  },
+  stopProcessTimer() {
+    if (this.processTimer) {
+      clearInterval(this.processTimer);
+      this.processTimer = null;
+    }
+  },
+  refreshProcessElapsed() {
+    const now = new Date();
+    let changed = false;
+    const messages = this.data.messages.map((message) => {
+      if (!message.process || !message.process.response_started_at) {
+        return message;
+      }
+      const process = normalizeChatProcess(message.process, now);
+      if (process.elapsed_label === message.process.elapsed_label) {
+        return message;
+      }
+      changed = true;
+      return Object.assign({}, message, { process });
+    });
+    if (changed) {
+      this.setData({ messages });
+    }
+  },
+  handleToggleProcess(event) {
+    const messageID = event.currentTarget.dataset.messageId || "";
+    if (!messageID) return;
+    this.updateMessage(messageID, (message) => {
+      if (!message.process) return message;
+      return Object.assign({}, message, {
+        process: Object.assign({}, message.process, { expanded: !message.process.expanded })
+      });
+    });
   },
   async restoreCurrentDraft() {
     try {
@@ -98,8 +157,8 @@ Page({
       const assistantMessage = {
         id: nextMessageID("assistant"),
         role: "assistant",
-        status: "pending",
-        content: "正在理解你的照片和需求..."
+        status: "",
+        content: ""
       };
       this.activeAssistantID = assistantMessage.id;
       this.setData({
@@ -122,7 +181,8 @@ Page({
     if (assistantID) {
       this.updateMessage(assistantID, (message) => Object.assign({}, message, {
         status: "",
-        content: message.content || "已停止生成。"
+        content: message.content || "已停止生成。",
+        process: failChatProcess(message.process, new Date())
       }));
     }
     this.setData({ thinking: false });
@@ -188,8 +248,8 @@ Page({
     const assistantMessage = {
       id: nextMessageID("assistant"),
       role: "assistant",
-      status: "pending",
-      content: "正在理解你的需求..."
+      status: "",
+      content: ""
     };
     this.activeAssistantID = assistantMessage.id;
     this.setData({
@@ -217,25 +277,22 @@ Page({
   },
   async sendToAgent(content, assistantID, assetRefs) {
     this.abortActiveRequest();
-    let receivedMessage = false;
     const stream = api.streamAgentChat({
       text: content,
       assetRefs: assetRefs || []
     }, {
       onStatus: (data) => {
-        const text = data && data.text ? data.text : "正在准备建议...";
-        if (!receivedMessage) {
-          this.updateMessage(assistantID, (message) => Object.assign({}, message, {
-            status: "pending",
-            content: text
-          }));
-        }
+        // Status remains a backwards-compatible server signal. Process events drive the UI.
+      },
+      onProcess: (data) => {
+        this.updateMessage(assistantID, (message) => Object.assign({}, message, {
+          process: mergeChatProcessEvent(message.process, data, new Date())
+        }));
       },
       onMessage: (data) => {
-        receivedMessage = true;
         const text = data && data.text ? data.text : "";
         this.updateMessage(assistantID, (message) => Object.assign({}, message, {
-          status: "pending",
+          status: "",
           content: text || message.content
         }));
       },
@@ -248,12 +305,14 @@ Page({
         const text = data && data.message ? data.message : "智能体请求失败";
         this.updateMessage(assistantID, (message) => Object.assign({}, message, {
           status: "error",
-          content: text
+          content: text,
+          process: failChatProcess(message.process, new Date())
         }));
       },
-      onDone: () => {
+      onDone: (data) => {
         this.updateMessage(assistantID, (message) => Object.assign({}, message, {
-          status: ""
+          status: "",
+          process: finishChatProcess(message.process, data, new Date())
         }));
       }
     });
@@ -269,7 +328,8 @@ Page({
       }
       this.updateMessage(assistantID, (message) => Object.assign({}, message, {
         status: "error",
-        content: error && error.message ? error.message : "顾问服务请求失败"
+        content: error && error.message ? error.message : "顾问服务请求失败",
+        process: failChatProcess(message.process, new Date())
       }));
       this.setData({ thinking: false });
     } finally {
@@ -396,10 +456,114 @@ function sectionLabel(type) {
   return "建议";
 }
 
+function normalizeChatMessage(raw) {
+  const message = raw || {};
+  return {
+    id: message.public_id || nextMessageID(message.role || "message"),
+    role: message.role || "assistant",
+    status: message.status === "failed" ? "error" : "",
+    content: message.content || "",
+    assetRefs: message.asset_refs || [],
+    process: message.process ? normalizeChatProcess(message.process, new Date()) : null
+  };
+}
+
+function normalizeChatProcess(raw, now) {
+  const process = raw || {};
+  const status = process.status || "running";
+  const finishedAt = process.finished_at || "";
+  const running = status === "running";
+  return {
+    status,
+    summary: running ? (process.summary || "理解你的需求") : "查看处理过程",
+    response_started_at: process.response_started_at || "",
+    finished_at: finishedAt,
+    elapsed_label: formatProcessElapsed(process.response_started_at, finishedAt, now),
+    expanded: Boolean(process.expanded),
+    steps: (process.steps || []).map((step) => normalizeChatProcessStep(step))
+  };
+}
+
+function normalizeChatProcessStep(raw) {
+  const step = raw || {};
+  return {
+    step_no: step.step_no || 0,
+    status: step.status || "succeeded",
+    summary: step.summary || "整理本轮建议",
+    detail: step.detail || "",
+    started_at: step.started_at || "",
+    finished_at: step.finished_at || ""
+  };
+}
+
+function mergeChatProcessEvent(existing, event, now) {
+  const current = existing || {};
+  const source = event || {};
+  const steps = (current.steps || []).map(normalizeChatProcessStep);
+  const nextStep = normalizeChatProcessStep({
+    step_no: source.step_no,
+    status: source.status,
+    summary: source.summary,
+    detail: source.detail,
+    started_at: source.response_started_at,
+    finished_at: source.finished_at
+  });
+  if (nextStep.step_no) {
+    const index = steps.findIndex((step) => step.step_no === nextStep.step_no);
+    if (index >= 0) {
+      steps[index] = nextStep;
+    } else {
+      steps.push(nextStep);
+    }
+  }
+  return normalizeChatProcess({
+    status: source.status || current.status || "running",
+    summary: source.summary || current.summary,
+    response_started_at: source.response_started_at || current.response_started_at,
+    finished_at: source.finished_at || current.finished_at,
+    expanded: current.expanded,
+    steps
+  }, now);
+}
+
+function finishChatProcess(existing, done, now) {
+  const process = existing || {};
+  const event = done || {};
+  return normalizeChatProcess({
+    status: "succeeded",
+    response_started_at: event.response_started_at || process.response_started_at,
+    finished_at: event.finished_at || process.finished_at || (now || new Date()).toISOString(),
+    expanded: process.expanded,
+    steps: process.steps || []
+  }, now);
+}
+
+function failChatProcess(existing, now) {
+  const process = existing || {};
+  return normalizeChatProcess({
+    status: "failed",
+    response_started_at: process.response_started_at,
+    finished_at: process.finished_at || (now || new Date()).toISOString(),
+    expanded: process.expanded,
+    steps: process.steps || []
+  }, now);
+}
+
+function formatProcessElapsed(startedAt, finishedAt, now) {
+  const started = Date.parse(startedAt || "");
+  if (Number.isNaN(started)) return "";
+  const finished = Date.parse(finishedAt || "");
+  const end = Number.isNaN(finished) ? (now instanceof Date ? now.getTime() : Date.now()) : finished;
+  return `${Math.max(0, Math.floor((end - started) / 1000))}s`;
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     normalizeDraftCard,
     normalizeDraftSection,
-    sectionLabel
+    sectionLabel,
+    normalizeChatProcess,
+    formatProcessElapsed,
+    failChatProcess
   };
 }

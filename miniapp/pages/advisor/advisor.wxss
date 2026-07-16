@@ -65,6 +65,125 @@
   box-shadow: 0 12rpx 28rpx rgba(32, 43, 39, 0.07);
 }
 
+.agent-process {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600rpx;
+  margin-bottom: 12rpx;
+}
+
+.agent-process__summary {
+  box-sizing: border-box;
+  display: inline-flex;
+  min-height: 58rpx;
+  max-width: 100%;
+  padding: 0 18rpx;
+  border: 1rpx solid #dce4e1;
+  border-radius: 999rpx;
+  color: #596966;
+  background: #ffffff;
+  box-shadow: 0 6rpx 14rpx rgba(32, 43, 39, 0.08);
+  align-items: center;
+  gap: 10rpx;
+}
+
+.agent-process__spinner {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 26rpx;
+  height: 26rpx;
+  border: 3rpx solid #b8c7c1;
+  border-top-color: #245d4f;
+  border-radius: 50%;
+  animation: agent-process-spin 0.9s linear infinite;
+}
+
+.agent-process__label {
+  min-width: 0;
+  overflow: hidden;
+  color: #4e5d5a;
+  font-size: 26rpx;
+  font-weight: 600;
+  line-height: 36rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-process__elapsed {
+  flex: 0 0 auto;
+  color: #929994;
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+
+.agent-process__chevron {
+  flex: 0 0 auto;
+  color: #7a8985;
+}
+
+.agent-process__details {
+  box-sizing: border-box;
+  margin: 12rpx 0 2rpx 18rpx;
+  padding: 4rpx 0 2rpx 20rpx;
+  border-left: 2rpx solid #d9e3df;
+}
+
+.agent-process__step {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  padding: 8rpx 0;
+  align-items: flex-start;
+  gap: 14rpx;
+}
+
+.agent-process__step-marker {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 12rpx;
+  height: 12rpx;
+  margin-top: 12rpx;
+  border-radius: 50%;
+  background: #77948b;
+}
+
+.agent-process__step-marker--failed {
+  background: #b86a5d;
+}
+
+.agent-process__step-content {
+  min-width: 0;
+}
+
+.agent-process__step-summary,
+.agent-process__step-detail {
+  display: block;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.agent-process__step-summary {
+  color: #576561;
+  font-size: 24rpx;
+  line-height: 34rpx;
+}
+
+.agent-process__step-detail {
+  margin-top: 2rpx;
+  color: #8a928e;
+  font-size: 22rpx;
+  line-height: 32rpx;
+}
+
+@keyframes agent-process-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .chat-message--user .chat-message__bubble {
   border-color: rgba(36, 93, 79, 0.18);
   border-radius: 20rpx 6rpx 20rpx 20rpx;

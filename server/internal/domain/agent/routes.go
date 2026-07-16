@@ -68,6 +68,7 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service, logger ...*slog.Logger) {
 	handler := NewHandler(service, optionalLogger(logger))
 	group.POST("/chat", handler.Chat)
+	group.GET("/messages", handler.Messages)
 }
 
 func RegisterAdviceDraftRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {

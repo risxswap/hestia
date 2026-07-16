@@ -12,7 +12,34 @@
         class="chat-message chat-message--{{item.role}} {{item.status === 'error' ? 'chat-message--error' : ''}}"
       >
         <view class="chat-message__meta">{{item.role === 'user' ? '你' : 'Hestia'}}</view>
-        <view class="chat-message__bubble">
+        <view wx:if="{{item.role === 'assistant' && item.process}}" class="agent-process">
+          <view
+            class="agent-process__summary"
+            data-message-id="{{item.id}}"
+            bind:tap="handleToggleProcess"
+          >
+            <view wx:if="{{item.process.status === 'running'}}" class="agent-process__spinner"></view>
+            <text class="agent-process__label">{{item.process.summary}}</text>
+            <text wx:if="{{item.process.elapsed_label}}" class="agent-process__elapsed">{{item.process.elapsed_label}}</text>
+            <t-icon class="agent-process__chevron" name="{{item.process.expanded ? 'chevron-up' : 'chevron-right'}}" size="28rpx" />
+          </view>
+          <view wx:if="{{item.process.expanded && item.process.steps.length}}" class="agent-process__details">
+            <view
+              wx:for="{{item.process.steps}}"
+              wx:for-item="step"
+              wx:key="step_no"
+              class="agent-process__step"
+            >
+              <view class="agent-process__step-marker agent-process__step-marker--{{step.status}}"></view>
+              <view class="agent-process__step-content">
+                <text class="agent-process__step-summary">{{step.summary}}</text>
+                <text wx:if="{{step.detail}}" class="agent-process__step-detail">{{step.detail}}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <view wx:if="{{item.content || (item.images && item.images.length)}}" class="chat-message__bubble">
           <view wx:if="{{item.images && item.images.length}}" class="chat-message__images">
             <image
               wx:for="{{item.images}}"
@@ -24,11 +51,6 @@
             />
           </view>
           <text class="chat-message__text">{{item.content}}</text>
-          <view wx:if="{{item.status === 'pending'}}" class="chat-message__pending">
-            <view class="pending-dot"></view>
-            <view class="pending-dot"></view>
-            <view class="pending-dot"></view>
-          </view>
         </view>
 
         <view wx:if="{{item.draft}}" class="draft-card">

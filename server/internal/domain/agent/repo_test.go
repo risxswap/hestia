@@ -108,9 +108,10 @@ func TestRepositoryCreateChatMessageWritesSourceMessage(t *testing.T) {
 	}
 	defer db.Close()
 	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
+	createdAt := time.Date(2026, 7, 16, 9, 30, 0, 0, time.UTC)
 
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO chat_msgs")).
-		WithArgs(sqlmock.AnyArg(), int64(12), int64(100), ChatRoleAssistant, ChatMsgTypeText, "处理中", sqlmock.AnyArg(), "", int64(0), "", ChatStatusGenerating).
+		WithArgs(sqlmock.AnyArg(), int64(12), int64(100), ChatRoleAssistant, ChatMsgTypeText, "处理中", sqlmock.AnyArg(), "", int64(0), "", ChatStatusGenerating, createdAt).
 		WillReturnResult(sqlmock.NewResult(101, 1))
 
 	message, err := repo.CreateChatMessage(context.Background(), CreateChatMessageInput{
@@ -124,12 +125,13 @@ func TestRepositoryCreateChatMessageWritesSourceMessage(t *testing.T) {
 			AssetType:     "chat_image",
 			Note:          "用户上传图",
 		}},
-		Status: ChatStatusGenerating,
+		Status:    ChatStatusGenerating,
+		CreatedAt: createdAt,
 	})
 	if err != nil {
 		t.Fatalf("create chat message: %v", err)
 	}
-	if message.ID != 101 || message.SourceMsgID != 100 || message.Role != ChatRoleAssistant {
+	if message.ID != 101 || message.SourceMsgID != 100 || message.Role != ChatRoleAssistant || !message.CreatedAt.Equal(createdAt) {
 		t.Fatalf("unexpected message: %#v", message)
 	}
 	if len(message.AssetRefs) != 1 || message.AssetRefs[0].AssetPublicID != "ast_photo" {
@@ -166,6 +168,36 @@ func TestRepositoryListRecentChatMessagesReturnsChronologicalSentMessages(t *tes
 	}
 	if len(messages[0].AssetRefs) != 1 || messages[0].AssetRefs[0].AssetPublicID != "ast_photo" {
 		t.Fatalf("expected asset refs on recent user message, got %#v", messages[0].AssetRefs)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestRepositoryListChatMessagesIncludesGeneratingMessagesWithCreatedAt(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("new sqlmock: %v", err)
+	}
+	defer db.Close()
+	repo := NewMySQLRepositoryWithExt(sqlx.NewDb(db, "sqlmock"))
+	startedAt := time.Date(2026, 7, 16, 9, 30, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, public_id, user_id, source_msg_id, role, msg_type, content_text, asset_refs, related_type, related_id, related_public_id, status, created_at, updated_at FROM chat_msgs")).
+		WithArgs(int64(12), 50).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "public_id", "user_id", "source_msg_id", "role", "msg_type", "content_text", "asset_refs", "related_type", "related_id", "related_public_id", "status", "created_at", "updated_at"}).
+			AddRow(3, "msg_assistant", 12, 2, ChatRoleAssistant, ChatMsgTypeText, nil, nil, nil, nil, nil, ChatStatusGenerating, startedAt, startedAt).
+			AddRow(2, "msg_user", 12, nil, ChatRoleUser, ChatMsgTypeText, "明天见客户", nil, nil, nil, nil, ChatStatusSent, startedAt.Add(-time.Minute), startedAt.Add(-time.Minute)))
+
+	messages, err := repo.ListChatMessages(context.Background(), 12, 50)
+	if err != nil {
+		t.Fatalf("list chat messages: %v", err)
+	}
+	if len(messages) != 2 || messages[0].PublicID != "msg_user" || messages[1].PublicID != "msg_assistant" {
+		t.Fatalf("expected chronological visible messages, got %#v", messages)
+	}
+	if !messages[1].CreatedAt.Equal(startedAt) || messages[1].Status != ChatStatusGenerating {
+		t.Fatalf("expected generating assistant message with persisted start time, got %#v", messages[1])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

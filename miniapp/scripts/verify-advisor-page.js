@@ -26,6 +26,9 @@ try {
   assert(!advisorJSON.includes("t-chat-sender"), "advisor page must not depend on t-chat-sender and its incompatible attachments component");
   assert(!advisorWXML.includes("<t-chat-sender"), "advisor markup must not render t-chat-sender");
   assert(advisorWXML.includes('bind:tap="handleChooseImage"'), "advisor markup should provide a native image picker entry");
+  assert(advisorWXML.includes('class="agent-process__summary"'), "advisor markup should render an agent process summary control");
+  assert(advisorWXML.includes('bind:tap="handleToggleProcess"'), "agent process summary should be expandable");
+  assert(!advisorWXML.includes("正在处理"), "agent process UI should show a stage summary instead of a generic processing label");
 
   require.cache[require.resolve(apiPath)] = {
     id: apiPath,
@@ -33,6 +36,7 @@ try {
     loaded: true,
     exports: {
       getCurrentAdviceDraft: async () => null,
+      getAgentMessages: async () => ({ messages: [] }),
       uploadFileToQiniu: async (file, options) => {
         apiCalls.push({ name: "uploadFileToQiniu", file, options });
         return { asset_public_id: "ast_chat_photo" };
@@ -62,6 +66,8 @@ try {
     "handleContinueDraft",
     "handleDiscardDraft",
     "restoreCurrentDraft",
+    "restoreAgentMessages",
+    "handleToggleProcess",
     "handleFileSelect",
     "handleChooseImage"
   ].forEach((name) => {
@@ -93,6 +99,27 @@ try {
   assert(draft.sections[0].title === "清爽通勤", "section title should map from content_json");
   assert(advisor.sectionLabel("hair") === "发型", "hair section label mismatch");
   assert(advisor.sectionLabel("makeup") === "妆容", "makeup section label mismatch");
+
+  const startedAt = "2026-07-16T09:30:00.000Z";
+  const now = new Date("2026-07-16T09:30:05.900Z");
+  assert(advisor.formatProcessElapsed(startedAt, "", now) === "5s", "process timer should derive elapsed time from server start time");
+  const runningProcess = advisor.normalizeChatProcess({
+    status: "running",
+    summary: "理解你的需求",
+    response_started_at: startedAt,
+    steps: []
+  }, now);
+  assert(runningProcess.summary === "理解你的需求" && runningProcess.elapsed_label === "5s", "running process should retain current summary and elapsed time");
+  const finishedProcess = advisor.normalizeChatProcess({
+    status: "succeeded",
+    summary: "完成回复",
+    response_started_at: startedAt,
+    finished_at: "2026-07-16T09:30:08.000Z",
+    steps: []
+  }, now);
+  assert(finishedProcess.summary === "查看处理过程" && finishedProcess.elapsed_label === "8s", "finished process should show the disclosure affordance and final elapsed time");
+  const failedProcess = advisor.failChatProcess(runningProcess, new Date("2026-07-16T09:30:09.000Z"));
+  assert(failedProcess.summary === "查看处理过程" && failedProcess.elapsed_label === "9s", "failed process should stop the timer at its final timestamp");
 
   const page = Object.assign({}, pageConfig, {
     data: JSON.parse(JSON.stringify(pageConfig.data)),

@@ -35,12 +35,16 @@ func (r *MySQLRepository) CreateChatMessage(ctx context.Context, input CreateCha
 	if err != nil {
 		return ChatMessage{}, err
 	}
+	createdAt := input.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
 	result, err := r.ext.ExecContext(ctx, `
 INSERT INTO chat_msgs
-  (public_id, user_id, source_msg_id, role, msg_type, content_text, asset_refs, related_type, related_id, related_public_id, status)
+  (public_id, user_id, source_msg_id, role, msg_type, content_text, asset_refs, related_type, related_id, related_public_id, status, created_at)
 VALUES
-  (?, ?, NULLIF(?, 0), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?)
-`, publicID, input.UserID, input.SourceMsgID, input.Role, input.MsgType, input.ContentText, assetRefsJSON, input.RelatedType, input.RelatedID, input.RelatedPublicID, input.Status)
+  (?, ?, NULLIF(?, 0), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), ?, ?)
+`, publicID, input.UserID, input.SourceMsgID, input.Role, input.MsgType, input.ContentText, assetRefsJSON, input.RelatedType, input.RelatedID, input.RelatedPublicID, input.Status, createdAt)
 	if err != nil {
 		return ChatMessage{}, err
 	}
@@ -61,6 +65,7 @@ VALUES
 		RelatedID:       input.RelatedID,
 		RelatedPublicID: input.RelatedPublicID,
 		Status:          input.Status,
+		CreatedAt:       createdAt,
 	}, nil
 }
 
@@ -117,6 +122,59 @@ LIMIT ?
 		messages = append(messages, rows[i].message())
 	}
 	return messages, nil
+}
+
+func (r *MySQLRepository) ListChatMessages(ctx context.Context, userID int64, limit int) ([]ChatMessage, error) {
+	if r == nil || r.ext == nil {
+		return nil, ErrRepositoryUnsupported
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	var rows []chatMessageRow
+	if err := sqlx.SelectContext(ctx, r.ext, &rows, `
+SELECT id, public_id, user_id, source_msg_id, role, msg_type, content_text, asset_refs, related_type, related_id, related_public_id, status, created_at, updated_at
+FROM chat_msgs
+WHERE user_id = ?
+  AND deleted_at IS NULL
+ORDER BY id DESC
+LIMIT ?
+`, userID, limit); err != nil {
+		return nil, err
+	}
+	messages := make([]ChatMessage, 0, len(rows))
+	for i := len(rows) - 1; i >= 0; i-- {
+		messages = append(messages, rows[i].message())
+	}
+	return messages, nil
+}
+
+func (r *MySQLRepository) ListAgentRunSteps(ctx context.Context, userID int64, assistantMessageIDs []int64) ([]AgentRunStep, error) {
+	if r == nil || r.ext == nil {
+		return nil, ErrRepositoryUnsupported
+	}
+	if len(assistantMessageIDs) == 0 {
+		return []AgentRunStep{}, nil
+	}
+	query, args, err := sqlx.In(`
+SELECT assistant_msg_id, step_no, step_type, status, tool_name, decision_label, started_at, finished_at
+FROM agent_run_steps
+WHERE user_id = ?
+  AND assistant_msg_id IN (?)
+ORDER BY assistant_msg_id ASC, step_no ASC
+`, userID, assistantMessageIDs)
+	if err != nil {
+		return nil, err
+	}
+	var rows []agentRunStepRow
+	if err := sqlx.SelectContext(ctx, r.ext, &rows, query, args...); err != nil {
+		return nil, err
+	}
+	steps := make([]AgentRunStep, 0, len(rows))
+	for _, row := range rows {
+		steps = append(steps, row.step())
+	}
+	return steps, nil
 }
 
 func (r *MySQLRepository) CreateAgentRunStep(ctx context.Context, input AgentRunStepInput) error {
@@ -775,10 +833,41 @@ type chatMessageRow struct {
 	RelatedID       sql.NullInt64  `db:"related_id"`
 	RelatedPublicID sql.NullString `db:"related_public_id"`
 	Status          string         `db:"status"`
+	CreatedAt       sql.NullTime   `db:"created_at"`
+	UpdatedAt       sql.NullTime   `db:"updated_at"`
+}
+
+type agentRunStepRow struct {
+	AssistantMsgID int64          `db:"assistant_msg_id"`
+	StepNo         int            `db:"step_no"`
+	StepType       string         `db:"step_type"`
+	Status         string         `db:"status"`
+	ToolName       sql.NullString `db:"tool_name"`
+	DecisionLabel  sql.NullString `db:"decision_label"`
+	StartedAt      sql.NullTime   `db:"started_at"`
+	FinishedAt     sql.NullTime   `db:"finished_at"`
+}
+
+func (r agentRunStepRow) step() AgentRunStep {
+	step := AgentRunStep{
+		AssistantMsgID: r.AssistantMsgID,
+		StepNo:         r.StepNo,
+		StepType:       r.StepType,
+		Status:         r.Status,
+		ToolName:       r.ToolName.String,
+		DecisionLabel:  r.DecisionLabel.String,
+	}
+	if r.StartedAt.Valid {
+		step.StartedAt = r.StartedAt.Time
+	}
+	if r.FinishedAt.Valid {
+		step.FinishedAt = r.FinishedAt.Time
+	}
+	return step
 }
 
 func (r chatMessageRow) message() ChatMessage {
-	return ChatMessage{
+	message := ChatMessage{
 		ID:              r.ID,
 		PublicID:        r.PublicID,
 		UserID:          r.UserID,
@@ -792,6 +881,13 @@ func (r chatMessageRow) message() ChatMessage {
 		RelatedPublicID: r.RelatedPublicID.String,
 		Status:          r.Status,
 	}
+	if r.CreatedAt.Valid {
+		message.CreatedAt = r.CreatedAt.Time
+	}
+	if r.UpdatedAt.Valid {
+		message.UpdatedAt = r.UpdatedAt.Time
+	}
+	return message
 }
 
 func (r draftRow) draft() Draft {

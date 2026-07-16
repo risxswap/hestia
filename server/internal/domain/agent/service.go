@@ -47,6 +47,8 @@ type Repository interface {
 	CreateChatMessage(ctx context.Context, input CreateChatMessageInput) (ChatMessage, error)
 	UpdateChatMessage(ctx context.Context, input UpdateChatMessageInput) (ChatMessage, error)
 	ListRecentChatMessages(ctx context.Context, userID int64, limit int) ([]ChatMessage, error)
+	ListChatMessages(ctx context.Context, userID int64, limit int) ([]ChatMessage, error)
+	ListAgentRunSteps(ctx context.Context, userID int64, assistantMessageIDs []int64) ([]AgentRunStep, error)
 	CreateAgentRunStep(ctx context.Context, input AgentRunStepInput) error
 	CreateDraft(ctx context.Context, input CreateDraftInput) (Draft, error)
 	GetCurrentDraft(ctx context.Context, userID int64) (Draft, error)
@@ -54,6 +56,105 @@ type Repository interface {
 	ListDraftVersions(ctx context.Context, userID int64, publicID string) ([]DraftRevision, error)
 	ConfirmDraft(ctx context.Context, userID int64, publicID string) (Advice, error)
 	DiscardDraft(ctx context.Context, userID int64, publicID string) error
+}
+
+func (s *Service) ChatHistory(ctx context.Context, userID int64, limit int) ([]ChatHistoryMessage, error) {
+	if s == nil || s.repo == nil {
+		return nil, ErrRepositoryUnsupported
+	}
+	messages, err := s.repo.ListChatMessages(ctx, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	assistantIDs := make([]int64, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == ChatRoleAssistant {
+			assistantIDs = append(assistantIDs, message.ID)
+		}
+	}
+	steps, err := s.repo.ListAgentRunSteps(ctx, userID, assistantIDs)
+	if err != nil {
+		return nil, err
+	}
+	stepsByMessage := make(map[int64][]ChatProcessStep, len(assistantIDs))
+	for _, step := range steps {
+		stepsByMessage[step.AssistantMsgID] = append(stepsByMessage[step.AssistantMsgID], safeChatProcessStep(step))
+	}
+	history := make([]ChatHistoryMessage, 0, len(messages))
+	for _, message := range messages {
+		item := ChatHistoryMessage{
+			PublicID:  message.PublicID,
+			Role:      message.Role,
+			MsgType:   message.MsgType,
+			Content:   message.ContentText,
+			Status:    message.Status,
+			AssetRefs: message.AssetRefs,
+			CreatedAt: message.CreatedAt,
+		}
+		if message.Role == ChatRoleAssistant {
+			item.Process = chatProcessForMessage(message, stepsByMessage[message.ID])
+		}
+		history = append(history, item)
+	}
+	return history, nil
+}
+
+func chatProcessForMessage(message ChatMessage, steps []ChatProcessStep) *ChatProcess {
+	process := &ChatProcess{
+		Status:            AgentStepStatusSucceeded,
+		Summary:           "查看处理过程",
+		ResponseStartedAt: message.CreatedAt,
+		Steps:             steps,
+	}
+	if message.Status == ChatStatusGenerating {
+		process.Status = "running"
+		process.Summary = "理解你的需求"
+		return process
+	}
+	if message.Status == ChatStatusFailed {
+		process.Status = AgentStepStatusFailed
+		process.Summary = "本轮处理未完成"
+	}
+	for _, step := range steps {
+		if step.FinishedAt != nil {
+			process.FinishedAt = step.FinishedAt
+		}
+	}
+	return process
+}
+
+func safeChatProcessStep(step AgentRunStep) ChatProcessStep {
+	summary, detail := safeProcessCopy(step.StepType, step.ToolName, step.Status)
+	return ChatProcessStep{
+		StepNo:     step.StepNo,
+		Status:     step.Status,
+		Summary:    summary,
+		Detail:     detail,
+		StartedAt:  step.StartedAt,
+		FinishedAt: optionalTime(step.FinishedAt),
+	}
+}
+
+func safeProcessCopy(stepType, toolName, status string) (string, string) {
+	if status == AgentStepStatusFailed {
+		return "本轮处理未完成", "可以补充具体场景后再试"
+	}
+	switch toolName {
+	case AdviceToolCreateDraft:
+		return "生成建议草稿", "已创建一版可继续调整的建议草稿"
+	case AdviceToolUpdateDraft:
+		return "调整建议草稿", "已更新当前建议草稿"
+	}
+	switch stepType {
+	case AgentStepTypeModelDecision:
+		return "理解你的需求", "已结合本轮场景与已有信息"
+	case AgentStepTypeToolCall, AgentStepTypeToolResult:
+		return "整理建议内容", "正在更新可执行建议"
+	case AgentStepTypeFinalResponse:
+		return "完成回复", "已整理本轮建议"
+	default:
+		return "整理本轮建议", "已处理本轮请求"
+	}
 }
 
 type Service struct {
@@ -112,6 +213,14 @@ func (s *Service) StreamStatus(ctx context.Context, userID int64) StreamStatus {
 }
 
 func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs ...ChatAssetRef) (ChatResult, error) {
+	return s.chat(ctx, userID, text, nil, assetRefs...)
+}
+
+func (s *Service) ChatWithProcessEvents(ctx context.Context, userID int64, text string, emit func(ChatProcessEvent), assetRefs ...ChatAssetRef) (ChatResult, error) {
+	return s.chat(ctx, userID, text, emit, assetRefs...)
+}
+
+func (s *Service) chat(ctx context.Context, userID int64, text string, emit func(ChatProcessEvent), assetRefs ...ChatAssetRef) (ChatResult, error) {
 	message := StreamMessage{Text: strings.TrimSpace(text)}
 	if message.Text == "" {
 		message.Text = "请告诉我想咨询的场景或想解决的问题。"
@@ -131,12 +240,14 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 	if err != nil {
 		return ChatResult{}, err
 	}
+	responseStartedAt := time.Now().UTC()
 	assistantMessage, err := s.repo.CreateChatMessage(ctx, CreateChatMessageInput{
 		UserID:      userID,
 		SourceMsgID: userMessage.ID,
 		Role:        ChatRoleAssistant,
 		MsgType:     ChatMsgTypeText,
 		Status:      ChatStatusGenerating,
+		CreatedAt:   responseStartedAt,
 	})
 	if err != nil {
 		return ChatResult{}, err
@@ -146,7 +257,18 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		UserMessagePublicID:      userMessage.PublicID,
 		AssistantMessageID:       assistantMessage.ID,
 		AssistantMessagePublicID: assistantMessage.PublicID,
+		ResponseStartedAt:        assistantMessage.CreatedAt,
 	}
+	if result.ResponseStartedAt.IsZero() {
+		result.ResponseStartedAt = responseStartedAt
+	}
+	emitChatProcess(emit, ChatProcessEvent{
+		StepNo:            1,
+		Status:            "running",
+		Summary:           "理解你的需求",
+		Detail:            "正在结合本轮场景与已有信息",
+		ResponseStartedAt: result.ResponseStartedAt,
+	})
 	currentDraft, err := s.repo.GetCurrentDraft(ctx, userID)
 	var currentDraftPtr *Draft
 	if errors.Is(err, ErrDraftNotFound) {
@@ -155,6 +277,7 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		currentDraftPtr = &currentDraft
 	}
 	if err != nil {
+		emitChatProcess(emit, failedChatProcessEvent(1, result.ResponseStartedAt))
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
 		return result, err
 	}
@@ -174,6 +297,7 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 			DurationMS:     1,
 		}, err)
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
+		emitChatProcess(emit, failedChatProcessEvent(1, result.ResponseStartedAt))
 		return result, err
 	}
 	runnerStartedAt := time.Now().UTC()
@@ -214,6 +338,16 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 			DecisionLabel: "runner_fallback_text",
 		}
 		stepOffset = 1
+		emitChatProcess(emit, failedChatProcessEvent(1, result.ResponseStartedAt))
+	} else {
+		emitChatProcess(emit, ChatProcessEvent{
+			StepNo:            1,
+			Status:            AgentStepStatusSucceeded,
+			Summary:           "理解你的需求",
+			Detail:            "已结合本轮场景与已有信息",
+			ResponseStartedAt: result.ResponseStartedAt,
+			FinishedAt:        optionalTime(runnerFinishedAt),
+		})
 	}
 	if strings.TrimSpace(output.AssistantText) == "" {
 		output.AssistantText = "请告诉我具体场景、已有单品或想调整的方向。"
@@ -271,10 +405,27 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		if err := s.repo.CreateAgentRunStep(ctx, agentRunStepFromAudit(userID, userMessage.ID, assistantMessage.ID, stepNo, auditStep)); err != nil {
 			return result, err
 		}
+		summary, detail := safeProcessCopy(auditStep.StepType, auditStep.ToolName, auditStep.Status)
+		emitChatProcess(emit, ChatProcessEvent{
+			StepNo:            stepNo,
+			Status:            firstNonEmpty(auditStep.Status, AgentStepStatusSucceeded),
+			Summary:           summary,
+			Detail:            detail,
+			ResponseStartedAt: result.ResponseStartedAt,
+			FinishedAt:        optionalTime(time.Now().UTC()),
+		})
 	}
 	for _, call := range output.ToolCalls {
 		stepNo++
 		toolStartedAt := time.Now().UTC()
+		summary, detail := safeProcessCopy(AgentStepTypeToolCall, call.Name, "running")
+		emitChatProcess(emit, ChatProcessEvent{
+			StepNo:            stepNo,
+			Status:            "running",
+			Summary:           summary,
+			Detail:            detail,
+			ResponseStartedAt: result.ResponseStartedAt,
+		})
 		if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
 			UserID:         userID,
 			SourceMsgID:    userMessage.ID,
@@ -308,6 +459,7 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 				FinishedAt:     toolFinishedAt,
 				DurationMS:     durationMS(toolStartedAt, toolFinishedAt),
 			}, err)
+			emitChatProcess(emit, failedChatProcessEvent(stepNo, result.ResponseStartedAt))
 			break
 		}
 		currentDraft = draft
@@ -334,6 +486,15 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		}); err != nil {
 			return result, err
 		}
+		summary, detail = safeProcessCopy(AgentStepTypeToolResult, call.Name, AgentStepStatusSucceeded)
+		emitChatProcess(emit, ChatProcessEvent{
+			StepNo:            stepNo,
+			Status:            AgentStepStatusSucceeded,
+			Summary:           summary,
+			Detail:            detail,
+			ResponseStartedAt: result.ResponseStartedAt,
+			FinishedAt:        optionalTime(toolFinishedAt),
+		})
 	}
 	if err != nil {
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
@@ -345,6 +506,7 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		MsgType:     ChatMsgTypeText,
 		ContentText: output.AssistantText,
 	}
+	finishedAt := time.Now().UTC()
 	finalStep := AgentRunStepInput{
 		UserID:         userID,
 		SourceMsgID:    userMessage.ID,
@@ -354,6 +516,9 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		Status:         AgentStepStatusSucceeded,
 		DecisionLabel:  "final_response",
 		OutputSummary:  output.AssistantText,
+		StartedAt:      finishedAt,
+		FinishedAt:     finishedAt,
+		DurationMS:     1,
 	}
 	if draftUpdated {
 		card := draftCard(draft)
@@ -373,7 +538,41 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 	if err := s.repo.CreateAgentRunStep(ctx, finalStep); err != nil {
 		return result, err
 	}
+	result.FinishedAt = finishedAt
+	emitChatProcess(emit, ChatProcessEvent{
+		StepNo:            finalStep.StepNo,
+		Status:            AgentStepStatusSucceeded,
+		Summary:           "完成回复",
+		Detail:            "已整理本轮建议",
+		ResponseStartedAt: result.ResponseStartedAt,
+		FinishedAt:        optionalTime(finishedAt),
+	})
 	return result, nil
+}
+
+func emitChatProcess(emit func(ChatProcessEvent), event ChatProcessEvent) {
+	if emit != nil {
+		emit(event)
+	}
+}
+
+func failedChatProcessEvent(stepNo int, responseStartedAt time.Time) ChatProcessEvent {
+	return ChatProcessEvent{
+		StepNo:            stepNo,
+		Status:            AgentStepStatusFailed,
+		Summary:           "本轮处理未完成",
+		Detail:            "可以补充具体场景后再试",
+		ResponseStartedAt: responseStartedAt,
+		FinishedAt:        optionalTime(time.Now().UTC()),
+	}
+}
+
+func optionalTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	copy := value
+	return &copy
 }
 
 func (s *Service) recordFailedStep(ctx context.Context, input AgentRunStepInput, stepErr error) error {
