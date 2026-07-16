@@ -29,6 +29,8 @@ try {
   assert(advisorWXML.includes('class="agent-process__summary"'), "advisor markup should render an agent process summary control");
   assert(advisorWXML.includes('bind:tap="handleToggleProcess"'), "agent process summary should be expandable");
   assert(!advisorWXML.includes("正在处理"), "agent process UI should show a stage summary instead of a generic processing label");
+  assert(advisorJSON.includes('"t-chat-markdown"'), "advisor page should register TDesign markdown rendering");
+  assert(advisorWXML.includes("<t-chat-markdown"), "advisor markup should render assistant content with markdown support");
 
   require.cache[require.resolve(apiPath)] = {
     id: apiPath,
@@ -120,6 +122,12 @@ try {
   assert(finishedProcess.summary === "查看处理过程" && finishedProcess.elapsed_label === "8s", "finished process should show the disclosure affordance and final elapsed time");
   const failedProcess = advisor.failChatProcess(runningProcess, new Date("2026-07-16T09:30:09.000Z"));
   assert(failedProcess.summary === "查看处理过程" && failedProcess.elapsed_label === "9s", "failed process should stop the timer at its final timestamp");
+  const rawAgentPayload = "```json\n" + JSON.stringify({
+    assistant_text: "你好，请告诉我你的场景。",
+    decision_label: "need_more_info",
+    tool_calls: []
+  }) + "\n```";
+  assert(advisor.extractAssistantText(rawAgentPayload) === "你好，请告诉我你的场景。", "assistant JSON payload should render only assistant_text");
 
   const page = Object.assign({}, pageConfig, {
     data: JSON.parse(JSON.stringify(pageConfig.data)),
@@ -130,6 +138,23 @@ try {
       }
     }
   });
+  let scrollCalls = 0;
+  page.scrollToBottom = () => {
+    scrollCalls += 1;
+  };
+  page.data.messages = [{
+    id: "assistant-process",
+    role: "assistant",
+    process: {
+      expanded: false,
+      status: "succeeded",
+      summary: "查看处理过程",
+      steps: []
+    }
+  }];
+  page.handleToggleProcess.call(page, { currentTarget: { dataset: { messageId: "assistant-process" } } });
+  assert(page.data.messages[0].process.expanded === true, "process toggle should expand the selected message");
+  assert(scrollCalls === 0, "expanding process details should keep the current scroll position");
   await awaitMaybe(page.handleFileSelect.call(page, {
     detail: {
       files: [{ url: "/tmp/chat-look.jpg", size: 2048, width: 640, height: 960 }]

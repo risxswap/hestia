@@ -50,7 +50,8 @@
               mode="aspectFill"
             />
           </view>
-          <text class="chat-message__text">{{item.content}}</text>
+          <text wx:if="{{item.role === 'user'}}" class="chat-message__text">{{item.content}}</text>
+          <t-chat-markdown wx:else class="chat-message__markdown" content="{{item.content}}" />
         </view>
 
         <view wx:if="{{item.draft}}" class="draft-card">

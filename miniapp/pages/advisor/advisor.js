@@ -75,12 +75,13 @@ Page({
   handleToggleProcess(event) {
     const messageID = event.currentTarget.dataset.messageId || "";
     if (!messageID) return;
-    this.updateMessage(messageID, (message) => {
-      if (!message.process) return message;
+    const messages = this.data.messages.map((message) => {
+      if (message.id !== messageID || !message.process) return message;
       return Object.assign({}, message, {
         process: Object.assign({}, message.process, { expanded: !message.process.expanded })
       });
     });
+    this.setData({ messages, scrollAnchor: "" });
   },
   async restoreCurrentDraft() {
     try {
@@ -290,7 +291,7 @@ Page({
         }));
       },
       onMessage: (data) => {
-        const text = data && data.text ? data.text : "";
+        const text = extractAssistantText(data && data.text ? data.text : "");
         this.updateMessage(assistantID, (message) => Object.assign({}, message, {
           status: "",
           content: text || message.content
@@ -462,10 +463,42 @@ function normalizeChatMessage(raw) {
     id: message.public_id || nextMessageID(message.role || "message"),
     role: message.role || "assistant",
     status: message.status === "failed" ? "error" : "",
-    content: message.content || "",
+    content: message.role === "assistant" ? extractAssistantText(message.content) : (message.content || ""),
     assetRefs: message.asset_refs || [],
     process: message.process ? normalizeChatProcess(message.process, new Date()) : null
   };
+}
+
+function extractAssistantText(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  const candidates = [];
+  const fenceStart = text.indexOf("```");
+  if (fenceStart >= 0) {
+    let fenced = text.slice(fenceStart + 3);
+    const lineEnd = fenced.indexOf("\n");
+    if (lineEnd >= 0) {
+      fenced = fenced.slice(lineEnd + 1);
+    }
+    const fenceEnd = fenced.indexOf("```");
+    candidates.push((fenceEnd >= 0 ? fenced.slice(0, fenceEnd) : fenced).trim());
+  }
+  const objectStart = text.indexOf("{");
+  const objectEnd = text.lastIndexOf("}");
+  if (objectStart >= 0 && objectEnd > objectStart) {
+    candidates.push(text.slice(objectStart, objectEnd + 1));
+  }
+  for (let index = 0; index < candidates.length; index += 1) {
+    try {
+      const payload = JSON.parse(candidates[index]);
+      if (payload && typeof payload.assistant_text === "string" && payload.assistant_text.trim()) {
+        return payload.assistant_text.trim();
+      }
+    } catch (error) {
+      // Preserve the original content when it is Markdown rather than Agent JSON.
+    }
+  }
+  return text;
 }
 
 function normalizeChatProcess(raw, now) {
@@ -564,6 +597,7 @@ if (typeof module !== "undefined") {
     sectionLabel,
     normalizeChatProcess,
     formatProcessElapsed,
-    failChatProcess
+    failChatProcess,
+    extractAssistantText
   };
 }

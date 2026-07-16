@@ -93,6 +93,20 @@ func TestParseAdviceRunOutputJSONMapsToolCalls(t *testing.T) {
 	}
 }
 
+func TestParseAdviceRunOutputJSONExtractsFencedPayloadWithSurroundingText(t *testing.T) {
+	output, err := parseAdviceRunOutputJSON("以下是本轮结果：\n```json\n" + `{
+  "assistant_text": "你好，先告诉我你的场景。",
+  "decision_label": "need_more_info",
+  "tool_calls": []
+}` + "\n```\n请继续补充信息。")
+	if err != nil {
+		t.Fatalf("parse fenced output with surrounding text: %v", err)
+	}
+	if output.AssistantText != "你好，先告诉我你的场景。" || output.DecisionLabel != "need_more_info" {
+		t.Fatalf("unexpected parsed output: %#v", output)
+	}
+}
+
 func containsAll(text string, values []string) bool {
 	for _, value := range values {
 		if !strings.Contains(text, value) {

@@ -203,9 +203,20 @@ func parseAdviceRunOutputJSON(raw string) (AdviceRunOutput, error) {
 
 func stripJSONFence(raw string) string {
 	text := strings.TrimSpace(raw)
-	text = strings.TrimPrefix(text, "```json")
-	text = strings.TrimPrefix(text, "```")
-	text = strings.TrimSuffix(text, "```")
+	if fenceStart := strings.Index(text, "```"); fenceStart >= 0 {
+		fenced := text[fenceStart+len("```"):]
+		if lineEnd := strings.IndexByte(fenced, '\n'); lineEnd >= 0 {
+			fenced = fenced[lineEnd+1:]
+		}
+		if fenceEnd := strings.Index(fenced, "```"); fenceEnd >= 0 {
+			text = fenced[:fenceEnd]
+		} else {
+			text = fenced
+		}
+	}
+	if objectStart := strings.IndexByte(text, '{'); objectStart >= 0 {
+		text = text[objectStart:]
+	}
 	return strings.TrimSpace(text)
 }
 
