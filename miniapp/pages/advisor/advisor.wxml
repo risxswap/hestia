@@ -21,7 +21,7 @@
             <view wx:if="{{item.process.status === 'running'}}" class="agent-process__spinner"></view>
             <text class="agent-process__label">{{item.process.summary}}</text>
             <text wx:if="{{item.process.elapsed_label}}" class="agent-process__elapsed">{{item.process.elapsed_label}}</text>
-            <t-icon class="agent-process__chevron" name="{{item.process.expanded ? 'chevron-up' : 'chevron-right'}}" size="28rpx" />
+            <t-icon class="agent-process__chevron" name="{{item.process.expanded ? 'chevron-up' : 'chevron-right'}}" size="24rpx" />
           </view>
           <view wx:if="{{item.process.expanded && item.process.steps.length}}" class="agent-process__details">
             <view
