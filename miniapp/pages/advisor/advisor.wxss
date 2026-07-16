@@ -317,6 +317,7 @@
 }
 
 .composer {
+  box-sizing: border-box;
   overflow: hidden;
   border: 1rpx solid #d8e1dd;
   border-radius: 20rpx;
@@ -324,25 +325,13 @@
   box-shadow: 0 14rpx 34rpx rgba(32, 43, 39, 0.08);
 }
 
-.composer .t-chat-sender {
-  margin: 0;
-  padding: 20rpx 0 16rpx;
-  border: 0;
-  border-radius: 20rpx;
-  background: transparent;
-  box-shadow: none;
-}
-
-.composer .t-chat-sender__actions {
-  padding: 0 22rpx;
-}
-
-.composer .t-chat-sender__textarea {
-  padding-bottom: 12rpx;
-}
-
-.composer .t-chat-sender__textarea--control {
+.composer__input {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
   min-height: 42rpx;
+  max-height: 180rpx;
+  padding: 20rpx 22rpx 12rpx;
   color: #232323;
   caret-color: #245d4f;
   font-size: 29rpx;
@@ -350,31 +339,41 @@
   letter-spacing: 0;
 }
 
-.composer .t-chat-sender__textarea--placeholder {
-  color: #8b8983;
-  font-size: 28rpx;
-  line-height: 42rpx;
-}
-
-.composer .t-chat-sender__footer {
+.composer__actions {
+  display: flex;
+  padding: 0 18rpx 16rpx;
   align-items: center;
+  justify-content: space-between;
 }
 
-.composer .t-chat-sender__sendbtn--default {
-  gap: 18rpx;
-}
-
-.composer .t-chat-sender .btn-func {
+.composer__image-button {
+  display: flex;
   width: 62rpx;
   height: 62rpx;
+  margin: 0;
+  padding: 0;
   border: 1rpx solid rgba(36, 93, 79, 0.18);
+  border-radius: 50%;
   color: #245d4f;
   background: #edf5f2;
+  align-items: center;
+  justify-content: center;
 }
 
-.composer .t-chat-sender__sendbtn--default .send-btn-text {
+.composer__image-button::after,
+.composer__submit::after {
+  border: 0;
+}
+
+.composer__image-button[disabled] {
+  color: #989690;
+  background: #edf0ee;
+}
+
+.composer__submit {
   min-width: 96rpx;
   height: 60rpx;
+  margin: 0;
   padding: 0 24rpx;
   border-radius: 999rpx;
   color: #ffffff;
@@ -384,18 +383,12 @@
   line-height: 60rpx;
 }
 
-.composer .t-chat-sender__sendbtn--default .send-btn-text.disabled {
+.composer__submit[disabled] {
   color: #989690;
   background: #edf0ee;
 }
 
-.composer .t-chat-sender__upload {
-  margin-top: 4rpx;
-  margin-bottom: 8rpx;
-  padding: 0 20rpx;
-}
-
-.composer .t-chat-sender__upload-item__icon {
-  color: #245d4f;
-  background: #edf5f2;
+.composer__submit--stop {
+  color: #8d3d32;
+  background: #fff0ec;
 }

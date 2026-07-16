@@ -100,6 +100,12 @@ func TestApplyMySQLSchemaExecutesInitialSchemaStatements(t *testing.T) {
 	if !containsStatement(exec.queries, "ALTER TABLE `chat_msgs` ADD COLUMN `asset_refs`") {
 		t.Fatalf("expected agent chat asset refs schema migration statement")
 	}
+	if !containsStatement(exec.queries, "ALTER TABLE `chat_msgs` ADD COLUMN `source_msg_id`") {
+		t.Fatalf("expected agent chat source message schema migration statement")
+	}
+	if !containsStatement(exec.queries, "ALTER TABLE `chat_msgs` ADD KEY `idx_chat_msgs_source_msg`") {
+		t.Fatalf("expected agent chat source message index migration statement")
+	}
 	if !containsStatement(exec.queries, "ALTER TABLE `agent_run_steps` ADD COLUMN `duration_ms`") {
 		t.Fatalf("expected agent run step duration schema migration statement")
 	}

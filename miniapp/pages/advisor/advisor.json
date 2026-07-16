@@ -1,8 +1,6 @@
 {
   "navigationBarTitleText": "聊聊",
   "usingComponents": {
-    "t-config-provider": "/miniprogram_npm/tdesign-miniprogram/config-provider/config-provider",
-    "t-chat-list": "/miniprogram_npm/tdesign-miniprogram/chat-list/chat-list",
-    "t-chat-sender": "/miniprogram_npm/tdesign-miniprogram/chat-sender/chat-sender"
+    "t-icon": "/miniprogram_npm/tdesign-miniprogram/icon/icon"
   }
 }

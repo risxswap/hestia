@@ -1,8 +1,11 @@
 const path = require("path");
+const fs = require("fs");
 
 const root = path.resolve(__dirname, "..");
 const pagePath = path.join(root, "pages/advisor/advisor.js");
 const apiPath = path.join(root, "utils/api.js");
+const pageJSONPath = path.join(root, "pages/advisor/advisor.json");
+const pageWXMLPath = path.join(root, "pages/advisor/advisor.wxml");
 
 function assert(condition, message) {
   if (!condition) {
@@ -12,11 +15,18 @@ function assert(condition, message) {
 
 let pageConfig = null;
 const originalPage = global.Page;
+const originalWx = global.wx;
 const originalApiCache = require.cache[require.resolve(apiPath)];
 const apiCalls = [];
 
 async function main() {
 try {
+  const advisorJSON = fs.readFileSync(pageJSONPath, "utf8");
+  const advisorWXML = fs.readFileSync(pageWXMLPath, "utf8");
+  assert(!advisorJSON.includes("t-chat-sender"), "advisor page must not depend on t-chat-sender and its incompatible attachments component");
+  assert(!advisorWXML.includes("<t-chat-sender"), "advisor markup must not render t-chat-sender");
+  assert(advisorWXML.includes('bind:tap="handleChooseImage"'), "advisor markup should provide a native image picker entry");
+
   require.cache[require.resolve(apiPath)] = {
     id: apiPath,
     filename: apiPath,
@@ -52,7 +62,8 @@ try {
     "handleContinueDraft",
     "handleDiscardDraft",
     "restoreCurrentDraft",
-    "handleFileSelect"
+    "handleFileSelect",
+    "handleChooseImage"
   ].forEach((name) => {
     assert(typeof pageConfig[name] === "function", `advisor page should define ${name}`);
   });
@@ -107,12 +118,31 @@ try {
   const userPhotoMessage = page.data.messages.find((message) => message.role === "user" && message.images && message.images.length);
   assert(userPhotoMessage.images[0].url === "/tmp/chat-look.jpg", "advisor page should render selected image preview");
 
+  let selectedFile = null;
+  global.wx = {
+    chooseMedia(options) {
+      options.success({
+        tempFiles: [{ tempFilePath: "/tmp/chosen-look.jpg", size: 4096 }]
+      });
+    }
+  };
+  page.handleFileSelect = async (event) => {
+    selectedFile = event.detail.files[0];
+  };
+  await awaitMaybe(page.handleChooseImage.call(page));
+  assert(selectedFile && selectedFile.tempFilePath === "/tmp/chosen-look.jpg", "advisor image picker should pass the selected image to upload handling");
+
   console.log("advisor page verification passed");
 } finally {
   if (typeof originalPage === "undefined") {
     delete global.Page;
   } else {
     global.Page = originalPage;
+  }
+  if (typeof originalWx === "undefined") {
+    delete global.wx;
+  } else {
+    global.wx = originalWx;
   }
   if (originalApiCache) {
     require.cache[require.resolve(apiPath)] = originalApiCache;

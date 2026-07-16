@@ -100,6 +100,50 @@ func TestServiceChatUsesAdviceRunnerToolCalls(t *testing.T) {
 	}
 }
 
+func TestServiceChatFallsBackWhenAdviceRunnerFails(t *testing.T) {
+	repo := &spyAgentRepo{}
+	runner := &spyAdviceRunner{err: errors.New("adk request failed")}
+	service := NewServiceWithRunner(repo, nil, runner)
+
+	result, err := service.Chat(context.Background(), 12, "明天通勤怎么穿")
+	if err != nil {
+		t.Fatalf("chat should fall back when ADK runner fails: %v", err)
+	}
+	if !repo.createdDraft {
+		t.Fatalf("expected rule-based fallback to create a draft")
+	}
+	if result.Draft == nil || result.Message.Text == "" {
+		t.Fatalf("expected fallback chat result, got %#v", result)
+	}
+	if len(repo.steps) < 2 {
+		t.Fatalf("expected failed ADK and fallback steps, got %#v", repo.steps)
+	}
+	failed := repo.steps[0]
+	if failed.StepType != AgentStepTypeModelDecision || failed.Status != AgentStepStatusFailed || failed.DecisionLabel != "runner_failed" || failed.ErrorMessage != "adk request failed" {
+		t.Fatalf("expected recorded ADK failure, got %#v", failed)
+	}
+	if repo.steps[1].StepNo != 2 || repo.steps[1].Status != AgentStepStatusSucceeded {
+		t.Fatalf("expected fallback model decision after failed ADK step, got %#v", repo.steps[1])
+	}
+}
+
+func TestServiceChatSetsDeadlineForAdviceRunner(t *testing.T) {
+	repo := &spyAgentRepo{}
+	runner := &spyAdviceRunner{requireDeadline: true}
+	service := NewServiceWithRunner(repo, nil, runner)
+
+	result, err := service.Chat(context.Background(), 12, "明天通勤怎么穿")
+	if err != nil {
+		t.Fatalf("chat should fall back after a runner deadline check: %v", err)
+	}
+	if !runner.hasDeadline {
+		t.Fatal("expected advice runner context to have a deadline")
+	}
+	if result.Draft == nil {
+		t.Fatalf("expected fallback draft, got %#v", result)
+	}
+}
+
 func TestServiceChatPassesAssetRefsToUserMessageAndRunner(t *testing.T) {
 	repo := &spyAgentRepo{}
 	runner := &spyAdviceRunner{
@@ -412,11 +456,18 @@ func routeLikeDraft(userID int64) Draft {
 }
 
 type spyAdviceRunner struct {
-	input  AdviceRunInput
-	output AdviceRunOutput
+	input           AdviceRunInput
+	output          AdviceRunOutput
+	err             error
+	requireDeadline bool
+	hasDeadline     bool
 }
 
-func (r *spyAdviceRunner) Run(_ context.Context, input AdviceRunInput) (AdviceRunOutput, error) {
+func (r *spyAdviceRunner) Run(ctx context.Context, input AdviceRunInput) (AdviceRunOutput, error) {
 	r.input = input
-	return r.output, nil
+	_, r.hasDeadline = ctx.Deadline()
+	if r.requireDeadline && !r.hasDeadline {
+		return AdviceRunOutput{}, errors.New("runner deadline missing")
+	}
+	return r.output, r.err
 }

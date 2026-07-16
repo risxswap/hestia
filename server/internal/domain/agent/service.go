@@ -11,7 +11,10 @@ import (
 	"hestia/server/internal/domain/profile"
 )
 
-const defaultStreamStatusText = "agent stream ready"
+const (
+	defaultStreamStatusText    = "agent stream ready"
+	defaultAdviceRunnerTimeout = 15 * time.Second
+)
 
 var (
 	ErrRepositoryUnsupported = errors.New("agent repository unsupported")
@@ -177,7 +180,8 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		runner = RuleBasedAdviceRunner{}
 	}
 	runnerStartedAt := time.Now().UTC()
-	output, err := runner.Run(ctx, AdviceRunInput{
+	runnerCtx, cancelRunner := context.WithTimeout(ctx, defaultAdviceRunnerTimeout)
+	output, err := runner.Run(runnerCtx, AdviceRunInput{
 		UserID:         userID,
 		Text:           message.Text,
 		SourceMsgID:    userMessage.ID,
@@ -185,7 +189,9 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		RecentMessages: recentMessages,
 		CurrentDraft:   currentDraftPtr,
 	})
+	cancelRunner()
 	runnerFinishedAt := time.Now().UTC()
+	stepOffset := 0
 	if err != nil {
 		_ = s.recordFailedStep(ctx, AgentRunStepInput{
 			UserID:         userID,
@@ -199,8 +205,34 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 			FinishedAt:     runnerFinishedAt,
 			DurationMS:     durationMS(runnerStartedAt, runnerFinishedAt),
 		}, err)
-		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
-		return result, err
+		fallbackStartedAt := time.Now().UTC()
+		output, err = (RuleBasedAdviceRunner{}).Run(ctx, AdviceRunInput{
+			UserID:         userID,
+			Text:           message.Text,
+			SourceMsgID:    userMessage.ID,
+			AssetRefs:      assetRefs,
+			RecentMessages: recentMessages,
+			CurrentDraft:   currentDraftPtr,
+		})
+		runnerStartedAt = fallbackStartedAt
+		runnerFinishedAt = time.Now().UTC()
+		stepOffset = 1
+		if err != nil {
+			_ = s.recordFailedStep(ctx, AgentRunStepInput{
+				UserID:         userID,
+				SourceMsgID:    userMessage.ID,
+				AssistantMsgID: assistantMessage.ID,
+				StepNo:         2,
+				StepType:       AgentStepTypeModelDecision,
+				DecisionLabel:  "fallback_failed",
+				InputSummary:   message.Text,
+				StartedAt:      fallbackStartedAt,
+				FinishedAt:     runnerFinishedAt,
+				DurationMS:     durationMS(fallbackStartedAt, runnerFinishedAt),
+			}, err)
+			_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
+			return result, err
+		}
 	}
 	if len(output.ToolCalls) == 0 {
 		refreshedDraft, refreshErr := s.repo.GetCurrentDraft(ctx, userID)
@@ -256,7 +288,7 @@ func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs
 		output.AssistantText = "我已生成一版可继续调整的形象建议草稿。"
 	}
 	result.Message = StreamMessage{Text: output.AssistantText}
-	stepNo := 1
+	stepNo := 1 + stepOffset
 	if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
 		UserID:         userID,
 		SourceMsgID:    userMessage.ID,

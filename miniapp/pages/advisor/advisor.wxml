@@ -99,22 +99,32 @@
       </view>
     </scroll-view>
 
-    <t-config-provider global-config="{{tdesignConfig}}">
-      <view class="composer">
-        <t-chat-sender
-          value="{{inputValue}}"
-          placeholder="输入场景、衣服或今天想呈现的感觉"
-          loading="{{thinking}}"
-          adjust-position="{{false}}"
-          render-presets="{{renderPresets}}"
-          textarea-props="{{textareaProps}}"
-          bind:change="handleInputChange"
-          bind:send="handleSend"
-          bind:stop="handleStop"
-          bind:fileSelect="handleFileSelect"
-          bind:keyboardheightchange="handleKeyboardHeightChange"
-        />
+    <view class="composer">
+      <textarea
+        class="composer__input"
+        value="{{inputValue}}"
+        placeholder="输入场景、衣服或今天想呈现的感觉"
+        disabled="{{thinking}}"
+        auto-height
+        confirm-type="send"
+        adjust-position="{{false}}"
+        maxlength="500"
+        bindinput="handleInputChange"
+        bindconfirm="handleSend"
+        bindkeyboardheightchange="handleKeyboardHeightChange"
+      />
+      <view class="composer__actions">
+        <button
+          class="composer__image-button"
+          disabled="{{thinking}}"
+          aria-label="选择图片"
+          bind:tap="handleChooseImage"
+        >
+          <t-icon name="image" size="32rpx" />
+        </button>
+        <button wx:if="{{thinking}}" class="composer__submit composer__submit--stop" bind:tap="handleStop">停止</button>
+        <button wx:else class="composer__submit" disabled="{{!inputValue}}" bind:tap="handleSend">发送</button>
       </view>
-    </t-config-provider>
+    </view>
   </view>
 </view>

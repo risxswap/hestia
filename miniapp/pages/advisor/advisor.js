@@ -9,29 +9,6 @@ Page({
     inputValue: "",
     footerStyle: "",
     scrollAnchor: "chat-bottom",
-    tdesignConfig: {
-      chatSender: {
-        sendText: "停止",
-        stopText: "发送"
-      }
-    },
-    renderPresets: [
-      {
-        name: "upload",
-        presets: ["uploadCamera", "uploadImage"],
-        status: ""
-      },
-      {
-        name: "send",
-        type: "text"
-      }
-    ],
-    textareaProps: {
-      autosize: {
-        minHeight: 42,
-        maxHeight: 120
-      }
-    },
     messages: [
       {
         id: "welcome",
@@ -89,6 +66,12 @@ Page({
       inputValue: ""
     });
     this.appendUserMessage(value);
+  },
+  async handleChooseImage() {
+    if (this.data.thinking) return;
+    const file = await chooseChatImageFile();
+    if (!file) return;
+    return this.handleFileSelect({ detail: { files: [file] } });
   },
   async handleFileSelect(event) {
     const files = event.detail.files || [];
@@ -341,6 +324,44 @@ Page({
 function nextMessageID(prefix) {
   messageSeq += 1;
   return `${prefix}-${Date.now()}-${messageSeq}`;
+}
+
+function chooseChatImageFile() {
+  if (typeof wx === "undefined") {
+    return Promise.resolve(null);
+  }
+  if (wx.chooseMedia) {
+    return new Promise((resolve) => {
+      wx.chooseMedia({
+        count: 1,
+        mediaType: ["image"],
+        sourceType: ["album", "camera"],
+        success(result) {
+          const files = result && result.tempFiles ? result.tempFiles : [];
+          resolve(files[0] || null);
+        },
+        fail() {
+          resolve(null);
+        }
+      });
+    });
+  }
+  if (wx.chooseImage) {
+    return new Promise((resolve) => {
+      wx.chooseImage({
+        count: 1,
+        sourceType: ["album", "camera"],
+        success(result) {
+          const paths = result && result.tempFilePaths ? result.tempFilePaths : [];
+          resolve(paths[0] ? { tempFilePath: paths[0] } : null);
+        },
+        fail() {
+          resolve(null);
+        }
+      });
+    });
+  }
+  return Promise.resolve(null);
 }
 
 function normalizeDraftCard(raw) {
