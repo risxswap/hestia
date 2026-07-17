@@ -18,6 +18,8 @@ type Config struct {
 	RedisPassword              string `env:"REDIS_PASSWORD"`
 	RedisDB                    int    `env:"REDIS_DB"`
 	LLMProvider                string `env:"LLM_PROVIDER"`
+	AgentRunnerTimeoutSeconds  int    `env:"AGENT_RUNNER_TIMEOUT_SECONDS" envDefault:"75"`
+	LLMRequestTimeoutSeconds   int    `env:"LLM_REQUEST_TIMEOUT_SECONDS" envDefault:"60"`
 	QiniuAccessKey             string `env:"QINIU_ACCESS_KEY"`
 	QiniuSecretKey             string `env:"QINIU_SECRET_KEY"`
 	QiniuBucket                string `env:"QINIU_BUCKET"`
@@ -33,6 +35,8 @@ func Load() (*Config, error) {
 	cfg := Config{
 		AppEnv:                     "development",
 		Port:                       "8080",
+		AgentRunnerTimeoutSeconds:  75,
+		LLMRequestTimeoutSeconds:   60,
 		QiniuUploadTokenTTLSeconds: 3600,
 		QiniuDownloadURLTTLSeconds: 900,
 	}
@@ -40,10 +44,28 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if err := env.Parse(&cfg); err != nil {
+		var parseErr env.ParseError
+		if errors.As(err, &parseErr) {
+			switch parseErr.Name {
+			case "AgentRunnerTimeoutSeconds":
+				return nil, fmt.Errorf("parse AGENT_RUNNER_TIMEOUT_SECONDS: %w", err)
+			case "LLMRequestTimeoutSeconds":
+				return nil, fmt.Errorf("parse LLM_REQUEST_TIMEOUT_SECONDS: %w", err)
+			}
+		}
 		return nil, err
 	}
 	if cfg.Port == "" {
 		return nil, errors.New("SERVER_PORT cannot be empty")
+	}
+	if cfg.AgentRunnerTimeoutSeconds <= 0 {
+		return nil, errors.New("AGENT_RUNNER_TIMEOUT_SECONDS must be positive")
+	}
+	if cfg.LLMRequestTimeoutSeconds <= 0 {
+		return nil, errors.New("LLM_REQUEST_TIMEOUT_SECONDS must be positive")
+	}
+	if cfg.AgentRunnerTimeoutSeconds <= cfg.LLMRequestTimeoutSeconds {
+		return nil, errors.New("AGENT_RUNNER_TIMEOUT_SECONDS must be greater than LLM_REQUEST_TIMEOUT_SECONDS")
 	}
 	return &cfg, nil
 }

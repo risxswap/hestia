@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"hestia/server/internal/infra/config"
@@ -35,6 +36,117 @@ func TestLoadUsesEnvironmentOverride(t *testing.T) {
 	}
 }
 
+func TestLoadUsesDefaultTimeouts(t *testing.T) {
+	unsetenv(t, "AGENT_RUNNER_TIMEOUT_SECONDS")
+	unsetenv(t, "LLM_REQUEST_TIMEOUT_SECONDS")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if cfg.AgentRunnerTimeoutSeconds != 75 {
+		t.Fatalf("expected agent runner timeout 75, got %d", cfg.AgentRunnerTimeoutSeconds)
+	}
+	if cfg.LLMRequestTimeoutSeconds != 60 {
+		t.Fatalf("expected llm request timeout 60, got %d", cfg.LLMRequestTimeoutSeconds)
+	}
+}
+
+func TestLoadUsesTimeoutEnvironmentOverrides(t *testing.T) {
+	t.Setenv("AGENT_RUNNER_TIMEOUT_SECONDS", "120")
+	t.Setenv("LLM_REQUEST_TIMEOUT_SECONDS", "90")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if cfg.AgentRunnerTimeoutSeconds != 120 {
+		t.Fatalf("expected agent runner timeout 120, got %d", cfg.AgentRunnerTimeoutSeconds)
+	}
+	if cfg.LLMRequestTimeoutSeconds != 90 {
+		t.Fatalf("expected llm request timeout 90, got %d", cfg.LLMRequestTimeoutSeconds)
+	}
+}
+
+func TestLoadRejectsInvalidTimeouts(t *testing.T) {
+	tests := []struct {
+		name          string
+		agentTimeout  string
+		llmTimeout    string
+		errorContains []string
+	}{
+		{
+			name:          "agent timeout is zero",
+			agentTimeout:  "0",
+			llmTimeout:    "60",
+			errorContains: []string{"AGENT_RUNNER_TIMEOUT_SECONDS"},
+		},
+		{
+			name:          "llm timeout is negative",
+			agentTimeout:  "75",
+			llmTimeout:    "-1",
+			errorContains: []string{"LLM_REQUEST_TIMEOUT_SECONDS"},
+		},
+		{
+			name:          "agent timeout does not exceed llm timeout",
+			agentTimeout:  "60",
+			llmTimeout:    "60",
+			errorContains: []string{"AGENT_RUNNER_TIMEOUT_SECONDS", "LLM_REQUEST_TIMEOUT_SECONDS"},
+		},
+		{
+			name:          "agent timeout is less than llm timeout",
+			agentTimeout:  "59",
+			llmTimeout:    "60",
+			errorContains: []string{"AGENT_RUNNER_TIMEOUT_SECONDS", "LLM_REQUEST_TIMEOUT_SECONDS"},
+		},
+		{
+			name:          "agent timeout is not an integer",
+			agentTimeout:  "invalid",
+			llmTimeout:    "60",
+			errorContains: []string{"AGENT_RUNNER_TIMEOUT_SECONDS"},
+		},
+		{
+			name:          "llm timeout is not an integer",
+			agentTimeout:  "75",
+			llmTimeout:    "invalid",
+			errorContains: []string{"LLM_REQUEST_TIMEOUT_SECONDS"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AGENT_RUNNER_TIMEOUT_SECONDS", tt.agentTimeout)
+			t.Setenv("LLM_REQUEST_TIMEOUT_SECONDS", tt.llmTimeout)
+
+			_, err := config.Load()
+			if err == nil {
+				t.Fatal("expected config load error")
+			}
+			for _, expected := range tt.errorContains {
+				if !strings.Contains(err.Error(), expected) {
+					t.Fatalf("expected error %q to contain %q", err, expected)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadDoesNotMislabelOtherParseErrorsAsTimeoutErrors(t *testing.T) {
+	t.Setenv("AGENT_RUNNER_TIMEOUT_SECONDS", "75")
+	t.Setenv("LLM_REQUEST_TIMEOUT_SECONDS", "60")
+	t.Setenv("REDIS_DB", "AgentRunnerTimeoutSeconds")
+
+	_, err := config.Load()
+	if err == nil {
+		t.Fatal("expected config load error")
+	}
+	if strings.Contains(err.Error(), "AGENT_RUNNER_TIMEOUT_SECONDS") {
+		t.Fatalf("expected unrelated parse error not to be labeled as agent timeout error: %v", err)
+	}
+}
+
 func TestConfigExposesOnlyRuntimeFields(t *testing.T) {
 	cfgType := reflect.TypeOf(config.Config{})
 	expected := []string{
@@ -45,6 +157,8 @@ func TestConfigExposesOnlyRuntimeFields(t *testing.T) {
 		"RedisPassword",
 		"RedisDB",
 		"LLMProvider",
+		"AgentRunnerTimeoutSeconds",
+		"LLMRequestTimeoutSeconds",
 		"QiniuAccessKey",
 		"QiniuSecretKey",
 		"QiniuBucket",
