@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -38,8 +39,8 @@ func TestServiceLogsAdviceRunnerLifecycle(t *testing.T) {
 			var logs bytes.Buffer
 			service := NewServiceWithRunner(&spyAgentRepo{}, nil, test.runner)
 			service.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
-			_, err := service.Chat(serverlogger.WithRequestID(context.Background(), "req_agent_test"), 12, "联系 test@example.com 后给建议")
-			if err != nil {
+			_, err := service.ChatStream(serverlogger.WithRequestID(context.Background(), "req_agent_test"), 12, "联系 test@example.com 后给建议", nil, nil)
+			if err != nil && test.name != "failed" {
 				t.Fatalf("chat: %v", err)
 			}
 			output := logs.String()
@@ -73,8 +74,8 @@ func TestServiceLogsStructuredRunnerFailureDiagnostics(t *testing.T) {
 	service := NewServiceWithRunner(&spyAgentRepo{}, nil, runner)
 	service.SetLogger(slog.New(slog.NewJSONHandler(&logs, nil)))
 
-	if _, err := service.Chat(context.Background(), 12, "明天通勤怎么穿"); err != nil {
-		t.Fatalf("chat should use fallback: %v", err)
+	if _, err := service.ChatStream(context.Background(), 12, "明天通勤怎么穿", nil, nil); !errors.Is(err, runner.err) {
+		t.Fatalf("expected runner error, got %v", err)
 	}
 	output := logs.String()
 	for _, expected := range []string{
@@ -105,9 +106,9 @@ func TestServiceChatFallsBackWhenAdviceRunnerFails(t *testing.T) {
 	runner := &spyAdviceRunner{err: errors.New("adk request failed")}
 	service := NewServiceWithRunner(repo, nil, runner)
 
-	result, err := service.Chat(context.Background(), 12, "明天通勤怎么穿")
-	if err != nil {
-		t.Fatalf("chat should return text guidance when ADK runner fails: %v", err)
+	result, err := service.ChatStream(context.Background(), 12, "明天通勤怎么穿", nil, nil)
+	if !errors.Is(err, runner.err) {
+		t.Fatalf("expected ADK runner error, got %v", err)
 	}
 	if repo.createdDraft || result.Draft != nil {
 		t.Fatalf("expected no automatic draft after ADK failure, got %#v", result)
@@ -115,15 +116,15 @@ func TestServiceChatFallsBackWhenAdviceRunnerFails(t *testing.T) {
 	if result.Message.Text != "我暂时无法生成建议，请补充具体场景后再试。" {
 		t.Fatalf("unexpected fallback guidance: %#v", result.Message)
 	}
-	if len(repo.steps) < 2 {
-		t.Fatalf("expected failed ADK and text fallback steps, got %#v", repo.steps)
+	if len(repo.steps) != 1 {
+		t.Fatalf("expected only failed ADK step, got %#v", repo.steps)
 	}
 	failed := repo.steps[0]
 	if failed.StepType != AgentStepTypeModelDecision || failed.Status != AgentStepStatusFailed || failed.DecisionLabel != "runner_failed" || failed.ErrorMessage != "adk request failed" {
 		t.Fatalf("expected recorded ADK failure, got %#v", failed)
 	}
-	if repo.steps[1].StepNo != 2 || repo.steps[1].Status != AgentStepStatusSucceeded {
-		t.Fatalf("expected fallback model decision after failed ADK step, got %#v", repo.steps[1])
+	if len(repo.updates) != 1 || repo.updates[0].Status != ChatStatusFailed {
+		t.Fatalf("expected failed message update, got %#v", repo.updates)
 	}
 }
 
@@ -135,7 +136,7 @@ func TestServiceChatKeepsTextResponseWhenRunnerDoesNotCallTools(t *testing.T) {
 	}}
 	service := NewServiceWithRunner(repo, nil, runner)
 
-	result, err := service.Chat(context.Background(), 12, "你好")
+	result, err := service.ChatStream(context.Background(), 12, "你好", nil, nil)
 	if err != nil {
 		t.Fatalf("chat: %v", err)
 	}
@@ -150,9 +151,9 @@ func TestServiceChatKeepsTextResponseWhenRunnerDoesNotCallTools(t *testing.T) {
 func TestServiceChatReturnsTextWhenAdviceRunnerIsUnavailable(t *testing.T) {
 	service := NewServiceWithRepository(&spyAgentRepo{})
 
-	result, err := service.Chat(context.Background(), 12, "你好")
-	if err != nil {
-		t.Fatalf("chat: %v", err)
+	result, err := service.ChatStream(context.Background(), 12, "你好", nil, nil)
+	if !errors.Is(err, ErrAdviceRunnerUnavailable) {
+		t.Fatalf("expected unavailable runner error, got %v", err)
 	}
 	if result.Draft != nil {
 		t.Fatalf("expected no automatic draft without an advice runner, got %#v", result.Draft)
@@ -167,7 +168,7 @@ func TestServiceChatSetsDeadlineForAdviceRunner(t *testing.T) {
 	runner := &spyAdviceRunner{requireDeadline: true}
 	service := NewServiceWithRunner(repo, nil, runner)
 
-	result, err := service.Chat(context.Background(), 12, "明天通勤怎么穿")
+	result, err := service.ChatStream(context.Background(), 12, "明天通勤怎么穿", nil, nil)
 	if err != nil {
 		t.Fatalf("chat should fall back after a runner deadline check: %v", err)
 	}
@@ -184,8 +185,8 @@ func TestServiceChatUsesConfiguredRunnerTimeout(t *testing.T) {
 	service := NewServiceWithRunnerTimeout(&spyAgentRepo{}, nil, runner, 20*time.Millisecond)
 	startedAt := time.Now()
 
-	if _, err := service.Chat(context.Background(), 12, "明天通勤怎么穿"); err != nil {
-		t.Fatalf("chat should fall back after runner timeout: %v", err)
+	if _, err := service.ChatStream(context.Background(), 12, "明天通勤怎么穿", nil, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected runner deadline error: %v", err)
 	}
 	elapsed := time.Since(startedAt)
 	if runner.deadline.IsZero() {
@@ -197,6 +198,10 @@ func TestServiceChatUsesConfiguredRunnerTimeout(t *testing.T) {
 	}
 	if elapsed < 10*time.Millisecond || elapsed > time.Second {
 		t.Fatalf("expected chat to return after configured timeout, elapsed %s", elapsed)
+	}
+	repo := service.repo.(*spyAgentRepo)
+	if len(repo.updates) != 1 || repo.updates[0].Status != ChatStatusFailed {
+		t.Fatalf("runner deadline must be failed, got %#v", repo.updates)
 	}
 }
 
@@ -210,7 +215,7 @@ func TestServiceChatPassesAssetRefsToUserMessageAndRunner(t *testing.T) {
 	}
 	service := NewServiceWithRunner(repo, nil, runner)
 
-	_, err := service.Chat(context.Background(), 12, "看看这张照片适合怎么搭", ChatAssetRef{
+	_, err := service.ChatStream(context.Background(), 12, "看看这张照片适合怎么搭", nil, nil, ChatAssetRef{
 		AssetPublicID: "ast_photo",
 		AssetType:     "chat_image",
 		Note:          "用户聊天上传图",
@@ -250,7 +255,7 @@ func TestServiceChatRecordsRunnerMetadataAndToolStepDetails(t *testing.T) {
 	}
 	service := NewServiceWithRunner(repo, nil, runner)
 
-	_, err := service.Chat(context.Background(), 12, "明天通勤怎么穿")
+	_, err := service.ChatStream(context.Background(), 12, "明天通勤怎么穿", nil, nil)
 	if err != nil {
 		t.Fatalf("chat: %v", err)
 	}
@@ -305,7 +310,7 @@ func TestServiceChatRecordsRunnerAuditStepsWithoutExecutingTools(t *testing.T) {
 	}
 	service := NewServiceWithRunner(repo, nil, runner)
 
-	result, err := service.Chat(context.Background(), 12, "鞋子换舒服点")
+	result, err := service.ChatStream(context.Background(), 12, "鞋子换舒服点", nil, nil)
 	if err != nil {
 		t.Fatalf("chat: %v", err)
 	}
@@ -333,7 +338,7 @@ func TestServiceChatDoesNotImplicitlyCreateDraftWithoutCompletedDraftAudit(t *te
 	}
 	service := NewServiceWithRunner(repo, nil, runner)
 
-	result, err := service.Chat(context.Background(), 12, "明天见客户")
+	result, err := service.ChatStream(context.Background(), 12, "明天见客户", nil, nil)
 	if err != nil {
 		t.Fatalf("chat: %v", err)
 	}
@@ -372,7 +377,7 @@ func TestServiceChatHistoryUsesPersistedStartTimeForGeneratingAssistantMessage(t
 	}
 }
 
-func TestServiceChatWithProcessEventsPublishesSafeProgressAndResponseTimes(t *testing.T) {
+func TestServiceChatStreamPublishesSafeProgressAndResponseTimes(t *testing.T) {
 	repo := &spyAgentRepo{}
 	service := NewServiceWithRunner(repo, nil, &spyAdviceRunner{output: AdviceRunOutput{
 		AssistantText: "明天见客户可以穿浅色衬衫配直筒裤。",
@@ -380,9 +385,9 @@ func TestServiceChatWithProcessEventsPublishesSafeProgressAndResponseTimes(t *te
 	}})
 	var events []ChatProcessEvent
 
-	result, err := service.ChatWithProcessEvents(context.Background(), 12, "明天见客户", func(event ChatProcessEvent) {
+	result, err := service.ChatStream(context.Background(), 12, "明天见客户", func(event ChatProcessEvent) {
 		events = append(events, event)
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("chat with process events: %v", err)
 	}
@@ -412,6 +417,11 @@ type spyAgentRepo struct {
 	lastUpdate      UpdateDraftInput
 	updateErr       error
 	history         []ChatMessage
+	updates         []UpdateChatMessageInput
+	updateCtxErrors []error
+	getDraftCalls   int
+	stepErr         error
+	calls           []string
 }
 
 func (r *spyAgentRepo) CreateChatMessage(_ context.Context, input CreateChatMessageInput) (ChatMessage, error) {
@@ -438,8 +448,11 @@ func (r *spyAgentRepo) CreateChatMessage(_ context.Context, input CreateChatMess
 	return item, nil
 }
 
-func (r *spyAgentRepo) UpdateChatMessage(_ context.Context, input UpdateChatMessageInput) (ChatMessage, error) {
-	return ChatMessage{ID: input.ID, Status: input.Status, MsgType: input.MsgType, ContentText: input.ContentText}, nil
+func (r *spyAgentRepo) UpdateChatMessage(ctx context.Context, input UpdateChatMessageInput) (ChatMessage, error) {
+	r.calls = append(r.calls, "message")
+	r.updates = append(r.updates, input)
+	r.updateCtxErrors = append(r.updateCtxErrors, ctx.Err())
+	return ChatMessage{ID: input.ID, Status: input.Status, MsgType: input.MsgType, ContentText: input.ContentText}, r.updateErr
 }
 
 func (r *spyAgentRepo) ListRecentChatMessages(context.Context, int64, int) ([]ChatMessage, error) {
@@ -455,6 +468,10 @@ func (r *spyAgentRepo) ListAgentRunSteps(context.Context, int64, []int64) ([]Age
 }
 
 func (r *spyAgentRepo) CreateAgentRunStep(_ context.Context, input AgentRunStepInput) error {
+	r.calls = append(r.calls, "audit")
+	if r.stepErr != nil {
+		return r.stepErr
+	}
 	r.steps = append(r.steps, input)
 	return nil
 }
@@ -468,6 +485,7 @@ func (r *spyAgentRepo) CreateDraft(_ context.Context, input CreateDraftInput) (D
 }
 
 func (r *spyAgentRepo) GetCurrentDraft(context.Context, int64) (Draft, error) {
+	r.getDraftCalls++
 	if r.currentDraft.ID == 0 {
 		return Draft{}, ErrDraftNotFound
 	}
@@ -521,6 +539,8 @@ type spyAdviceRunner struct {
 	err             error
 	requireDeadline bool
 	hasDeadline     bool
+	deltas          []string
+	emitErr         error
 }
 
 type metadataSpyAdviceRunner struct {
@@ -550,10 +570,269 @@ func (r *spyAdviceRunner) Run(ctx context.Context, input AdviceRunInput, emit Ad
 	if r.requireDeadline && !r.hasDeadline {
 		return AdviceRunOutput{}, errors.New("runner deadline missing")
 	}
-	if emit != nil && r.output.AssistantText != "" {
-		if err := emit(r.output.AssistantText); err != nil {
-			return AdviceRunOutput{}, err
+	deltas := r.deltas
+	if len(deltas) == 0 && r.output.AssistantText != "" {
+		deltas = []string{r.output.AssistantText}
+	}
+	for _, delta := range deltas {
+		if emit != nil {
+			if err := emit(delta); err != nil {
+				return r.output, err
+			}
 		}
 	}
+	if r.emitErr != nil {
+		return r.output, r.emitErr
+	}
 	return r.output, r.err
+}
+
+func TestServiceChatStreamPersistsDeltasOnce(t *testing.T) {
+	repo := &spyAgentRepo{}
+	runner := &spyAdviceRunner{deltas: []string{"浅色衬衫", "配直筒裤"}, output: AdviceRunOutput{AssistantText: "浅色衬衫配直筒裤", DecisionLabel: "chat_response"}}
+	service := NewServiceWithRunner(repo, nil, runner)
+	var deltas []StreamDelta
+
+	result, err := service.ChatStream(context.Background(), 12, "明天见客户", nil, func(delta StreamDelta) error {
+		deltas = append(deltas, delta)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("chat stream: %v", err)
+	}
+	if len(deltas) != 2 || deltas[0].Text+deltas[1].Text != result.Message.Text {
+		t.Fatalf("unexpected deltas/result: %#v %#v", deltas, result)
+	}
+	if len(repo.updates) != 1 || repo.updates[0].ContentText != result.Message.Text || repo.updates[0].Status != ChatStatusSent {
+		t.Fatalf("expected one final update, got %#v", repo.updates)
+	}
+}
+
+func TestServiceChatStreamRunnerFailures(t *testing.T) {
+	runnerFailure := errors.New("runner failed")
+	tests := []struct {
+		name       string
+		ctx        func() (context.Context, context.CancelFunc)
+		runner     *spyAdviceRunner
+		wantErr    error
+		wantStatus string
+		wantText   string
+	}{
+		{name: "stream closed after partial", ctx: backgroundContext, runner: &spyAdviceRunner{deltas: []string{"已生成"}, output: AdviceRunOutput{AssistantText: "已生成"}, emitErr: ErrStreamClosed}, wantErr: ErrChatStopped, wantStatus: ChatStatusStopped, wantText: "已生成"},
+		{name: "ordinary error with partial", ctx: backgroundContext, runner: &spyAdviceRunner{deltas: []string{"部分建议"}, output: AdviceRunOutput{AssistantText: "部分建议"}, err: runnerFailure}, wantErr: runnerFailure, wantStatus: ChatStatusFailed, wantText: "部分建议"},
+		{name: "ordinary error without partial", ctx: backgroundContext, runner: &spyAdviceRunner{err: runnerFailure}, wantErr: runnerFailure, wantStatus: ChatStatusFailed, wantText: runnerFallbackText},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &spyAgentRepo{}
+			service := NewServiceWithRunner(repo, nil, tt.runner)
+			ctx, cancel := tt.ctx()
+			defer cancel()
+			_, err := service.ChatStream(ctx, 12, "明天见客户", nil, func(StreamDelta) error { return nil })
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("expected %v, got %v", tt.wantErr, err)
+			}
+			if len(repo.updates) != 1 || repo.updates[0].Status != tt.wantStatus || repo.updates[0].ContentText != tt.wantText {
+				t.Fatalf("unexpected update: %#v", repo.updates)
+			}
+			for _, step := range repo.steps {
+				if step.StepType == AgentStepTypeFinalResponse && step.Status == AgentStepStatusSucceeded {
+					t.Fatalf("failure persisted success final step: %#v", repo.steps)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceChatStreamZeroDeltaStopsUseStoppedText(t *testing.T) {
+	tests := []struct {
+		name   string
+		runner AdviceRunner
+	}{
+		{name: "stream closed", runner: &spyAdviceRunner{emitErr: ErrStreamClosed}},
+		{name: "wrapped stream closed", runner: &spyAdviceRunner{emitErr: fmt.Errorf("client disconnected: %w", ErrStreamClosed)}},
+		{name: "context canceled", runner: adviceRunnerFunc(func(ctx context.Context, _ AdviceRunInput, _ AdviceTextDeltaEmitter) (AdviceRunOutput, error) {
+			return AdviceRunOutput{}, context.Canceled
+		})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &spyAgentRepo{}
+			_, err := NewServiceWithRunner(repo, nil, tt.runner).ChatStream(context.Background(), 12, "继续", nil, nil)
+			if !errors.Is(err, ErrChatStopped) {
+				t.Fatalf("expected stopped, got %v", err)
+			}
+			if strings.Contains(tt.name, "stream closed") && !errors.Is(err, ErrStreamClosed) {
+				t.Fatalf("expected original stream-close cause, got %v", err)
+			}
+			if len(repo.updates) != 1 || repo.updates[0].ContentText != "已停止生成。" {
+				t.Fatalf("unexpected zero-delta stopped content: %#v", repo.updates)
+			}
+		})
+	}
+}
+
+func TestServiceChatStreamMessageUpdateFailuresAreReturned(t *testing.T) {
+	updateErr := errors.New("message update failed")
+	runnerErr := errors.New("runner failed")
+	tests := []struct {
+		name        string
+		runner      AdviceRunner
+		wantPrimary error
+		wantStatus  string
+	}{
+		{name: "failed", runner: &spyAdviceRunner{err: runnerErr}, wantPrimary: runnerErr, wantStatus: ChatStatusFailed},
+		{name: "stopped", runner: &spyAdviceRunner{emitErr: ErrStreamClosed}, wantPrimary: ErrChatStopped, wantStatus: ChatStatusStopped},
+		{name: "normal", runner: &spyAdviceRunner{output: AdviceRunOutput{AssistantText: "完整建议"}}, wantPrimary: updateErr, wantStatus: ChatStatusSent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &spyAgentRepo{updateErr: updateErr}
+			_, err := NewServiceWithRunner(repo, nil, tt.runner).ChatStream(context.Background(), 12, "建议", nil, nil)
+			if !errors.Is(err, tt.wantPrimary) || !errors.Is(err, updateErr) {
+				t.Fatalf("expected primary %v and update error, got %v", tt.wantPrimary, err)
+			}
+			if len(repo.updates) != 1 || repo.updates[0].Status != tt.wantStatus {
+				t.Fatalf("expected attempted %s update, got %#v", tt.wantStatus, repo.updates)
+			}
+		})
+	}
+}
+
+func TestServiceChatStreamFailurePersistsAuditsBeforeMessage(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	runnerErr := errors.New("runner failed")
+	repo := &spyAgentRepo{stepErr: auditErr}
+	runner := &spyAdviceRunner{output: AdviceRunOutput{AuditSteps: []AdviceRunAuditStep{
+		{StepType: AgentStepTypeToolCall, Status: AgentStepStatusSucceeded, ToolName: AdviceToolUpdateDraft, ToolCallID: "call_1"},
+		{StepType: AgentStepTypeToolResult, Status: AgentStepStatusSucceeded, ToolName: AdviceToolUpdateDraft, ToolCallID: "call_1"},
+	}}, err: runnerErr}
+
+	_, err := NewServiceWithRunner(repo, nil, runner).ChatStream(context.Background(), 12, "调整", nil, nil)
+	if !errors.Is(err, runnerErr) || !errors.Is(err, auditErr) {
+		t.Fatalf("expected runner root and audit error, got %v", err)
+	}
+	if len(repo.calls) < 3 || repo.calls[0] != "audit" || repo.calls[1] != "audit" || repo.calls[2] != "message" {
+		t.Fatalf("expected all audits before message, got %#v", repo.calls)
+	}
+	if len(repo.updates) != 1 || repo.updates[0].Status != ChatStatusFailed {
+		t.Fatalf("audit failure left message generating: %#v", repo.updates)
+	}
+}
+
+func TestServiceChatStreamCanceledPersistsWithIndependentContext(t *testing.T) {
+	repo := &spyAgentRepo{}
+	ctx, cancel := context.WithCancel(context.Background())
+	runner := adviceRunnerFunc(func(_ context.Context, _ AdviceRunInput, emit AdviceTextDeltaEmitter) (AdviceRunOutput, error) {
+		output := AdviceRunOutput{AssistantText: "部分"}
+		if err := emit("部分"); err != nil {
+			return output, err
+		}
+		cancel()
+		return output, context.Canceled
+	})
+	service := NewServiceWithRunner(repo, nil, runner)
+
+	_, err := service.ChatStream(ctx, 12, "继续", nil, func(StreamDelta) error { return nil })
+	if !errors.Is(err, ErrChatStopped) {
+		t.Fatalf("expected stopped, got %v", err)
+	}
+	if len(repo.updateCtxErrors) != 1 || repo.updateCtxErrors[0] != nil || repo.updates[0].Status != ChatStatusStopped {
+		t.Fatalf("expected independent update context, got errors=%#v updates=%#v", repo.updateCtxErrors, repo.updates)
+	}
+}
+
+func TestServiceChatStreamEmitterCloseSavesOnlySuccessfulDeltas(t *testing.T) {
+	repo := &spyAgentRepo{}
+	runner := adviceRunnerFunc(func(_ context.Context, _ AdviceRunInput, emit AdviceTextDeltaEmitter) (AdviceRunOutput, error) {
+		output := AdviceRunOutput{}
+		for _, text := range []string{"已生成", "不应保存"} {
+			if err := emit(text); err != nil {
+				return output, err
+			}
+			output.AssistantText += text
+		}
+		return output, nil
+	})
+	service := NewServiceWithRunner(repo, nil, runner)
+	emitted := 0
+
+	_, err := service.ChatStream(context.Background(), 12, "继续", nil, func(delta StreamDelta) error {
+		emitted++
+		if emitted == 2 {
+			return ErrStreamClosed
+		}
+		return nil
+	})
+	if !errors.Is(err, ErrChatStopped) {
+		t.Fatalf("expected stopped, got %v", err)
+	}
+	if len(repo.updates) != 1 || repo.updates[0].ContentText != "已生成" || repo.updates[0].Status != ChatStatusStopped {
+		t.Fatalf("unexpected stopped update: %#v", repo.updates)
+	}
+}
+
+func TestServiceChatStreamAuditFailureStillFinalizesMessage(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	repo := &spyAgentRepo{stepErr: auditErr}
+	runnerErr := errors.New("runner failed")
+	runner := &spyAdviceRunner{output: AdviceRunOutput{AssistantText: "部分", AuditSteps: []AdviceRunAuditStep{{StepType: AgentStepTypeToolCall, Status: AgentStepStatusSucceeded, ToolName: AdviceToolUpdateDraft}}}, err: runnerErr}
+
+	_, err := NewServiceWithRunner(repo, nil, runner).ChatStream(context.Background(), 12, "调整", nil, nil)
+	if !errors.Is(err, runnerErr) || !errors.Is(err, auditErr) {
+		t.Fatalf("expected runner and audit errors, got %v", err)
+	}
+	if len(repo.updates) != 1 || repo.updates[0].Status != ChatStatusFailed {
+		t.Fatalf("assistant left generating: %#v", repo.updates)
+	}
+}
+
+func TestServiceChatStreamSuccessfulRunnerAuditFailureDoesNotLeaveGenerating(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	repo := &spyAgentRepo{stepErr: auditErr}
+	runner := &spyAdviceRunner{output: AdviceRunOutput{AssistantText: "完整建议"}}
+
+	_, err := NewServiceWithRunner(repo, nil, runner).ChatStream(context.Background(), 12, "建议", nil, nil)
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("expected audit error, got %v", err)
+	}
+	if len(repo.updates) != 1 || repo.updates[0].Status != ChatStatusFailed || repo.updates[0].ContentText != "完整建议" {
+		t.Fatalf("assistant left generating: %#v", repo.updates)
+	}
+}
+
+func TestServiceChatStreamFailurePersistsAuditWithoutRefreshingDraft(t *testing.T) {
+	repo := &spyAgentRepo{currentDraft: routeLikeDraft(12)}
+	runnerErr := errors.New("after tool")
+	runner := &spyAdviceRunner{output: AdviceRunOutput{AssistantText: "部分", AuditSteps: []AdviceRunAuditStep{{StepType: AgentStepTypeToolResult, Status: AgentStepStatusSucceeded, ToolName: AdviceToolUpdateDraft, ToolCallID: "call_1"}}}, err: runnerErr}
+	service := NewServiceWithRunner(repo, nil, runner)
+
+	_, err := service.ChatStream(context.Background(), 12, "调整", nil, nil)
+	if !errors.Is(err, runnerErr) {
+		t.Fatalf("expected runner error, got %v", err)
+	}
+	if len(repo.steps) != 2 || repo.steps[0].ToolCallID != "call_1" || repo.getDraftCalls != 1 {
+		t.Fatalf("expected audit persisted without post-run draft refresh, calls=%d steps=%#v", repo.getDraftCalls, repo.steps)
+	}
+}
+
+func TestServiceChatHistoryStopped(t *testing.T) {
+	repo := &spyAgentRepo{history: []ChatMessage{{ID: 2, Role: ChatRoleAssistant, Status: ChatStatusStopped, CreatedAt: time.Now()}}}
+	messages, err := NewServiceWithRepository(repo).ChatHistory(context.Background(), 12, 50)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if messages[0].Process.Status != ChatStatusStopped || messages[0].Process.Summary != "已停止" {
+		t.Fatalf("unexpected stopped process: %#v", messages[0].Process)
+	}
+}
+
+type adviceRunnerFunc func(context.Context, AdviceRunInput, AdviceTextDeltaEmitter) (AdviceRunOutput, error)
+
+func (f adviceRunnerFunc) Run(ctx context.Context, input AdviceRunInput, emit AdviceTextDeltaEmitter) (AdviceRunOutput, error) {
+	return f(ctx, input, emit)
+}
+
+func backgroundContext() (context.Context, context.CancelFunc) {
+	return context.Background(), func() {}
 }

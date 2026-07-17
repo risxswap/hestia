@@ -88,7 +88,7 @@ func TestChatRouteStreamsProcessEventsWithResponseTimes(t *testing.T) {
 		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
 		c.Next()
 	})
-	service := agent.NewServiceWithDependencies(newRouteAgentRepo(), nil)
+	service := agent.NewServiceWithRunner(newRouteAgentRepo(), nil, routeAdviceRunner{})
 	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
 	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{"text":"明天见客户"}`))
 	request.Header.Set("Accept", "text/event-stream")
@@ -155,7 +155,7 @@ func TestChatRouteAcceptsAssetRefs(t *testing.T) {
 		c.Next()
 	})
 	repo := newRouteAgentRepo()
-	service := agent.NewServiceWithDependencies(repo, nil)
+	service := agent.NewServiceWithRunner(repo, nil, routeAdviceRunner{})
 	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
 	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{
 		"text":"看看这张照片怎么搭",
@@ -401,6 +401,16 @@ func routeDraft(userID int64) agent.Draft {
 
 type routeClothesRepo struct {
 	items []clothes.Item
+}
+
+type routeAdviceRunner struct{}
+
+func (routeAdviceRunner) Run(_ context.Context, _ agent.AdviceRunInput, emit agent.AdviceTextDeltaEmitter) (agent.AdviceRunOutput, error) {
+	const text = "已整理好建议。"
+	if err := emit(text); err != nil {
+		return agent.AdviceRunOutput{}, err
+	}
+	return agent.AdviceRunOutput{AssistantText: text, DecisionLabel: "chat_response"}, nil
 }
 
 func (r *routeClothesRepo) CreateCoreItems(_ context.Context, items []clothes.Item) ([]clothes.Item, error) {

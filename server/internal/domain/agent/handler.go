@@ -35,10 +35,10 @@ func (h *Handler) Chat(c *gin.Context) {
 	c.Status(http.StatusOK)
 	_ = response.WriteSSE(c.Writer, "status", h.service.StreamStatus(c.Request.Context(), user.UserID))
 	c.Writer.Flush()
-	result, err := h.service.ChatWithProcessEvents(c.Request.Context(), user.UserID, request.Text, func(event ChatProcessEvent) {
+	result, err := h.service.ChatStream(c.Request.Context(), user.UserID, request.Text, func(event ChatProcessEvent) {
 		_ = response.WriteSSE(c.Writer, "process", event)
 		c.Writer.Flush()
-	}, request.AssetRefs...)
+	}, func(StreamDelta) error { return nil }, request.AssetRefs...)
 	if err != nil {
 		_ = response.WriteSSE(c.Writer, "error", gin.H{"message": "智能体请求失败"})
 		c.Writer.Flush()

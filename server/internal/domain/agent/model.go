@@ -1,6 +1,9 @@
 package agent
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 const (
 	ChatRoleUser      = "user"
@@ -13,6 +16,7 @@ const (
 	ChatStatusSent       = "sent"
 	ChatStatusGenerating = "generating"
 	ChatStatusFailed     = "failed"
+	ChatStatusStopped    = "stopped"
 
 	AgentStepTypeModelDecision = "model_decision"
 	AgentStepTypeToolCall      = "tool_call"
@@ -30,6 +34,11 @@ const (
 	SectionTypeOutfit = "outfit"
 	SectionTypeHair   = "hair"
 	SectionTypeMakeup = "makeup"
+)
+
+var (
+	ErrChatStopped  = errors.New("chat stopped")
+	ErrStreamClosed = errors.New("stream closed")
 )
 
 type ChatRequest struct {
@@ -50,6 +59,10 @@ type StreamStatus struct {
 }
 
 type StreamMessage struct {
+	Text string `json:"text"`
+}
+
+type StreamDelta struct {
 	Text string `json:"text"`
 }
 

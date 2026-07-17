@@ -118,6 +118,10 @@ func chatProcessForMessage(message ChatMessage, steps []ChatProcessStep) *ChatPr
 		process.Status = AgentStepStatusFailed
 		process.Summary = "本轮处理未完成"
 	}
+	if message.Status == ChatStatusStopped {
+		process.Status = ChatStatusStopped
+		process.Summary = "已停止"
+	}
 	for _, step := range steps {
 		if step.FinishedAt != nil {
 			process.FinishedAt = step.FinishedAt
@@ -248,15 +252,7 @@ func (s *Service) StreamStatus(ctx context.Context, userID int64) StreamStatus {
 	return StreamStatus{Text: text + "；核心衣服：" + strings.Join(names, "、")}
 }
 
-func (s *Service) Chat(ctx context.Context, userID int64, text string, assetRefs ...ChatAssetRef) (ChatResult, error) {
-	return s.chat(ctx, userID, text, nil, assetRefs...)
-}
-
-func (s *Service) ChatWithProcessEvents(ctx context.Context, userID int64, text string, emit func(ChatProcessEvent), assetRefs ...ChatAssetRef) (ChatResult, error) {
-	return s.chat(ctx, userID, text, emit, assetRefs...)
-}
-
-func (s *Service) chat(ctx context.Context, userID int64, text string, emit func(ChatProcessEvent), assetRefs ...ChatAssetRef) (ChatResult, error) {
+func (s *Service) ChatStream(ctx context.Context, userID int64, text string, emitProcess func(ChatProcessEvent), emitDelta func(StreamDelta) error, assetRefs ...ChatAssetRef) (ChatResult, error) {
 	message := StreamMessage{Text: strings.TrimSpace(text)}
 	if message.Text == "" {
 		message.Text = "请告诉我想咨询的场景或想解决的问题。"
@@ -298,7 +294,7 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 	if result.ResponseStartedAt.IsZero() {
 		result.ResponseStartedAt = responseStartedAt
 	}
-	emitChatProcess(emit, ChatProcessEvent{
+	emitChatProcess(emitProcess, ChatProcessEvent{
 		StepNo:            1,
 		Status:            "running",
 		Summary:           "理解你的需求",
@@ -313,7 +309,7 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		currentDraftPtr = &currentDraft
 	}
 	if err != nil {
-		emitChatProcess(emit, failedChatProcessEvent(1, result.ResponseStartedAt))
+		emitChatProcess(emitProcess, failedChatProcessEvent(1, result.ResponseStartedAt))
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
 		return result, err
 	}
@@ -333,7 +329,7 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 			DurationMS:     1,
 		}, err)
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
-		emitChatProcess(emit, failedChatProcessEvent(1, result.ResponseStartedAt))
+		emitChatProcess(emitProcess, failedChatProcessEvent(1, result.ResponseStartedAt))
 		return result, err
 	}
 	runnerStartedAt := time.Now().UTC()
@@ -374,15 +370,22 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		errorDiagnostics = diagnoseAgentError(ctx, runnerErr, runnerMetadata)
 	} else {
 		runnerCtx, cancelRunner := context.WithTimeout(ctx, s.runnerTimeout)
-		output, runnerErr = s.runner.Run(runnerCtx, runnerInput, nil)
+		output, runnerErr = s.runner.Run(runnerCtx, runnerInput, func(text string) error {
+			if emitDelta == nil {
+				return nil
+			}
+			return emitDelta(StreamDelta{Text: text})
+		})
 		if runnerErr != nil {
 			errorDiagnostics = diagnoseAgentError(runnerCtx, runnerErr, runnerMetadata)
 		}
 		cancelRunner()
 	}
+	if runnerErr == nil && ctx.Err() != nil {
+		runnerErr = ctx.Err()
+	}
 	runnerFinishedAt := time.Now().UTC()
 	runnerDuration := durationMS(runnerStartedAt, runnerFinishedAt)
-	stepOffset := 0
 	if runnerErr != nil {
 		errorAttrs := append([]any{}, runnerAttrs...)
 		errorAttrs = append(errorAttrs,
@@ -392,11 +395,41 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		)
 		errorAttrs = append(errorAttrs, errorDiagnostics.logAttrs()...)
 		runnerLog.ErrorContext(ctx, "agent llm call failed", errorAttrs...)
-		_ = s.recordFailedStep(ctx, AgentRunStepInput{
+		stopped := ctx.Err() != nil || errors.Is(runnerErr, context.Canceled) || errors.Is(runnerErr, ErrStreamClosed)
+		status := ChatStatusFailed
+		terminalErr := runnerErr
+		if stopped {
+			status = ChatStatusStopped
+			terminalErr = errors.Join(ErrChatStopped, runnerErr)
+		}
+		content := strings.TrimSpace(output.AssistantText)
+		if content == "" && !stopped {
+			content = runnerFallbackText
+		} else if content == "" {
+			content = "已停止生成。"
+		}
+		result.Message = StreamMessage{Text: content}
+		persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancelPersist()
+		var auditErr error
+		stepNo := 0
+		for _, auditStep := range output.AuditSteps {
+			stepNo++
+			if err := s.repo.CreateAgentRunStep(persistCtx, agentRunStepFromAudit(userID, userMessage.ID, assistantMessage.ID, stepNo, auditStep)); err != nil {
+				if auditErr == nil {
+					auditErr = err
+				}
+			}
+		}
+		_, updateErr := s.repo.UpdateChatMessage(persistCtx, UpdateChatMessageInput{
+			ID: assistantMessage.ID, Status: status, MsgType: ChatMsgTypeText, ContentText: content,
+		})
+		stepNo++
+		failedStepErr := s.recordFailedStep(persistCtx, AgentRunStepInput{
 			UserID:         userID,
 			SourceMsgID:    userMessage.ID,
 			AssistantMsgID: assistantMessage.ID,
-			StepNo:         1,
+			StepNo:         stepNo,
 			StepType:       AgentStepTypeModelDecision,
 			DecisionLabel:  "runner_failed",
 			InputSummary:   message.Text,
@@ -404,12 +437,11 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 			FinishedAt:     runnerFinishedAt,
 			DurationMS:     durationMS(runnerStartedAt, runnerFinishedAt),
 		}, runnerErr)
-		output = AdviceRunOutput{
-			AssistantText: runnerFallbackText,
-			DecisionLabel: "runner_fallback_text",
+		emitChatProcess(emitProcess, failedChatProcessEvent(stepNo, result.ResponseStartedAt))
+		if auditErr != nil || updateErr != nil || failedStepErr != nil {
+			return result, errors.Join(terminalErr, auditErr, updateErr, failedStepErr)
 		}
-		stepOffset = 1
-		emitChatProcess(emit, failedChatProcessEvent(1, result.ResponseStartedAt))
+		return result, terminalErr
 	} else {
 		successAttrs := append([]any{}, runnerAttrs...)
 		successAttrs = append(successAttrs,
@@ -422,7 +454,7 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 			"output_summary", serverlogger.SanitizeSummary(output.AssistantText),
 		)
 		runnerLog.InfoContext(ctx, "agent llm call completed", successAttrs...)
-		emitChatProcess(emit, ChatProcessEvent{
+		emitChatProcess(emitProcess, ChatProcessEvent{
 			StepNo:            1,
 			Status:            AgentStepStatusSucceeded,
 			Summary:           "理解你的需求",
@@ -435,7 +467,7 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		output.AssistantText = "请告诉我具体场景、已有单品或想调整的方向。"
 	}
 	result.Message = StreamMessage{Text: output.AssistantText}
-	stepNo := 1 + stepOffset
+	stepNo := 1
 	if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
 		UserID:         userID,
 		SourceMsgID:    userMessage.ID,
@@ -455,7 +487,7 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		FinishedAt:     runnerFinishedAt,
 		DurationMS:     durationMS(runnerStartedAt, runnerFinishedAt),
 	}); err != nil {
-		return result, err
+		return result, errors.Join(err, s.persistFailedAssistant(ctx, assistantMessage.ID, output.AssistantText))
 	}
 	var draft Draft
 	draftUpdated := false
@@ -485,10 +517,10 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 	for _, auditStep := range output.AuditSteps {
 		stepNo++
 		if err := s.repo.CreateAgentRunStep(ctx, agentRunStepFromAudit(userID, userMessage.ID, assistantMessage.ID, stepNo, auditStep)); err != nil {
-			return result, err
+			return result, errors.Join(err, s.persistFailedAssistant(ctx, assistantMessage.ID, output.AssistantText))
 		}
 		summary, detail := safeProcessCopy(auditStep.StepType, auditStep.ToolName, auditStep.Status)
-		emitChatProcess(emit, ChatProcessEvent{
+		emitChatProcess(emitProcess, ChatProcessEvent{
 			StepNo:            stepNo,
 			Status:            firstNonEmpty(auditStep.Status, AgentStepStatusSucceeded),
 			Summary:           summary,
@@ -536,7 +568,7 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		return result, err
 	}
 	result.FinishedAt = finishedAt
-	emitChatProcess(emit, ChatProcessEvent{
+	emitChatProcess(emitProcess, ChatProcessEvent{
 		StepNo:            finalStep.StepNo,
 		Status:            AgentStepStatusSucceeded,
 		Summary:           "完成回复",
@@ -583,6 +615,18 @@ func (s *Service) recordFailedStep(ctx context.Context, input AgentRunStepInput,
 	input.Status = AgentStepStatusFailed
 	input.ErrorMessage = errorText
 	return s.repo.CreateAgentRunStep(ctx, input)
+}
+
+func (s *Service) persistFailedAssistant(parent context.Context, assistantMessageID int64, content string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 3*time.Second)
+	defer cancel()
+	_, err := s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{
+		ID:          assistantMessageID,
+		Status:      ChatStatusFailed,
+		MsgType:     ChatMsgTypeText,
+		ContentText: content,
+	})
+	return err
 }
 
 func durationMS(startedAt, finishedAt time.Time) int {
