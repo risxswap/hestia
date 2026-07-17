@@ -230,6 +230,27 @@ func TestServiceChatSetsDeadlineForAdviceRunner(t *testing.T) {
 	}
 }
 
+func TestServiceChatUsesConfiguredRunnerTimeout(t *testing.T) {
+	runner := &contextDeadlineRunner{}
+	service := NewServiceWithRunnerTimeout(&spyAgentRepo{}, nil, runner, 20*time.Millisecond)
+	startedAt := time.Now()
+
+	if _, err := service.Chat(context.Background(), 12, "明天通勤怎么穿"); err != nil {
+		t.Fatalf("chat should fall back after runner timeout: %v", err)
+	}
+	elapsed := time.Since(startedAt)
+	if runner.deadline.IsZero() {
+		t.Fatal("expected runner context deadline")
+	}
+	deadlineDuration := runner.deadline.Sub(startedAt)
+	if deadlineDuration < 10*time.Millisecond || deadlineDuration > 100*time.Millisecond {
+		t.Fatalf("expected deadline near configured 20ms, got %s", deadlineDuration)
+	}
+	if elapsed < 10*time.Millisecond || elapsed > time.Second {
+		t.Fatalf("expected chat to return after configured timeout, elapsed %s", elapsed)
+	}
+}
+
 func TestServiceChatPassesAssetRefsToUserMessageAndRunner(t *testing.T) {
 	repo := &spyAgentRepo{}
 	runner := &spyAdviceRunner{
@@ -604,6 +625,16 @@ type spyAdviceRunner struct {
 	err             error
 	requireDeadline bool
 	hasDeadline     bool
+}
+
+type contextDeadlineRunner struct {
+	deadline time.Time
+}
+
+func (r *contextDeadlineRunner) Run(ctx context.Context, _ AdviceRunInput) (AdviceRunOutput, error) {
+	r.deadline, _ = ctx.Deadline()
+	<-ctx.Done()
+	return AdviceRunOutput{}, ctx.Err()
 }
 
 func (r *spyAdviceRunner) Run(ctx context.Context, input AdviceRunInput) (AdviceRunOutput, error) {

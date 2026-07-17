@@ -3,6 +3,7 @@ package clothes
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/domain/asset"
@@ -24,7 +25,11 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 		service.SetRecognitionJobCreator(NewAsyncJobRecognitionCreator(job.NewService(job.NewMySQLRepository(deps.DB)), service))
 		if deps.LLM != nil {
 			llmRepo := llm.NewMySQLConfigRepository(deps.DB)
-			llmService := llm.NewService(llm.NewConfigResolver(llmRepo), deps.LLM)
+			llmTimeout := time.Duration(0)
+			if deps.Config != nil {
+				llmTimeout = time.Duration(deps.Config.LLMRequestTimeoutSeconds) * time.Second
+			}
+			llmService := llm.NewServiceWithTimeout(llm.NewConfigResolver(llmRepo), deps.LLM, llmTimeout)
 			llmService.SetLogger(deps.Logger)
 			service.SetImageRecognizer(NewLLMImageRecognizer(llmService))
 		}

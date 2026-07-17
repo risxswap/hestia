@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultStreamStatusText    = "agent stream ready"
-	defaultAdviceRunnerTimeout = 15 * time.Second
+	defaultAdviceRunnerTimeout = 75 * time.Second
 	runnerFallbackText         = "我暂时无法生成建议，请补充具体场景后再试。"
 )
 
@@ -161,30 +161,46 @@ func safeProcessCopy(stepType, toolName, status string) (string, string) {
 }
 
 type Service struct {
-	clothes ClothesAdviceService
-	repo    Repository
-	runner  AdviceRunner
-	logger  *slog.Logger
+	clothes       ClothesAdviceService
+	repo          Repository
+	runner        AdviceRunner
+	logger        *slog.Logger
+	runnerTimeout time.Duration
 }
 
 func NewService() *Service {
-	return &Service{}
+	return &Service{runnerTimeout: defaultAdviceRunnerTimeout}
 }
 
 func NewServiceWithClothes(clothesService ClothesAdviceService) *Service {
-	return &Service{clothes: clothesService}
+	service := NewService()
+	service.clothes = clothesService
+	return service
 }
 
 func NewServiceWithRepository(repo Repository) *Service {
-	return &Service{repo: repo}
+	service := NewService()
+	service.repo = repo
+	return service
 }
 
 func NewServiceWithDependencies(repo Repository, clothesService ClothesAdviceService) *Service {
-	return &Service{repo: repo, clothes: clothesService}
+	service := NewService()
+	service.repo = repo
+	service.clothes = clothesService
+	return service
 }
 
 func NewServiceWithRunner(repo Repository, clothesService ClothesAdviceService, runner AdviceRunner) *Service {
-	return &Service{repo: repo, clothes: clothesService, runner: runner}
+	service := NewServiceWithDependencies(repo, clothesService)
+	service.runner = runner
+	return service
+}
+
+func NewServiceWithRunnerTimeout(repo Repository, clothesService ClothesAdviceService, runner AdviceRunner, timeout time.Duration) *Service {
+	service := NewServiceWithRunner(repo, clothesService, runner)
+	service.SetRunnerTimeout(timeout)
+	return service
 }
 
 func (s *Service) SetAdviceRunner(runner AdviceRunner) {
@@ -192,6 +208,12 @@ func (s *Service) SetAdviceRunner(runner AdviceRunner) {
 		return
 	}
 	s.runner = runner
+}
+
+func (s *Service) SetRunnerTimeout(timeout time.Duration) {
+	if s != nil && timeout > 0 {
+		s.runnerTimeout = timeout
+	}
 }
 
 func (s *Service) SetLogger(logger *slog.Logger) {
@@ -342,7 +364,7 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 	if s.runner == nil {
 		runnerErr = ErrAdviceRunnerUnavailable
 	} else {
-		runnerCtx, cancelRunner := context.WithTimeout(ctx, defaultAdviceRunnerTimeout)
+		runnerCtx, cancelRunner := context.WithTimeout(ctx, s.runnerTimeout)
 		output, runnerErr = s.runner.Run(runnerCtx, runnerInput)
 		cancelRunner()
 	}

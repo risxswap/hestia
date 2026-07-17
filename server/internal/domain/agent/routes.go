@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/domain/clothes"
@@ -32,9 +33,16 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 		logger = deps.Logger
 	}
 	service := NewServiceWithDependencies(repo, clothesService)
+	if deps != nil && deps.Config != nil {
+		service.SetRunnerTimeout(time.Duration(deps.Config.AgentRunnerTimeoutSeconds) * time.Second)
+	}
 	service.SetLogger(logger)
 	if deps != nil && deps.DB != nil && deps.LLM != nil {
-		llmService := llm.NewService(llm.NewConfigResolver(llm.NewMySQLConfigRepository(deps.DB)), deps.LLM)
+		llmTimeout := time.Duration(0)
+		if deps.Config != nil {
+			llmTimeout = time.Duration(deps.Config.LLMRequestTimeoutSeconds) * time.Second
+		}
+		llmService := llm.NewServiceWithTimeout(llm.NewConfigResolver(llm.NewMySQLConfigRepository(deps.DB)), deps.LLM, llmTimeout)
 		llmService.SetLogger(logger)
 		if chatModel, resolvedUsage, err := llmService.NewToolCallingChatModelWithUsage(context.Background(), llm.Request{
 			UsageKey:     "agent_chat",

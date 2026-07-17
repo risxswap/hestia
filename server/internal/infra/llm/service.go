@@ -40,14 +40,24 @@ type Generator interface {
 	Generate(ctx context.Context, request Request) (Response, error)
 }
 
+const defaultRequestTimeout = 60 * time.Second
+
 type Service struct {
-	resolver *ConfigResolver
-	client   Client
-	logger   *slog.Logger
+	resolver       *ConfigResolver
+	client         Client
+	logger         *slog.Logger
+	requestTimeout time.Duration
 }
 
 func NewService(resolver *ConfigResolver, client Client) *Service {
-	return &Service{resolver: resolver, client: client, logger: slog.Default()}
+	return NewServiceWithTimeout(resolver, client, defaultRequestTimeout)
+}
+
+func NewServiceWithTimeout(resolver *ConfigResolver, client Client, timeout time.Duration) *Service {
+	if timeout <= 0 {
+		timeout = defaultRequestTimeout
+	}
+	return &Service{resolver: resolver, client: client, logger: slog.Default(), requestTimeout: timeout}
 }
 
 func (s *Service) SetLogger(logger *slog.Logger) {
@@ -132,9 +142,9 @@ func (s *Service) NewToolCallingChatModelWithUsage(ctx context.Context, request 
 	if toolClient, ok := s.client.(ToolCallingClient); ok {
 		switch strings.ToLower(strings.TrimSpace(resolved.Provider.Code)) {
 		case "qwen":
-			chatModel, err = toolClient.NewQwenToolCallingChatModel(ctx, qwenChatModelConfig(resolved, request))
+			chatModel, err = toolClient.NewQwenToolCallingChatModel(ctx, qwenChatModelConfig(resolved, request, s.requestTimeout))
 		case "siliconflow", "openai":
-			chatModel, err = toolClient.NewOpenAIToolCallingChatModel(ctx, openAIChatModelConfig(resolved, request))
+			chatModel, err = toolClient.NewOpenAIToolCallingChatModel(ctx, openAIChatModelConfig(resolved, request, s.requestTimeout))
 		default:
 			err = fmt.Errorf("unsupported llm provider %q", resolved.Provider.Code)
 		}
@@ -229,21 +239,21 @@ func (s *Service) logCallError(ctx context.Context, startedAt time.Time, attrs [
 func (s *Service) newChatModel(ctx context.Context, resolved ResolvedUsage, request Request) (EinoChatModel, error) {
 	switch strings.ToLower(strings.TrimSpace(resolved.Provider.Code)) {
 	case "qwen":
-		return s.client.NewQwenChatModel(ctx, qwenChatModelConfig(resolved, request))
+		return s.client.NewQwenChatModel(ctx, qwenChatModelConfig(resolved, request, s.requestTimeout))
 	case "siliconflow", "openai":
-		return s.client.NewOpenAIChatModel(ctx, openAIChatModelConfig(resolved, request))
+		return s.client.NewOpenAIChatModel(ctx, openAIChatModelConfig(resolved, request, s.requestTimeout))
 	default:
 		return nil, fmt.Errorf("unsupported llm provider %q", resolved.Provider.Code)
 	}
 }
 
-func qwenChatModelConfig(resolved ResolvedUsage, request Request) *qwen.ChatModelConfig {
+func qwenChatModelConfig(resolved ResolvedUsage, request Request, timeout time.Duration) *qwen.ChatModelConfig {
 	params := mergedParams(resolved.Usage.Params, request.Params)
 	config := &qwen.ChatModelConfig{
 		BaseURL: strings.TrimSpace(resolved.Provider.APIBaseURL),
 		APIKey:  strings.TrimSpace(resolved.Provider.Token),
 		Model:   strings.TrimSpace(resolved.Model.ModelCode),
-		Timeout: 60 * time.Second,
+		Timeout: timeout,
 	}
 	if maxTokens, ok := intParam(params, "max_tokens"); ok {
 		config.MaxTokens = &maxTokens
@@ -262,13 +272,13 @@ func qwenChatModelConfig(resolved ResolvedUsage, request Request) *qwen.ChatMode
 	return config
 }
 
-func openAIChatModelConfig(resolved ResolvedUsage, request Request) *einoopenai.ChatModelConfig {
+func openAIChatModelConfig(resolved ResolvedUsage, request Request, timeout time.Duration) *einoopenai.ChatModelConfig {
 	params := mergedParams(resolved.Usage.Params, request.Params)
 	config := &einoopenai.ChatModelConfig{
 		BaseURL: strings.TrimSpace(resolved.Provider.APIBaseURL),
 		APIKey:  strings.TrimSpace(resolved.Provider.Token),
 		Model:   strings.TrimSpace(resolved.Model.ModelCode),
-		Timeout: 60 * time.Second,
+		Timeout: timeout,
 	}
 	if maxTokens, ok := intParam(params, "max_tokens"); ok {
 		config.MaxTokens = &maxTokens

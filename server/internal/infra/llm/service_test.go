@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	serverlogger "hestia/server/internal/infra/logger"
 
@@ -16,6 +17,97 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
+
+func TestServiceUsesConfiguredRequestTimeout(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerCode string
+		client       func(*time.Duration) Client
+	}{
+		{
+			name:         "qwen",
+			providerCode: "qwen",
+			client: func(captured *time.Duration) Client {
+				return EinoQwenChatModelFactoryFunc(func(_ context.Context, config *qwen.ChatModelConfig) (EinoChatModel, error) {
+					*captured = config.Timeout
+					return &captureEinoChatModel{}, nil
+				})
+			},
+		},
+		{
+			name:         "openai compatible",
+			providerCode: "siliconflow",
+			client: func(captured *time.Duration) Client {
+				return EinoOpenAIChatModelFactoryFunc(func(_ context.Context, config *einoopenai.ChatModelConfig) (EinoChatModel, error) {
+					*captured = config.Timeout
+					return &captureEinoChatModel{}, nil
+				})
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var captured time.Duration
+			service := NewServiceWithTimeout(timeoutTestResolver(test.providerCode), test.client(&captured), 37*time.Second)
+			if _, err := service.Generate(context.Background(), Request{UsageKey: "agent_chat", RequiredCaps: []string{"text"}}); err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			if captured != 37*time.Second {
+				t.Fatalf("expected 37s request timeout, got %s", captured)
+			}
+		})
+	}
+}
+
+func TestServiceUsesConfiguredRequestTimeoutForToolCallingModels(t *testing.T) {
+	for _, providerCode := range []string{"qwen", "siliconflow"} {
+		t.Run(providerCode, func(t *testing.T) {
+			var captured time.Duration
+			client := &captureToolCallingClient{qwenModel: &captureToolCallingChatModel{}, openAIModel: &captureToolCallingChatModel{}}
+			client.onQwenConfig = func(config *qwen.ChatModelConfig) { captured = config.Timeout }
+			client.onOpenAIConfig = func(config *einoopenai.ChatModelConfig) { captured = config.Timeout }
+			service := NewServiceWithTimeout(timeoutTestResolver(providerCode), client, 37*time.Second)
+			if _, err := service.NewToolCallingChatModel(context.Background(), Request{UsageKey: "agent_chat", RequiredCaps: []string{"text"}}); err != nil {
+				t.Fatalf("new tool calling model: %v", err)
+			}
+			if captured != 37*time.Second {
+				t.Fatalf("expected 37s request timeout, got %s", captured)
+			}
+		})
+	}
+}
+
+func TestServiceRequestTimeoutDefaults(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		service func(Client) *Service
+	}{
+		{name: "legacy constructor", service: func(client Client) *Service { return NewService(timeoutTestResolver("qwen"), client) }},
+		{name: "non-positive timeout", service: func(client Client) *Service { return NewServiceWithTimeout(timeoutTestResolver("qwen"), client, 0) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var captured time.Duration
+			client := EinoQwenChatModelFactoryFunc(func(_ context.Context, config *qwen.ChatModelConfig) (EinoChatModel, error) {
+				captured = config.Timeout
+				return &captureEinoChatModel{}, nil
+			})
+			if _, err := test.service(client).Generate(context.Background(), Request{UsageKey: "agent_chat", RequiredCaps: []string{"text"}}); err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			if captured != 60*time.Second {
+				t.Fatalf("expected default 60s request timeout, got %s", captured)
+			}
+		})
+	}
+}
+
+func timeoutTestResolver(providerCode string) *ConfigResolver {
+	return NewConfigResolver(memoryConfigRepo{
+		usages:    map[string]Usage{"agent_chat": {Key: "agent_chat", ProviderCode: providerCode, ModelCode: "test-model"}},
+		providers: map[string]Provider{providerCode: {Code: providerCode, Status: StatusActive}},
+		models:    map[string]Model{modelKey(providerCode, "test-model"): {ProviderCode: providerCode, ModelCode: "test-model", Caps: []string{"text"}, Status: StatusActive}},
+	})
+}
 
 func TestServiceGenerateResolvesUsageAndCallsEinoModel(t *testing.T) {
 	capturedModel := &captureEinoChatModel{}
