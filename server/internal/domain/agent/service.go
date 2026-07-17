@@ -3,12 +3,15 @@ package agent
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
+	"hestia/server/internal/common/id"
 	"hestia/server/internal/domain/clothes"
 	"hestia/server/internal/domain/memory"
 	"hestia/server/internal/domain/profile"
+	serverlogger "hestia/server/internal/infra/logger"
 )
 
 const (
@@ -161,6 +164,7 @@ type Service struct {
 	clothes ClothesAdviceService
 	repo    Repository
 	runner  AdviceRunner
+	logger  *slog.Logger
 }
 
 func NewService() *Service {
@@ -188,6 +192,16 @@ func (s *Service) SetAdviceRunner(runner AdviceRunner) {
 		return
 	}
 	s.runner = runner
+}
+
+func (s *Service) SetLogger(logger *slog.Logger) {
+	if s == nil {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	s.logger = logger
 }
 
 func (s *Service) StreamStatus(ctx context.Context, userID int64) StreamStatus {
@@ -301,6 +315,20 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		return result, err
 	}
 	runnerStartedAt := time.Now().UTC()
+	runnerLog := s.logger
+	if runnerLog == nil {
+		runnerLog = slog.Default()
+	}
+	llmCallID := id.NewPublicID("llm")
+	runnerAttrs := []any{
+		"request_id", serverlogger.RequestID(ctx),
+		"llm_call_id", llmCallID,
+		"user_id", userID,
+		"input_chars", len([]rune(message.Text)),
+		"image_count", len(assetRefs),
+		"input_summary", serverlogger.SanitizeSummary(message.Text),
+	}
+	runnerLog.InfoContext(ctx, "agent llm call started", runnerAttrs...)
 	runnerInput := AdviceRunInput{
 		UserID:         userID,
 		Text:           message.Text,
@@ -319,8 +347,16 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		cancelRunner()
 	}
 	runnerFinishedAt := time.Now().UTC()
+	runnerDuration := durationMS(runnerStartedAt, runnerFinishedAt)
 	stepOffset := 0
 	if runnerErr != nil {
+		errorAttrs := append([]any{}, runnerAttrs...)
+		errorAttrs = append(errorAttrs,
+			"duration_ms", runnerDuration,
+			"error_stage", "agent_run",
+			"error", serverlogger.ErrorSummary(runnerErr),
+		)
+		runnerLog.ErrorContext(ctx, "agent llm call failed", errorAttrs...)
 		_ = s.recordFailedStep(ctx, AgentRunStepInput{
 			UserID:         userID,
 			SourceMsgID:    userMessage.ID,
@@ -340,6 +376,17 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		stepOffset = 1
 		emitChatProcess(emit, failedChatProcessEvent(1, result.ResponseStartedAt))
 	} else {
+		successAttrs := append([]any{}, runnerAttrs...)
+		successAttrs = append(successAttrs,
+			"usage_key", output.Metadata.UsageKey,
+			"provider_code", output.Metadata.ProviderCode,
+			"model_code", output.Metadata.ModelCode,
+			"prompt_version", output.Metadata.PromptVersion,
+			"duration_ms", runnerDuration,
+			"output_chars", len([]rune(output.AssistantText)),
+			"output_summary", serverlogger.SanitizeSummary(output.AssistantText),
+		)
+		runnerLog.InfoContext(ctx, "agent llm call completed", successAttrs...)
 		emitChatProcess(emit, ChatProcessEvent{
 			StepNo:            1,
 			Status:            AgentStepStatusSucceeded,

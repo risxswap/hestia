@@ -1,11 +1,61 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
+
+	serverlogger "hestia/server/internal/infra/logger"
 )
+
+func TestServiceLogsAdviceRunnerLifecycle(t *testing.T) {
+	tests := []struct {
+		name     string
+		runner   *spyAdviceRunner
+		expected []string
+	}{
+		{
+			name: "completed",
+			runner: &spyAdviceRunner{output: AdviceRunOutput{
+				AssistantText: "建议已生成",
+				DecisionLabel: "final_response",
+				Metadata:      AdviceRunMetadata{UsageKey: "agent_chat", ProviderCode: "qwen", ModelCode: "qwen-plus", PromptVersion: "v2"},
+			}},
+			expected: []string{"agent llm call started", "agent llm call completed", "usage_key=agent_chat", "model_code=qwen-plus", "input_chars=", "output_chars=", "duration_ms="},
+		},
+		{
+			name:     "failed",
+			runner:   &spyAdviceRunner{err: errors.New("agent failed token=secret")},
+			expected: []string{"agent llm call started", "agent llm call failed", "level=ERROR", "error_stage=agent_run", "error=\"agent failed token=[REDACTED]\""},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			service := NewServiceWithRunner(&spyAgentRepo{}, nil, test.runner)
+			service.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
+			_, err := service.Chat(serverlogger.WithRequestID(context.Background(), "req_agent_test"), 12, "联系 test@example.com 后给建议")
+			if err != nil {
+				t.Fatalf("chat: %v", err)
+			}
+			output := logs.String()
+			for _, expected := range append(test.expected, "request_id=req_agent_test") {
+				if !strings.Contains(output, expected) {
+					t.Fatalf("expected %q in %s", expected, output)
+				}
+			}
+			for _, leaked := range []string{"test@example.com", "token=secret"} {
+				if strings.Contains(output, leaked) {
+					t.Fatalf("leaked %q in %s", leaked, output)
+				}
+			}
+		})
+	}
+}
 
 func TestServiceChatPersistsMessagesStepsAndUpdatesCurrentDraft(t *testing.T) {
 	repo := &spyAgentRepo{currentDraft: Draft{

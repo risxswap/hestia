@@ -9,6 +9,7 @@ import (
 	"hestia/server/internal/domain/memory"
 	"hestia/server/internal/domain/profile"
 	"hestia/server/internal/infra/llm"
+	serverlogger "hestia/server/internal/infra/logger"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/compose"
@@ -31,6 +32,7 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 		logger = deps.Logger
 	}
 	service := NewServiceWithDependencies(repo, clothesService)
+	service.SetLogger(logger)
 	if deps != nil && deps.DB != nil && deps.LLM != nil {
 		llmService := llm.NewService(llm.NewConfigResolver(llm.NewMySQLConfigRepository(deps.DB)), deps.LLM)
 		llmService.SetLogger(logger)
@@ -58,11 +60,27 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 				}
 				if runner, err := NewEinoADKChatModelAdviceRunnerWithMetadata(context.Background(), chatModel, toolsConfig, metadata); err == nil {
 					service.SetAdviceRunner(runner)
+				} else {
+					logAgentSetupError(logger, "runner_init", err)
 				}
+			} else {
+				logAgentSetupError(logger, "tools_init", err)
 			}
+		} else {
+			logAgentSetupError(logger, "model_init", err)
 		}
 	}
 	RegisterUserRoutesWithService(group, service, logger)
+}
+
+func logAgentSetupError(logger *slog.Logger, stage string, err error) {
+	if err == nil {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Error("agent setup failed", "error_stage", stage, "error", serverlogger.ErrorSummary(err))
 }
 
 func RegisterUserRoutesWithService(group *gin.RouterGroup, service *Service, logger ...*slog.Logger) {
