@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
+
+	"hestia/server/internal/common/id"
+	serverlogger "hestia/server/internal/infra/logger"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino-ext/components/model/qwen"
@@ -58,26 +62,33 @@ func (s *Service) SetLogger(logger *slog.Logger) {
 }
 
 func (s *Service) Generate(ctx context.Context, request Request) (Response, error) {
+	startedAt := time.Now()
+	attrs := requestLogAttrs(ctx, id.NewPublicID("llm"), request)
 	if s == nil || s.client == nil {
+		s.logCallError(ctx, startedAt, attrs, "client_check", ErrClientUnavailable)
 		return Response{}, ErrClientUnavailable
 	}
 	resolved, err := s.resolver.ResolveUsage(ctx, request.UsageKey, request.RequiredCaps)
 	if err != nil {
+		s.logCallError(ctx, startedAt, attrs, "config_resolve", err)
 		return Response{}, err
 	}
-	startedAt := time.Now()
-	attrs := s.generateLogAttrs(request, resolved)
+	attrs = append(attrs, resolvedLogAttrs(resolved)...)
 	if s.logger != nil {
-		s.logger.InfoContext(ctx, "llm generate started", attrs...)
+		s.logger.InfoContext(ctx, "llm call started", attrs...)
 	}
 	chatModel, err := s.newChatModel(ctx, resolved, request)
 	if err != nil {
-		s.logGenerateError(ctx, startedAt, attrs, err)
+		s.logCallError(ctx, startedAt, attrs, "model_init", err)
 		return Response{}, err
+	}
+	if chatModel == nil {
+		s.logCallError(ctx, startedAt, attrs, "model_init", ErrClientUnavailable)
+		return Response{}, ErrClientUnavailable
 	}
 	message, err := chatModel.Generate(ctx, einoMessages(request))
 	if err != nil {
-		s.logGenerateError(ctx, startedAt, attrs, err)
+		s.logCallError(ctx, startedAt, attrs, "model_generate", err)
 		return Response{}, err
 	}
 	text := ""
@@ -86,8 +97,12 @@ func (s *Service) Generate(ctx context.Context, request Request) (Response, erro
 	}
 	if s.logger != nil {
 		successAttrs := append([]any{}, attrs...)
-		successAttrs = append(successAttrs, "duration_ms", time.Since(startedAt).Milliseconds(), "response_chars", len([]rune(text)))
-		s.logger.InfoContext(ctx, "llm generate completed", successAttrs...)
+		successAttrs = append(successAttrs,
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"output_chars", len([]rune(text)),
+			"output_summary", serverlogger.SanitizeSummary(text),
+		)
+		s.logger.InfoContext(ctx, "llm call completed", successAttrs...)
 	}
 	return Response{Text: text, Usage: resolved}, nil
 }
@@ -98,54 +113,117 @@ func (s *Service) NewToolCallingChatModel(ctx context.Context, request Request) 
 }
 
 func (s *Service) NewToolCallingChatModelWithUsage(ctx context.Context, request Request) (einomodel.ToolCallingChatModel, ResolvedUsage, error) {
+	startedAt := time.Now()
+	attrs := requestLogAttrs(ctx, id.NewPublicID("llm"), request)
 	if s == nil || s.client == nil {
+		s.logCallError(ctx, startedAt, attrs, "client_check", ErrClientUnavailable)
 		return nil, ResolvedUsage{}, ErrClientUnavailable
 	}
 	resolved, err := s.resolver.ResolveUsage(ctx, request.UsageKey, request.RequiredCaps)
 	if err != nil {
+		s.logCallError(ctx, startedAt, attrs, "config_resolve", err)
 		return nil, ResolvedUsage{}, err
 	}
+	attrs = append(attrs, resolvedLogAttrs(resolved)...)
+	if s.logger != nil {
+		s.logger.InfoContext(ctx, "llm model init started", attrs...)
+	}
+	var chatModel einomodel.ToolCallingChatModel
 	if toolClient, ok := s.client.(ToolCallingClient); ok {
 		switch strings.ToLower(strings.TrimSpace(resolved.Provider.Code)) {
 		case "qwen":
-			chatModel, err := toolClient.NewQwenToolCallingChatModel(ctx, qwenChatModelConfig(resolved, request))
-			return chatModel, resolved, err
+			chatModel, err = toolClient.NewQwenToolCallingChatModel(ctx, qwenChatModelConfig(resolved, request))
 		case "siliconflow", "openai":
-			chatModel, err := toolClient.NewOpenAIToolCallingChatModel(ctx, openAIChatModelConfig(resolved, request))
-			return chatModel, resolved, err
+			chatModel, err = toolClient.NewOpenAIToolCallingChatModel(ctx, openAIChatModelConfig(resolved, request))
 		default:
-			return nil, ResolvedUsage{}, fmt.Errorf("unsupported llm provider %q", resolved.Provider.Code)
+			err = fmt.Errorf("unsupported llm provider %q", resolved.Provider.Code)
+		}
+	} else {
+		var baseModel EinoChatModel
+		baseModel, err = s.newChatModel(ctx, resolved, request)
+		if err == nil {
+			chatModel, _ = baseModel.(einomodel.ToolCallingChatModel)
+			if chatModel == nil {
+				err = ErrClientUnavailable
+			}
 		}
 	}
-	chatModel, err := s.newChatModel(ctx, resolved, request)
 	if err != nil {
-		return nil, ResolvedUsage{}, err
+		s.logCallError(ctx, startedAt, attrs, "model_init", err)
+		return nil, resolved, err
 	}
-	toolModel, ok := chatModel.(einomodel.ToolCallingChatModel)
-	if !ok {
-		return nil, ResolvedUsage{}, ErrClientUnavailable
+	if chatModel == nil {
+		s.logCallError(ctx, startedAt, attrs, "model_init", ErrClientUnavailable)
+		return nil, resolved, ErrClientUnavailable
 	}
-	return toolModel, resolved, nil
+	if s.logger != nil {
+		successAttrs := append([]any{}, attrs...)
+		successAttrs = append(successAttrs, "duration_ms", time.Since(startedAt).Milliseconds())
+		s.logger.InfoContext(ctx, "llm model init completed", successAttrs...)
+	}
+	return chatModel, resolved, nil
 }
 
-func (s *Service) generateLogAttrs(request Request, resolved ResolvedUsage) []any {
+func requestLogAttrs(ctx context.Context, callID string, request Request) []any {
+	roleCounts := map[string]int{}
+	inputChars := 0
+	contents := make([]string, 0, len(request.Messages))
+	for _, message := range request.Messages {
+		role := strings.ToLower(strings.TrimSpace(message.Role))
+		roleCounts[role]++
+		inputChars += len([]rune(message.Content))
+		if content := strings.TrimSpace(message.Content); content != "" {
+			contents = append(contents, content)
+		}
+	}
+	paramKeys := make([]string, 0, len(request.Params))
+	for key := range request.Params {
+		if key = strings.TrimSpace(key); key != "" {
+			paramKeys = append(paramKeys, key)
+		}
+	}
+	sort.Strings(paramKeys)
 	return []any{
+		"request_id", serverlogger.RequestID(ctx),
+		"llm_call_id", callID,
 		"usage_key", request.UsageKey,
-		"provider_code", resolved.Provider.Code,
-		"model_code", resolved.Model.ModelCode,
 		"required_caps", strings.Join(trimStringValues(request.RequiredCaps), ","),
 		"message_count", len(request.Messages),
+		"system_message_count", roleCounts["system"],
+		"user_message_count", roleCounts["user"],
+		"assistant_message_count", roleCounts["assistant"],
+		"tool_message_count", roleCounts["tool"],
+		"input_chars", inputChars,
 		"image_count", len(trimStringValues(request.ImageURLs)),
+		"param_keys", strings.Join(paramKeys, ","),
+		"input_summary", serverlogger.SanitizeSummary(strings.Join(contents, " | ")),
 	}
 }
 
-func (s *Service) logGenerateError(ctx context.Context, startedAt time.Time, attrs []any, err error) {
+func resolvedLogAttrs(resolved ResolvedUsage) []any {
+	return []any{
+		"provider_code", resolved.Provider.Code,
+		"model_code", resolved.Model.ModelCode,
+		"prompt_version", resolved.Usage.PromptVersion,
+	}
+}
+
+func (s *Service) logCallError(ctx context.Context, startedAt time.Time, attrs []any, stage string, err error) {
 	if s == nil || s.logger == nil {
+		slog.Default().ErrorContext(ctx, "llm call failed", append(append([]any{}, attrs...),
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"error_stage", stage,
+			"error", serverlogger.ErrorSummary(err),
+		)...)
 		return
 	}
 	errorAttrs := append([]any{}, attrs...)
-	errorAttrs = append(errorAttrs, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)
-	s.logger.ErrorContext(ctx, "llm generate failed", errorAttrs...)
+	errorAttrs = append(errorAttrs,
+		"duration_ms", time.Since(startedAt).Milliseconds(),
+		"error_stage", stage,
+		"error", serverlogger.ErrorSummary(err),
+	)
+	s.logger.ErrorContext(ctx, "llm call failed", errorAttrs...)
 }
 
 func (s *Service) newChatModel(ctx context.Context, resolved ResolvedUsage, request Request) (EinoChatModel, error) {

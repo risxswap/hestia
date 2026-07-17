@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	serverlogger "hestia/server/internal/infra/logger"
+
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino-ext/components/model/qwen"
 	"github.com/cloudwego/eino-ext/libs/acl/openai"
@@ -78,10 +80,14 @@ func TestServiceGenerateResolvesUsageAndCallsEinoModel(t *testing.T) {
 
 type captureEinoChatModel struct {
 	messages []*schema.Message
+	err      error
 }
 
 func (m *captureEinoChatModel) Generate(_ context.Context, input []*schema.Message, _ ...model.Option) (*schema.Message, error) {
 	m.messages = input
+	if m.err != nil {
+		return nil, m.err
+	}
 	return schema.AssistantMessage(`{"name":"米白衬衫"}`, nil), nil
 }
 
@@ -104,6 +110,8 @@ type captureToolCallingClient struct {
 	openAIModel    model.ToolCallingChatModel
 	onQwenConfig   func(*qwen.ChatModelConfig)
 	onOpenAIConfig func(*einoopenai.ChatModelConfig)
+	qwenErr        error
+	openAIErr      error
 }
 
 func (c *captureToolCallingClient) NewQwenChatModel(context.Context, *qwen.ChatModelConfig) (EinoChatModel, error) {
@@ -118,12 +126,18 @@ func (c *captureToolCallingClient) NewQwenToolCallingChatModel(_ context.Context
 	if c.onQwenConfig != nil {
 		c.onQwenConfig(config)
 	}
+	if c.qwenErr != nil {
+		return nil, c.qwenErr
+	}
 	return c.qwenModel, nil
 }
 
 func (c *captureToolCallingClient) NewOpenAIToolCallingChatModel(_ context.Context, config *einoopenai.ChatModelConfig) (model.ToolCallingChatModel, error) {
 	if c.onOpenAIConfig != nil {
 		c.onOpenAIConfig(config)
+	}
+	if c.openAIErr != nil {
+		return nil, c.openAIErr
 	}
 	return c.openAIModel, nil
 }
@@ -303,9 +317,10 @@ func TestServiceGenerateLogsLLMCallWithoutSensitiveValues(t *testing.T) {
 	service := NewService(NewConfigResolver(memoryConfigRepo{
 		usages: map[string]Usage{
 			"wardrobe_image_recognition": {
-				Key:          "wardrobe_image_recognition",
-				ProviderCode: "siliconflow",
-				ModelCode:    "Qwen/Qwen2.5-VL-72B-Instruct",
+				Key:           "wardrobe_image_recognition",
+				ProviderCode:  "siliconflow",
+				ModelCode:     "Qwen/Qwen2.5-VL-72B-Instruct",
+				PromptVersion: "v3",
 			},
 		},
 		providers: map[string]Provider{
@@ -325,13 +340,16 @@ func TestServiceGenerateLogsLLMCallWithoutSensitiveValues(t *testing.T) {
 	}))
 	service.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
 
-	_, err := service.Generate(context.Background(), Request{
+	ctx := serverlogger.WithRequestID(context.Background(), "req_llm_test")
+	_, err := service.Generate(ctx, Request{
 		UsageKey:     "wardrobe_image_recognition",
 		RequiredCaps: []string{"vision", "json"},
 		Messages: []Message{
-			{Role: "user", Content: "识别这件衣服"},
+			{Role: "system", Content: "分析服装"},
+			{Role: "user", Content: "联系 test@example.com 后识别这件衣服"},
 		},
 		ImageURLs: []string{"https://download.example.test/private.jpg?token=secret"},
+		Params:    map[string]any{"temperature": 0.2, "max_tokens": 800},
 	})
 	if err != nil {
 		t.Fatalf("generate with logging: %v", err)
@@ -339,24 +357,131 @@ func TestServiceGenerateLogsLLMCallWithoutSensitiveValues(t *testing.T) {
 
 	output := logs.String()
 	for _, expected := range []string{
-		"llm generate started",
-		"llm generate completed",
+		"llm call started",
+		"llm call completed",
+		"request_id=req_llm_test",
+		"llm_call_id=llm_",
 		"usage_key=wardrobe_image_recognition",
 		"provider_code=siliconflow",
 		"model_code=Qwen/Qwen2.5-VL-72B-Instruct",
+		"prompt_version=v3",
+		"message_count=2",
+		"system_message_count=1",
+		"user_message_count=1",
+		"input_chars=",
+		"param_keys=max_tokens,temperature",
 		"image_count=1",
 		"duration_ms=",
-		"response_chars=",
+		"output_chars=",
+		"input_summary=",
+		"output_summary=",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("expected log output to contain %q, got %s", expected, output)
 		}
 	}
-	for _, leaked := range []string{"sf-token", "download.example.test", "token=secret", "识别这件衣服"} {
+	for _, leaked := range []string{"sf-token", "download.example.test", "token=secret", "test@example.com"} {
 		if strings.Contains(output, leaked) {
 			t.Fatalf("expected log output not to contain sensitive value %q, got %s", leaked, output)
 		}
 	}
+}
+
+func TestServiceGenerateLogsEveryFailureStage(t *testing.T) {
+	tests := []struct {
+		name       string
+		stage      string
+		newService func(*bytes.Buffer) *Service
+		request    Request
+	}{
+		{
+			name: "client check", stage: "client_check",
+			newService: func(logs *bytes.Buffer) *Service {
+				service := NewService(NewConfigResolver(memoryConfigRepo{}), nil)
+				service.SetLogger(slog.New(slog.NewTextHandler(logs, nil)))
+				return service
+			},
+			request: Request{UsageKey: "agent_chat"},
+		},
+		{
+			name: "config resolve", stage: "config_resolve",
+			newService: func(logs *bytes.Buffer) *Service {
+				service := NewService(NewConfigResolver(memoryConfigRepo{}), EinoQwenChatModelFactoryFunc(func(context.Context, *qwen.ChatModelConfig) (EinoChatModel, error) { return nil, nil }))
+				service.SetLogger(slog.New(slog.NewTextHandler(logs, nil)))
+				return service
+			},
+			request: Request{UsageKey: "missing"},
+		},
+		{
+			name: "model init", stage: "model_init",
+			newService: func(logs *bytes.Buffer) *Service {
+				service := NewService(testResolver(), EinoQwenChatModelFactoryFunc(func(context.Context, *qwen.ChatModelConfig) (EinoChatModel, error) {
+					return nil, errors.New("init failed token=secret")
+				}))
+				service.SetLogger(slog.New(slog.NewTextHandler(logs, nil)))
+				return service
+			},
+			request: Request{UsageKey: "agent_chat"},
+		},
+		{
+			name: "model generate", stage: "model_generate",
+			newService: func(logs *bytes.Buffer) *Service {
+				service := NewService(testResolver(), EinoQwenChatModelFactoryFunc(func(context.Context, *qwen.ChatModelConfig) (EinoChatModel, error) {
+					return &captureEinoChatModel{err: errors.New("generate failed Bearer secret")}, nil
+				}))
+				service.SetLogger(slog.New(slog.NewTextHandler(logs, nil)))
+				return service
+			},
+			request: Request{UsageKey: "agent_chat"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			_, err := test.newService(&logs).Generate(serverlogger.WithRequestID(context.Background(), "req_failure"), test.request)
+			if err == nil {
+				t.Fatal("expected generate error")
+			}
+			output := logs.String()
+			for _, expected := range []string{"llm call failed", "level=ERROR", "request_id=req_failure", "llm_call_id=llm_", "error_stage=" + test.stage, "error="} {
+				if !strings.Contains(output, expected) {
+					t.Fatalf("expected %q in %s", expected, output)
+				}
+			}
+			for _, leaked := range []string{"token=secret", "Bearer secret"} {
+				if strings.Contains(output, leaked) {
+					t.Fatalf("leaked %q in %s", leaked, output)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceToolCallingLogsInitializationFailure(t *testing.T) {
+	var logs bytes.Buffer
+	service := NewService(testResolver(), &captureToolCallingClient{qwenErr: errors.New("tool init failed api_key=secret")})
+	service.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
+	_, _, err := service.NewToolCallingChatModelWithUsage(serverlogger.WithRequestID(context.Background(), "req_tool"), Request{UsageKey: "agent_chat"})
+	if err == nil {
+		t.Fatal("expected tool model init error")
+	}
+	output := logs.String()
+	for _, expected := range []string{"llm call failed", "request_id=req_tool", "error_stage=model_init"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected %q in %s", expected, output)
+		}
+	}
+	if strings.Contains(output, "api_key=secret") {
+		t.Fatalf("expected secret redacted in %s", output)
+	}
+}
+
+func testResolver() *ConfigResolver {
+	return NewConfigResolver(memoryConfigRepo{
+		usages:    map[string]Usage{"agent_chat": {Key: "agent_chat", ProviderCode: "qwen", ModelCode: "qwen-plus", PromptVersion: "v2"}},
+		providers: map[string]Provider{"qwen": {Code: "qwen", Token: "provider-secret", Status: StatusActive}},
+		models:    map[string]Model{modelKey("qwen", "qwen-plus"): {ProviderCode: "qwen", ModelCode: "qwen-plus", Status: StatusActive}},
+	})
 }
 
 func TestServiceGenerateReturnsResolverAndClientErrors(t *testing.T) {
