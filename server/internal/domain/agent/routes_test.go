@@ -249,6 +249,42 @@ func TestChatRouteProcessWriteFailureStopsBeforeDelta(t *testing.T) {
 	}
 }
 
+func TestChatRouteProcessWriteFailureCancelsRunnerBeforeToolExecution(t *testing.T) {
+	repo := newRouteAgentRepo()
+	runner := &processCancelRouteRunner{}
+	router := newAgentChatRouter(agent.NewServiceWithRunner(repo, nil, runner))
+	writer := &failSSEEventResponseWriter{header: make(http.Header), failEvent: "process"}
+
+	router.ServeHTTP(writer, newAgentChatRequest())
+
+	if runner.toolExecuted {
+		t.Fatal("expected failed process write to cancel runner before tool execution")
+	}
+	if len(repo.updates) != 1 || repo.updates[0].Status != agent.ChatStatusStopped {
+		t.Fatalf("expected stopped assistant after process write failure, got %#v", repo.updates)
+	}
+	if writer.writesAfterFailure != 0 {
+		t.Fatalf("expected no writes after process failure, got %d", writer.writesAfterFailure)
+	}
+}
+
+func TestChatRouteFinalProcessWriteFailureOverridesSentMessageAsStopped(t *testing.T) {
+	repo := newRouteAgentRepo()
+	router := newAgentChatRouter(agent.NewServiceWithRunner(repo, nil, routeAdviceRunner{
+		output: agent.AdviceRunOutput{AssistantText: "完整建议"},
+	}))
+	writer := &failSSEEventResponseWriter{header: make(http.Header), failEvent: "process", failOccurrence: 3}
+
+	router.ServeHTTP(writer, newAgentChatRequest())
+
+	if len(repo.updates) != 2 || repo.updates[0].Status != agent.ChatStatusSent || repo.updates[1].Status != agent.ChatStatusStopped {
+		t.Fatalf("expected sent message overridden as stopped, got %#v", repo.updates)
+	}
+	if strings.Contains(writer.body.String(), "event: done\n") || writer.writesAfterFailure != 0 {
+		t.Fatalf("expected no writes after final process failure, writes_after=%d body=%q", writer.writesAfterFailure, writer.body.String())
+	}
+}
+
 func TestChatRouteStatusWriteFailureDoesNotStartRunner(t *testing.T) {
 	runner := &countingRouteRunner{}
 	router := newAgentChatRouter(agent.NewServiceWithRunner(newRouteAgentRepo(), nil, runner))
@@ -625,6 +661,8 @@ type failSSEEventResponseWriter struct {
 	failed             bool
 	writesAfterFailure int
 	bodyLenAtFailure   int
+	failOccurrence     int
+	matchingWrites     int
 }
 
 func (w *failSSEEventResponseWriter) Header() http.Header    { return w.header }
@@ -634,7 +672,14 @@ func (w *failSSEEventResponseWriter) Write(p []byte) (int, error) {
 	if w.failed {
 		w.writesAfterFailure++
 	}
-	if !w.failed && strings.Contains(string(p), "event: "+w.failEvent+"\n") {
+	if strings.Contains(string(p), "event: "+w.failEvent+"\n") {
+		w.matchingWrites++
+	}
+	failOccurrence := w.failOccurrence
+	if failOccurrence == 0 {
+		failOccurrence = 1
+	}
+	if !w.failed && w.matchingWrites == failOccurrence && strings.Contains(string(p), "event: "+w.failEvent+"\n") {
 		w.failed = true
 		if w.short {
 			n := len(p) / 2
@@ -650,6 +695,20 @@ func (w *failSSEEventResponseWriter) Write(p []byte) (int, error) {
 
 type countingRouteRunner struct {
 	calls int
+}
+
+type processCancelRouteRunner struct {
+	toolExecuted bool
+}
+
+func (r *processCancelRouteRunner) Run(ctx context.Context, _ agent.AdviceRunInput, _ agent.AdviceTextDeltaEmitter) (agent.AdviceRunOutput, error) {
+	select {
+	case <-ctx.Done():
+		return agent.AdviceRunOutput{}, ctx.Err()
+	default:
+		r.toolExecuted = true
+		return agent.AdviceRunOutput{AssistantText: "不应执行工具"}, nil
+	}
 }
 
 func (r *countingRouteRunner) Run(_ context.Context, _ agent.AdviceRunInput, _ agent.AdviceTextDeltaEmitter) (agent.AdviceRunOutput, error) {

@@ -422,6 +422,10 @@ type spyAgentRepo struct {
 	getDraftCalls   int
 	stepErr         error
 	calls           []string
+	stepHook        func(context.Context, AgentRunStepInput) error
+	updateHook      func(context.Context, UpdateChatMessageInput) error
+	getDraftHook    func(context.Context, int64) (Draft, error, bool)
+	historyHook     func(context.Context, int64, int) ([]ChatMessage, error, bool)
 }
 
 func (r *spyAgentRepo) CreateChatMessage(_ context.Context, input CreateChatMessageInput) (ChatMessage, error) {
@@ -452,10 +456,20 @@ func (r *spyAgentRepo) UpdateChatMessage(ctx context.Context, input UpdateChatMe
 	r.calls = append(r.calls, "message")
 	r.updates = append(r.updates, input)
 	r.updateCtxErrors = append(r.updateCtxErrors, ctx.Err())
+	if r.updateHook != nil {
+		if err := r.updateHook(ctx, input); err != nil {
+			return ChatMessage{}, err
+		}
+	}
 	return ChatMessage{ID: input.ID, Status: input.Status, MsgType: input.MsgType, ContentText: input.ContentText}, r.updateErr
 }
 
-func (r *spyAgentRepo) ListRecentChatMessages(context.Context, int64, int) ([]ChatMessage, error) {
+func (r *spyAgentRepo) ListRecentChatMessages(ctx context.Context, userID int64, limit int) ([]ChatMessage, error) {
+	if r.historyHook != nil {
+		if messages, err, handled := r.historyHook(ctx, userID, limit); handled {
+			return messages, err
+		}
+	}
 	return nil, nil
 }
 
@@ -467,8 +481,13 @@ func (r *spyAgentRepo) ListAgentRunSteps(context.Context, int64, []int64) ([]Age
 	return nil, nil
 }
 
-func (r *spyAgentRepo) CreateAgentRunStep(_ context.Context, input AgentRunStepInput) error {
+func (r *spyAgentRepo) CreateAgentRunStep(ctx context.Context, input AgentRunStepInput) error {
 	r.calls = append(r.calls, "audit")
+	if r.stepHook != nil {
+		if err := r.stepHook(ctx, input); err != nil {
+			return err
+		}
+	}
 	if r.stepErr != nil {
 		return r.stepErr
 	}
@@ -484,8 +503,13 @@ func (r *spyAgentRepo) CreateDraft(_ context.Context, input CreateDraftInput) (D
 	return draft, nil
 }
 
-func (r *spyAgentRepo) GetCurrentDraft(context.Context, int64) (Draft, error) {
+func (r *spyAgentRepo) GetCurrentDraft(ctx context.Context, userID int64) (Draft, error) {
 	r.getDraftCalls++
+	if r.getDraftHook != nil {
+		if draft, err, handled := r.getDraftHook(ctx, userID); handled {
+			return draft, err
+		}
+	}
 	if r.currentDraft.ID == 0 {
 		return Draft{}, ErrDraftNotFound
 	}
@@ -813,6 +837,189 @@ func TestServiceChatStreamFailurePersistsAuditWithoutRefreshingDraft(t *testing.
 	}
 	if len(repo.steps) != 2 || repo.steps[0].ToolCallID != "call_1" || repo.getDraftCalls != 1 {
 		t.Fatalf("expected audit persisted without post-run draft refresh, calls=%d steps=%#v", repo.getDraftCalls, repo.steps)
+	}
+}
+
+func TestServiceChatStreamPostRunnerCancellationPersistsStopped(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*spyAgentRepo, context.CancelFunc)
+		output    AdviceRunOutput
+		wantText  string
+		check     func(*testing.T, *spyAgentRepo)
+	}{
+		{
+			name: "decision step",
+			configure: func(repo *spyAgentRepo, cancel context.CancelFunc) {
+				fired := false
+				repo.stepHook = func(_ context.Context, input AgentRunStepInput) error {
+					if !fired && input.StepType == AgentStepTypeModelDecision {
+						fired = true
+						cancel()
+						return context.Canceled
+					}
+					return nil
+				}
+			},
+			output:   AdviceRunOutput{},
+			wantText: "已停止生成。",
+		},
+		{
+			name: "draft refresh",
+			configure: func(repo *spyAgentRepo, cancel context.CancelFunc) {
+				repo.currentDraft = routeLikeDraft(12)
+				repo.getDraftHook = func(_ context.Context, _ int64) (Draft, error, bool) {
+					if repo.getDraftCalls == 2 {
+						cancel()
+						return Draft{}, context.Canceled, true
+					}
+					return Draft{}, nil, false
+				}
+			},
+			output: AdviceRunOutput{AssistantText: "草稿正文", AuditSteps: []AdviceRunAuditStep{{StepType: AgentStepTypeToolResult, Status: AgentStepStatusSucceeded, ToolName: AdviceToolUpdateDraft}}},
+			check: func(t *testing.T, repo *spyAgentRepo) {
+				if len(repo.steps) != 1 {
+					t.Fatalf("expected cancellation before audit persistence, got %#v", repo.steps)
+				}
+			},
+		},
+		{
+			name: "audit step",
+			configure: func(repo *spyAgentRepo, cancel context.CancelFunc) {
+				fired := false
+				repo.stepHook = func(_ context.Context, input AgentRunStepInput) error {
+					if !fired && input.StepType == AgentStepTypeToolCall {
+						fired = true
+						cancel()
+						return context.Canceled
+					}
+					return nil
+				}
+			},
+			output: AdviceRunOutput{AssistantText: "审计正文", AuditSteps: []AdviceRunAuditStep{
+				{StepType: AgentStepTypeToolCall, Status: AgentStepStatusSucceeded, ToolName: "get_profile_context"},
+				{StepType: AgentStepTypeToolResult, Status: AgentStepStatusSucceeded, ToolName: "get_profile_context"},
+			}},
+			check: func(t *testing.T, repo *spyAgentRepo) {
+				if len(repo.steps) != 1 {
+					t.Fatalf("expected no audit after canceled audit write, got %#v", repo.steps)
+				}
+			},
+		},
+		{
+			name: "final message update",
+			configure: func(repo *spyAgentRepo, cancel context.CancelFunc) {
+				fired := false
+				repo.updateHook = func(_ context.Context, input UpdateChatMessageInput) error {
+					if !fired && input.Status == ChatStatusSent {
+						fired = true
+						cancel()
+						return context.Canceled
+					}
+					return nil
+				}
+			},
+			output: AdviceRunOutput{AssistantText: "最终正文"},
+		},
+		{
+			name: "final step after sent message",
+			configure: func(repo *spyAgentRepo, cancel context.CancelFunc) {
+				fired := false
+				repo.stepHook = func(_ context.Context, input AgentRunStepInput) error {
+					if !fired && input.StepType == AgentStepTypeFinalResponse {
+						fired = true
+						cancel()
+						return nil
+					}
+					return nil
+				}
+			},
+			output: AdviceRunOutput{AssistantText: "已发送正文"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &spyAgentRepo{}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			tt.configure(repo, cancel)
+			wantText := tt.wantText
+			if wantText == "" {
+				wantText = tt.output.AssistantText
+			}
+
+			_, err := NewServiceWithRunner(repo, nil, &spyAdviceRunner{output: tt.output}).ChatStream(ctx, 12, "继续", nil, nil)
+
+			if !errors.Is(err, ErrChatStopped) || !errors.Is(err, context.Canceled) {
+				t.Fatalf("expected stopped and canceled errors, got %v", err)
+			}
+			if len(repo.updates) == 0 || repo.updates[len(repo.updates)-1].Status != ChatStatusStopped || repo.updates[len(repo.updates)-1].ContentText != wantText {
+				t.Fatalf("expected stopped update preserving output, got %#v", repo.updates)
+			}
+			if repo.updateCtxErrors[len(repo.updateCtxErrors)-1] != nil {
+				t.Fatalf("expected detached stopped update context, got %#v", repo.updateCtxErrors)
+			}
+			if tt.check != nil {
+				tt.check(t, repo)
+			}
+		})
+	}
+}
+
+func TestServiceChatStreamPreRunnerCancellationPersistsStopped(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*spyAgentRepo)
+	}{
+		{
+			name: "current draft",
+			configure: func(repo *spyAgentRepo) {
+				repo.getDraftHook = func(ctx context.Context, _ int64) (Draft, error, bool) {
+					return Draft{}, ctx.Err(), true
+				}
+			},
+		},
+		{
+			name: "recent history",
+			configure: func(repo *spyAgentRepo) {
+				repo.getDraftHook = func(_ context.Context, _ int64) (Draft, error, bool) {
+					return Draft{}, ErrDraftNotFound, true
+				}
+				repo.historyHook = func(ctx context.Context, _ int64, _ int) ([]ChatMessage, error, bool) {
+					return nil, ctx.Err(), true
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &spyAgentRepo{}
+			tt.configure(repo)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			runnerCalls := 0
+			runner := adviceRunnerFunc(func(context.Context, AdviceRunInput, AdviceTextDeltaEmitter) (AdviceRunOutput, error) {
+				runnerCalls++
+				return AdviceRunOutput{AssistantText: "不应执行"}, nil
+			})
+
+			_, err := NewServiceWithRunner(repo, nil, runner).ChatStream(ctx, 12, "继续", func(ChatProcessEvent) {
+				cancel()
+			}, nil)
+
+			if !errors.Is(err, ErrChatStopped) || !errors.Is(err, context.Canceled) {
+				t.Fatalf("expected stopped and canceled errors, got %v", err)
+			}
+			if runnerCalls != 0 {
+				t.Fatalf("expected runner not to execute, got %d calls", runnerCalls)
+			}
+			if len(repo.updates) == 0 || repo.updates[len(repo.updates)-1].Status != ChatStatusStopped || repo.updates[len(repo.updates)-1].ContentText != "已停止生成。" {
+				t.Fatalf("expected detached stopped update, got %#v", repo.updates)
+			}
+			if repo.updateCtxErrors[len(repo.updateCtxErrors)-1] != nil {
+				t.Fatalf("expected uncanceled update context, got %#v", repo.updateCtxErrors)
+			}
+		})
 	}
 }
 

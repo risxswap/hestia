@@ -36,19 +36,24 @@ func (h *Handler) Chat(c *gin.Context) {
 	_ = c.ShouldBindJSON(&request)
 	response.StreamHeaders(c)
 	c.Status(http.StatusOK)
+	streamCtx, cancelStream := context.WithCancel(c.Request.Context())
+	defer cancelStream()
 	var streamMu sync.Mutex
 	streamFailed := false
 	writeEvent := func(event string, data any) error {
 		streamMu.Lock()
-		defer streamMu.Unlock()
 		if streamFailed {
+			streamMu.Unlock()
 			return ErrStreamClosed
 		}
 		if err := response.WriteSSE(c.Writer, event, data); err != nil {
 			streamFailed = true
+			streamMu.Unlock()
+			cancelStream()
 			return fmt.Errorf("write %s: %w: %v", event, ErrStreamClosed, err)
 		}
 		c.Writer.Flush()
+		streamMu.Unlock()
 		return nil
 	}
 	hasStreamFailed := func() bool {
@@ -59,7 +64,7 @@ func (h *Handler) Chat(c *gin.Context) {
 	if err := writeEvent("status", h.service.StreamStatus(c.Request.Context(), user.UserID)); err != nil {
 		return
 	}
-	result, err := h.service.ChatStream(c.Request.Context(), user.UserID, request.Text, func(event ChatProcessEvent) {
+	result, err := h.service.ChatStream(streamCtx, user.UserID, request.Text, func(event ChatProcessEvent) {
 		_ = writeEvent("process", event)
 	}, func(delta StreamDelta) error {
 		return writeEvent("delta", delta)

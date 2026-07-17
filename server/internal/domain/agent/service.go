@@ -294,6 +294,15 @@ func (s *Service) ChatStream(ctx context.Context, userID int64, text string, emi
 	if result.ResponseStartedAt.IsZero() {
 		result.ResponseStartedAt = responseStartedAt
 	}
+	stopChat := func(content string, opErr error) (ChatResult, error) {
+		content = strings.TrimSpace(content)
+		if content == "" {
+			content = "已停止生成。"
+		}
+		result.Message = StreamMessage{Text: content}
+		persistErr := s.persistStoppedAssistant(ctx, assistantMessage.ID, content)
+		return result, errors.Join(ErrChatStopped, ctx.Err(), opErr, persistErr)
+	}
 	emitChatProcess(emitProcess, ChatProcessEvent{
 		StepNo:            1,
 		Status:            "running",
@@ -309,12 +318,18 @@ func (s *Service) ChatStream(ctx context.Context, userID int64, text string, emi
 		currentDraftPtr = &currentDraft
 	}
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			return stopChat("", err)
+		}
 		emitChatProcess(emitProcess, failedChatProcessEvent(1, result.ResponseStartedAt))
 		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
 		return result, err
 	}
 	recentMessages, err := s.repo.ListRecentChatMessages(ctx, userID, 12)
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			return stopChat("", err)
+		}
 		now := time.Now().UTC()
 		_ = s.recordFailedStep(ctx, AgentRunStepInput{
 			UserID:         userID,
@@ -463,10 +478,20 @@ func (s *Service) ChatStream(ctx context.Context, userID int64, text string, emi
 			FinishedAt:        optionalTime(runnerFinishedAt),
 		})
 	}
+	stoppedContent := strings.TrimSpace(output.AssistantText)
+	if stoppedContent == "" {
+		stoppedContent = "已停止生成。"
+	}
 	if strings.TrimSpace(output.AssistantText) == "" {
 		output.AssistantText = "请告诉我具体场景、已有单品或想调整的方向。"
 	}
 	result.Message = StreamMessage{Text: output.AssistantText}
+	stopAfterRunner := func(opErr error) (ChatResult, error) {
+		return stopChat(stoppedContent, opErr)
+	}
+	if postRunnerCanceled(ctx, nil) {
+		return stopAfterRunner(nil)
+	}
 	stepNo := 1
 	if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
 		UserID:         userID,
@@ -487,13 +512,22 @@ func (s *Service) ChatStream(ctx context.Context, userID int64, text string, emi
 		FinishedAt:     runnerFinishedAt,
 		DurationMS:     durationMS(runnerStartedAt, runnerFinishedAt),
 	}); err != nil {
+		if postRunnerCanceled(ctx, err) {
+			return stopAfterRunner(err)
+		}
 		return result, errors.Join(err, s.persistFailedAssistant(ctx, assistantMessage.ID, output.AssistantText))
 	}
 	var draft Draft
 	draftUpdated := false
 	if hasCompletedAdviceDraftAudit(output.AuditSteps) {
+		if postRunnerCanceled(ctx, nil) {
+			return stopAfterRunner(nil)
+		}
 		refreshedDraft, refreshErr := s.repo.GetCurrentDraft(ctx, userID)
 		if refreshErr != nil {
+			if postRunnerCanceled(ctx, refreshErr) {
+				return stopAfterRunner(refreshErr)
+			}
 			now := time.Now().UTC()
 			_ = s.recordFailedStep(ctx, AgentRunStepInput{
 				UserID:         userID,
@@ -515,8 +549,14 @@ func (s *Service) ChatStream(ctx context.Context, userID int64, text string, emi
 		draftUpdated = true
 	}
 	for _, auditStep := range output.AuditSteps {
+		if postRunnerCanceled(ctx, nil) {
+			return stopAfterRunner(nil)
+		}
 		stepNo++
 		if err := s.repo.CreateAgentRunStep(ctx, agentRunStepFromAudit(userID, userMessage.ID, assistantMessage.ID, stepNo, auditStep)); err != nil {
+			if postRunnerCanceled(ctx, err) {
+				return stopAfterRunner(err)
+			}
 			return result, errors.Join(err, s.persistFailedAssistant(ctx, assistantMessage.ID, output.AssistantText))
 		}
 		summary, detail := safeProcessCopy(auditStep.StepType, auditStep.ToolName, auditStep.Status)
@@ -560,12 +600,27 @@ func (s *Service) ChatStream(ctx context.Context, userID int64, text string, emi
 		finalStep.RelatedID = draft.ID
 		finalStep.RelatedPublicID = draft.PublicID
 	}
+	if postRunnerCanceled(ctx, nil) {
+		return stopAfterRunner(nil)
+	}
 	_, err = s.repo.UpdateChatMessage(ctx, messageUpdate)
 	if err != nil {
+		if postRunnerCanceled(ctx, err) {
+			return stopAfterRunner(err)
+		}
 		return result, err
 	}
+	if postRunnerCanceled(ctx, nil) {
+		return stopAfterRunner(nil)
+	}
 	if err := s.repo.CreateAgentRunStep(ctx, finalStep); err != nil {
+		if postRunnerCanceled(ctx, err) {
+			return stopAfterRunner(err)
+		}
 		return result, err
+	}
+	if postRunnerCanceled(ctx, nil) {
+		return stopAfterRunner(nil)
 	}
 	result.FinishedAt = finishedAt
 	emitChatProcess(emitProcess, ChatProcessEvent{
@@ -576,6 +631,9 @@ func (s *Service) ChatStream(ctx context.Context, userID int64, text string, emi
 		ResponseStartedAt: result.ResponseStartedAt,
 		FinishedAt:        optionalTime(finishedAt),
 	})
+	if postRunnerCanceled(ctx, nil) {
+		return stopAfterRunner(nil)
+	}
 	return result, nil
 }
 
@@ -623,6 +681,22 @@ func (s *Service) persistFailedAssistant(parent context.Context, assistantMessag
 	_, err := s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{
 		ID:          assistantMessageID,
 		Status:      ChatStatusFailed,
+		MsgType:     ChatMsgTypeText,
+		ContentText: content,
+	})
+	return err
+}
+
+func postRunnerCanceled(ctx context.Context, opErr error) bool {
+	return ctx.Err() != nil || errors.Is(opErr, context.Canceled)
+}
+
+func (s *Service) persistStoppedAssistant(parent context.Context, assistantMessageID int64, content string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 3*time.Second)
+	defer cancel()
+	_, err := s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{
+		ID:          assistantMessageID,
+		Status:      ChatStatusStopped,
 		MsgType:     ChatMsgTypeText,
 		ContentText: content,
 	})

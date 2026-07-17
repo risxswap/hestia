@@ -280,6 +280,8 @@ func (s *Service) persistPartialReply(
 
 先用适用 Context 持久化已经生成的 audit steps，再保存消息。独立 Context 只能执行消息和审计落库，不能继续 Runner、工具或草稿操作。
 
+Runner 成功返回后不能只检查一次 `ctx.Err()`。模型决策 step、草稿刷新、每个 audit step、最终消息更新和最终 step 都要在操作前检查取消，并在操作返回取消错误时进入统一停止兜底；final step 成功后再检查一次，覆盖调用期间发生的取消。停止兜底使用 `context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)` 将助手消息更新为 `stopped`，保留 `output.AssistantText`，空正文使用“已停止生成。”，并返回同时匹配 `ErrChatStopped` 与取消原因的 joined error。非取消数据库错误继续沿用 `failed` 语义。
+
 - [ ] **Step 6: 更新历史过程状态映射**
 
 `chatProcessForMessage` 对 `ChatStatusStopped` 返回：
@@ -357,6 +359,8 @@ response.WriteSSE(c.Writer, "message", result.Message)
 
 如果 `errors.Is(err, ErrChatStopped)` 或请求 Context 已取消，直接结束 Handler，不尝试向已关闭连接写 `error`。其他错误继续发送用户安全的 `error`。
 
+Handler 为本轮流派生 `streamCtx, cancelStream := context.WithCancel(c.Request.Context())` 并传给 `ChatStream`。统一 `writeEvent` 在首次 Write 错误或短写时先原子标记 stream failed，释放 writer mutex 后立即调用 `cancelStream`，避免回调重入死锁。`status` 写失败仍直接返回、不启动 Agent；`process` 写失败必须在 Runner 进入后续工具前让 Context 可取消，且失败后不再写任何 SSE 事件。
+
 - [ ] **Step 4: 增加失败事件和 done 顺序测试**
 
 覆盖：
@@ -364,6 +368,7 @@ response.WriteSSE(c.Writer, "message", result.Message)
 - 正常：`status/process/delta/draft?/done`，无 `message`。
 - 部分正文后失败：有 `delta` 和 `error`，无 `done`。
 - 停止：不把内部 `ErrChatStopped` 写给客户端。
+- 写失败取消：覆盖 `status`、`process`、`delta` 的错误和短写；特别断言 `process` 首次写失败后 Runner 观察到 `ctx.Done()`，不会执行工具，也不会产生后续 writer 写入。
 - `done.message_public_id`、开始和完成时间保持存在。
 
 - [ ] **Step 5: 运行路由测试确认绿灯**
