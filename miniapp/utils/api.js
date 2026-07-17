@@ -561,21 +561,26 @@ function streamAgentChat(input, callbacks) {
   const handlers = callbacks || {};
   let requestTask = null;
   let receivedChunk = false;
+  let aborted = false;
+  let rejectStream = null;
 
-  const promise = ensureDevSession().then(() => new Promise((resolve, reject) => {
-    const parser = createSSEParser((event) => {
-      events.push(event);
-      if (typeof handlers.onEvent === "function") {
-        handlers.onEvent(event);
-      }
-      const eventHandler = handlers[`on${upperFirst(event.event)}`];
-      if (typeof eventHandler === "function") {
-        eventHandler(event.data, event);
-      }
-    });
-    const chunkDecoder = createChunkDecoder();
+  const promise = new Promise((resolve, reject) => {
+    rejectStream = reject;
+    ensureDevSession().then(() => {
+      if (aborted) return;
+      const parser = createSSEParser((event) => {
+        events.push(event);
+        if (typeof handlers.onEvent === "function") {
+          handlers.onEvent(event);
+        }
+        const eventHandler = handlers[`on${upperFirst(event.event)}`];
+        if (typeof eventHandler === "function") {
+          eventHandler(event.data, event);
+        }
+      });
+      const chunkDecoder = createChunkDecoder();
 
-    requestTask = wx.request({
+      requestTask = wx.request({
       url: `${getApiBaseUrl()}${normalizePath("/api/user/agent/chat")}`,
       method: "POST",
       data: payload,
@@ -604,19 +609,25 @@ function streamAgentChat(input, callbacks) {
           data: error
         }));
       }
-    });
-
-    if (requestTask && typeof requestTask.onChunkReceived === "function") {
-      requestTask.onChunkReceived((response) => {
-        receivedChunk = true;
-        parser.push(chunkDecoder.decode(response && response.data));
       });
-    }
-  }));
+
+      if (requestTask && typeof requestTask.onChunkReceived === "function") {
+        requestTask.onChunkReceived((response) => {
+          receivedChunk = true;
+          parser.push(chunkDecoder.decode(response && response.data));
+        });
+      }
+    }).catch(reject);
+  });
 
   return {
     promise,
     abort() {
+      if (aborted) return;
+      aborted = true;
+      if (rejectStream) {
+        rejectStream(new ApiError("请求已取消", { code: "api.request_aborted" }));
+      }
       if (requestTask && typeof requestTask.abort === "function") {
         requestTask.abort();
       }

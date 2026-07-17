@@ -145,6 +145,46 @@ async function main() {
     assert(report.public_id === "rpt_test", "getLatestReport should return response data");
   });
 
+  await withGlobals({
+    getApp: () => ({ globalData: { apiBaseUrl: "http://127.0.0.1:8080" } }),
+    wx: (() => {
+      let releaseLogin = null;
+      const calls = [];
+      return {
+        calls,
+        getStorageSync() { return ""; },
+        setStorageSync() {},
+        request(options) {
+          calls.push(options);
+          if (options.url.endsWith("/api/user/dev-login")) {
+            releaseLogin = () => options.success({
+              statusCode: 200,
+              data: { code: "ok", data: { token: "late_token", user_public_id: "usr_late" } }
+            });
+          }
+          return {};
+        },
+        releaseLogin() { releaseLogin(); }
+      };
+    })()
+  }, async () => {
+    const stream = api.streamAgentChat("立即停止");
+    stream.abort();
+    global.wx.releaseLogin();
+    let abortedError = null;
+    try {
+      await Promise.race([
+        stream.promise,
+        new Promise((resolve, reject) => setTimeout(() => reject(new Error("abort timeout")), 20))
+      ]);
+    } catch (error) {
+      abortedError = error;
+    }
+    const agentRequests = global.wx.calls.filter((call) => call.url.endsWith("/api/user/agent/chat"));
+    assert(agentRequests.length === 0, "abort before session readiness must prevent the agent request");
+    assert(abortedError && abortedError.code === "api.request_aborted", "early abort should reject with stable api.request_aborted code");
+  });
+
   assert(calls.length === 2, `expected 2 wx.request calls, got ${calls.length}`);
   assert(
     calls[0].url === "http://127.0.0.1:8080/api/user/dev-login",
@@ -183,10 +223,12 @@ async function main() {
         if (options.url.endsWith("/api/user/agent/chat")) {
           options.success({
             statusCode: 200,
-            data: "event: message\n" +
-              "data: {\"text\":\"先给你一版草稿\"}\n\n" +
-              "event: draft\n" +
-              "data: {\"draft_public_id\":\"drf_test\",\"sections\":[]}\n\n"
+            data: "event: delta\n" +
+              "data: {\"text\":\"先给你\"}\n\n" +
+              "event: delta\n" +
+              "data: {\"text\":\"一版草稿\"}\n\n" +
+              "event: done\n" +
+              "data: {\"job_public_id\":\"job_test\"}\n\n"
           });
           return {};
         }
@@ -204,18 +246,27 @@ async function main() {
     }
   }, async () => {
     const chatEvents = await api.sendAgentMessage("今天怎么穿");
-    assert(chatEvents.length === 2, `sendAgentMessage should collect SSE events, got ${chatEvents.length}`);
+    assert(chatEvents.length === 3, `sendAgentMessage should collect SSE events, got ${chatEvents.length}`);
+    assert(chatEvents.map((event) => event.event).join(",") === "delta,delta,done", "agent fixtures should use delta-only text streaming");
+    assert(!chatEvents.some((event) => event.event === "message"), "agent event collection must not contain message events");
     const history = await api.getAgentMessages();
     assert(history.public_id === "drf_test", "getAgentMessages should return response data");
     await api.getCurrentAdviceDraft();
     await api.getAdviceDraftVersions("drf_test");
     await api.confirmAdviceDraft("drf_test");
     await api.discardAdviceDraft("drf_test");
+    const receivedDeltas = [];
     const directStream = api.streamAgentChat({
       text: "看这张照片",
       assetRefs: [{ asset_public_id: "ast_photo", asset_type: "chat_image", note: "聊天上传图" }]
+    }, {
+      onDelta(data) {
+        receivedDeltas.push(data.text);
+      }
     });
-    await directStream.promise;
+    const directEvents = await directStream.promise;
+    assert(receivedDeltas.join("|") === "先给你|一版草稿", `onDelta should receive text in order: ${receivedDeltas.join("|")}`);
+    assert(!directEvents.some((event) => event.event === "message"), "direct stream must not contain message events");
   });
 
   const agentPaths = agentCalls.map((call) => call.url.replace("http://127.0.0.1:8080", ""));
@@ -241,7 +292,7 @@ async function main() {
       },
       request(options) {
         let chunkHandler = null;
-        const raw = "event: message\n" +
+        const raw = "event: delta\n" +
           "data: {\"text\":\"准备好了\"}\n\n";
         const bytes = Array.from(Buffer.from(raw, "utf8"));
         const splitAt = bytes.findIndex((byte) => byte >= 0xe0);
@@ -263,9 +314,17 @@ async function main() {
       }
     }
   }, async () => {
-    const chunkEvents = await api.streamAgentChat("测试分块").promise;
+    const receivedDeltas = [];
+    const stream = api.streamAgentChat("测试分块", {
+      onDelta(data) {
+        receivedDeltas.push(data.text);
+      }
+    });
+    const chunkEvents = await stream.promise;
     assert(chunkEvents.length === 1, `chunked stream should produce one event, got ${chunkEvents.length}`);
+    assert(chunkEvents[0].event === "delta", `chunked stream should preserve delta event: ${JSON.stringify(chunkEvents)}`);
     assert(chunkEvents[0].data.text === "准备好了", `chunked UTF-8 text mismatch: ${JSON.stringify(chunkEvents)}`);
+    assert(receivedDeltas.join("") === "准备好了", `chunked onDelta UTF-8 text mismatch: ${receivedDeltas.join("")}`);
   });
 
   const collectionCalls = [];

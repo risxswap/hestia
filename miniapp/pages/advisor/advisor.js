@@ -18,17 +18,23 @@ Page({
     ]
   },
   async onLoad() {
+    this.isUnloaded = false;
     this.startProcessTimer();
     await this.restoreAgentMessages();
     await this.restoreCurrentDraft();
   },
   onUnload() {
-    this.abortActiveRequest();
+    this.isUnloaded = true;
+    if (this.activeStreamIdentity && this.activeStreamIdentity.buffer) {
+      this.activeStreamIdentity.buffer.clear();
+    }
+    this.abortActiveRequest("unloaded");
     this.stopProcessTimer();
   },
   async restoreAgentMessages() {
     try {
       const result = await api.getAgentMessages();
+      if (this.isUnloaded) return;
       const records = result && Array.isArray(result.messages) ? result.messages : [];
       if (!records.length) {
         return;
@@ -39,6 +45,7 @@ Page({
         this.scrollToBottom();
       });
     } catch (error) {
+      if (this.isUnloaded) return;
       // A history request should not prevent a user from starting a new chat.
     }
   },
@@ -86,6 +93,7 @@ Page({
   async restoreCurrentDraft() {
     try {
       const draft = await api.getCurrentAdviceDraft();
+      if (this.isUnloaded) return;
       if (!draft || !draft.draft_public_id) {
         return;
       }
@@ -95,6 +103,7 @@ Page({
       }
       this.appendAssistantMessage("继续调整这版草稿也可以。", "", normalizeDraftCard(draft));
     } catch (error) {
+      if (this.isUnloaded) return;
       if (error && error.code === "agent.draft_not_found") {
         return;
       }
@@ -177,13 +186,20 @@ Page({
     }
   },
   handleStop() {
-    this.abortActiveRequest();
     const assistantID = this.activeAssistantID;
+    const identity = this.activeStreamIdentity;
+    if (identity && identity.buffer) {
+      safeFlushTextDeltaBuffer(identity.buffer);
+    }
+    this.abortActiveRequest("stopped");
+    if (identity && identity.buffer) {
+      identity.buffer.clear();
+    }
     if (assistantID) {
       this.updateMessage(assistantID, (message) => Object.assign({}, message, {
-        status: "",
+        status: "stopped",
         content: message.content || "已停止生成。",
-        process: failChatProcess(message.process, new Date())
+        process: stopChatProcess(message.process, new Date())
       }));
     }
     this.setData({ thinking: false });
@@ -277,7 +293,28 @@ Page({
     });
   },
   async sendToAgent(content, assistantID, assetRefs) {
-    this.abortActiveRequest();
+    if (this.activeStreamIdentity && this.activeStreamIdentity.buffer) {
+      safeFlushTextDeltaBuffer(this.activeStreamIdentity.buffer);
+    }
+    this.abortActiveRequest("superseded");
+    const identity = {
+      assistantID,
+      stream: null,
+      stopped: false,
+      superseded: false,
+      unloaded: false,
+      buffer: null
+    };
+    identity.buffer = createTextDeltaBuffer(Object.assign({}, this.textDeltaBufferOptions || {}, {
+      apply: (text) => {
+        if (this.isUnloaded || this.activeStreamIdentity !== identity) return;
+        this.updateMessage(assistantID, (message) => Object.assign({}, message, {
+          status: "",
+          content: (message.content || "") + text
+        }), { suppressScroll: true });
+      }
+    }));
+    this.activeStreamIdentity = identity;
     const stream = api.streamAgentChat({
       text: content,
       assetRefs: assetRefs || []
@@ -286,69 +323,91 @@ Page({
         // Status remains a backwards-compatible server signal. Process events drive the UI.
       },
       onProcess: (data) => {
+        if (this.isUnloaded || identity.unloaded) return;
+        if (identity.stopped) return;
+        if (this.activeStreamIdentity !== identity) return;
         this.updateMessage(assistantID, (message) => Object.assign({}, message, {
           process: mergeChatProcessEvent(message.process, data, new Date())
         }));
       },
-      onMessage: (data) => {
-        const text = extractAssistantText(data && data.text ? data.text : "");
-        this.updateMessage(assistantID, (message) => Object.assign({}, message, {
-          status: "",
-          content: text || message.content
-        }));
+      onDelta: (data) => {
+        if (this.isUnloaded || identity.unloaded) return;
+        if (identity.stopped) return;
+        if (this.activeStreamIdentity !== identity) return;
+        identity.buffer.push(data && typeof data.text === "string" ? data.text : "");
       },
       onDraft: (data) => {
+        if (this.isUnloaded || identity.unloaded) return;
+        if (identity.stopped) return;
+        if (this.activeStreamIdentity !== identity) return;
         this.updateMessage(assistantID, (message) => Object.assign({}, message, {
           draft: normalizeDraftCard(data)
         }));
       },
       onError: (data) => {
+        if (this.isUnloaded || identity.unloaded) return;
+        safeFlushTextDeltaBuffer(identity.buffer);
+        if (this.isUnloaded || identity.unloaded) return;
+        if (this.activeStreamIdentity !== identity || identity.stopped) return;
         const text = data && data.message ? data.message : "智能体请求失败";
         this.updateMessage(assistantID, (message) => Object.assign({}, message, {
           status: "error",
-          content: text,
+          content: message.content || text,
           process: failChatProcess(message.process, new Date())
         }));
       },
       onDone: (data) => {
+        if (this.isUnloaded || identity.unloaded) return;
+        safeFlushTextDeltaBuffer(identity.buffer);
+        if (this.isUnloaded || identity.unloaded) return;
+        if (this.activeStreamIdentity !== identity || identity.stopped) return;
         this.updateMessage(assistantID, (message) => Object.assign({}, message, {
           status: "",
           process: finishChatProcess(message.process, data, new Date())
         }));
       }
     });
+    identity.stream = stream;
     this.activeRequest = stream;
     try {
       await stream.promise;
+      safeFlushTextDeltaBuffer(identity.buffer);
+      if (this.isUnloaded || this.activeStreamIdentity !== identity) return;
       this.setData({ thinking: false }, () => {
         this.scrollToBottom();
       });
     } catch (error) {
-      if (this.stoppingRequest) {
+      safeFlushTextDeltaBuffer(identity.buffer);
+      if (this.isUnloaded || identity.stopped || identity.superseded || this.activeStreamIdentity !== identity) {
         return;
       }
       this.updateMessage(assistantID, (message) => Object.assign({}, message, {
         status: "error",
-        content: error && error.message ? error.message : "顾问服务请求失败",
+        content: message.content || (error && error.message ? error.message : "顾问服务请求失败"),
         process: failChatProcess(message.process, new Date())
       }));
       this.setData({ thinking: false });
     } finally {
+      safeFlushTextDeltaBuffer(identity.buffer);
       if (this.activeRequest === stream) {
         this.activeRequest = null;
         this.activeAssistantID = "";
+        this.activeStreamIdentity = null;
       }
-      this.stoppingRequest = false;
+      if (this.stoppingRequest === stream) {
+        this.stoppingRequest = null;
+      }
     }
   },
-  updateMessage(messageID, updater) {
+  updateMessage(messageID, updater, options) {
+    const config = options || {};
     const messages = this.data.messages.map((message) => {
       if (message.id !== messageID) {
         return message;
       }
       return updater(message);
     });
-    this.setData({ messages }, () => {
+    this.setData({ messages }, config.suppressScroll ? undefined : () => {
       this.scrollToBottom();
     });
   },
@@ -375,8 +434,15 @@ Page({
     this.setData({ messages });
   },
   abortActiveRequest() {
+    const reason = arguments[0] || "stopped";
+    const identity = this.activeStreamIdentity;
+    if (identity) {
+      identity.stopped = reason === "stopped";
+      identity.superseded = reason === "superseded";
+      identity.unloaded = reason === "unloaded";
+    }
     if (this.activeRequest && typeof this.activeRequest.abort === "function") {
-      this.stoppingRequest = true;
+      this.stoppingRequest = this.activeRequest;
       this.activeRequest.abort();
     }
   }
@@ -462,43 +528,61 @@ function normalizeChatMessage(raw) {
   return {
     id: message.public_id || nextMessageID(message.role || "message"),
     role: message.role || "assistant",
-    status: message.status === "failed" ? "error" : "",
-    content: message.role === "assistant" ? extractAssistantText(message.content) : (message.content || ""),
+    status: message.status === "failed" || message.status === "error" ? "error" : (message.status === "stopped" ? "stopped" : ""),
+    content: message.content || "",
     assetRefs: message.asset_refs || [],
     process: message.process ? normalizeChatProcess(message.process, new Date()) : null
   };
 }
 
-function extractAssistantText(raw) {
-  const text = String(raw || "").trim();
-  if (!text) return "";
-  const candidates = [];
-  const fenceStart = text.indexOf("```");
-  if (fenceStart >= 0) {
-    let fenced = text.slice(fenceStart + 3);
-    const lineEnd = fenced.indexOf("\n");
-    if (lineEnd >= 0) {
-      fenced = fenced.slice(lineEnd + 1);
+function createTextDeltaBuffer(options) {
+  const config = options || {};
+  const delay = typeof config.delay === "number" ? config.delay : 50;
+  const apply = config.apply;
+  const schedule = config.schedule || ((callback) => setTimeout(callback, delay));
+  const cancel = config.cancel || ((timer) => clearTimeout(timer));
+  let pending = "";
+  let timer = null;
+
+  function flush() {
+    if (timer !== null) {
+      cancel(timer);
+      timer = null;
     }
-    const fenceEnd = fenced.indexOf("```");
-    candidates.push((fenceEnd >= 0 ? fenced.slice(0, fenceEnd) : fenced).trim());
+    if (!pending) return;
+    const text = pending;
+    pending = "";
+    apply(text);
   }
-  const objectStart = text.indexOf("{");
-  const objectEnd = text.lastIndexOf("}");
-  if (objectStart >= 0 && objectEnd > objectStart) {
-    candidates.push(text.slice(objectStart, objectEnd + 1));
-  }
-  for (let index = 0; index < candidates.length; index += 1) {
-    try {
-      const payload = JSON.parse(candidates[index]);
-      if (payload && typeof payload.assistant_text === "string" && payload.assistant_text.trim()) {
-        return payload.assistant_text.trim();
+
+  return {
+    push(text) {
+      if (typeof text !== "string" || !text) return;
+      pending += text;
+      if (timer === null) {
+        timer = schedule(() => {
+          timer = null;
+          flush();
+        }, delay);
       }
-    } catch (error) {
-      // Preserve the original content when it is Markdown rather than Agent JSON.
+    },
+    flush,
+    clear() {
+      if (timer !== null) {
+        cancel(timer);
+        timer = null;
+      }
+      pending = "";
     }
+  };
+}
+
+function safeFlushTextDeltaBuffer(buffer) {
+  try {
+    buffer.flush();
+  } catch (error) {
+    // A transient UI apply failure must not block stream cleanup.
   }
-  return text;
 }
 
 function normalizeChatProcess(raw, now) {
@@ -508,7 +592,7 @@ function normalizeChatProcess(raw, now) {
   const running = status === "running";
   return {
     status,
-    summary: running ? (process.summary || "理解你的需求") : "查看处理过程",
+    summary: running ? (process.summary || "理解你的需求") : (status === "stopped" ? "已停止" : "查看处理过程"),
     response_started_at: process.response_started_at || "",
     finished_at: finishedAt,
     elapsed_label: formatProcessElapsed(process.response_started_at, finishedAt, now),
@@ -582,6 +666,17 @@ function failChatProcess(existing, now) {
   }, now);
 }
 
+function stopChatProcess(existing, now) {
+  const process = existing || {};
+  return normalizeChatProcess({
+    status: "stopped",
+    response_started_at: process.response_started_at,
+    finished_at: process.finished_at || (now || new Date()).toISOString(),
+    expanded: process.expanded,
+    steps: process.steps || []
+  }, now);
+}
+
 function formatProcessElapsed(startedAt, finishedAt, now) {
   const started = Date.parse(startedAt || "");
   if (Number.isNaN(started)) return "";
@@ -595,9 +690,11 @@ if (typeof module !== "undefined") {
     normalizeDraftCard,
     normalizeDraftSection,
     sectionLabel,
+    normalizeChatMessage,
     normalizeChatProcess,
     formatProcessElapsed,
     failChatProcess,
-    extractAssistantText
+    stopChatProcess,
+    createTextDeltaBuffer
   };
 }
