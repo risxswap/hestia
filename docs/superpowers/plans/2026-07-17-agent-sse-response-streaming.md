@@ -95,7 +95,7 @@ adk.NewRunner(ctx, adk.RunnerConfig{
 
 ```text
 最终回答直接输出面向用户的自然语言或 Markdown，不输出 JSON、工具名或内部步骤。
-调用工具时不要同时输出用户可见正文；完成必要工具调用后再生成最终回复。
+工具调用前可以输出简短的用户可见说明；`ToolCalls` 结构及 arguments 和 Tool role 结果正文不得写入回复，完成必要工具调用后继续生成最终回复。
 ```
 
 - [ ] **Step 4: 实现唯一 MessageStream 消费器**
@@ -112,10 +112,10 @@ func consumeAdviceMessageOutput(
 
 规则：
 
-- `variant.Role == schema.Tool`：完整读取并合并消息，只生成工具结果审计，不 emit。
-- Assistant 流的第一个语义 chunk 含 `ToolCalls`：完整读取并合并，只生成工具调用审计，不 emit。
-- Assistant 流的第一个语义 chunk 含正文：立即 emit，并按顺序继续读取、聚合正文。
-- 已开始 emit 正文后出现 ToolCall：返回稳定错误 `ErrMixedAssistantStream`，不能继续向用户暴露内容。
+- `variant.Role == schema.Tool`：完整读取并合并消息，只生成工具结果审计，其结果正文不 emit。
+- 每个 Assistant chunk 的 `Content` 均视为用户可见正文：非空时立即 emit，成功后按顺序聚合。
+- Assistant 流可以同时包含 `Content` 和 `ToolCalls`，同一 chunk 也允许两者并存；`Content` 正常 emit，`ToolCalls` 只合并后生成审计，不序列化到 SSE。
+- Tool result 事件完整读取并合并，只生成工具结果审计，不 emit；后续 Assistant 流的 `Content` 继续追加到同一回复。
 - `Recv()` 返回非 EOF 错误时，返回已聚合的部分正文和原错误。
 - 始终 `defer stream.Close()`，不能再次调用 `GetMessage()` 消费同一流。
 
@@ -146,10 +146,10 @@ AdviceRunAuditStep{
 
 新增测试：
 
-1. ToolCall assistant stream 和 Tool result event 均不触发正文 emitter，审计顺序为 call/result。
+1. Assistant 流中的公开 `Content` 均触发正文 emitter，即使同流存在 ToolCall；`ToolCalls` 结构及 arguments 和 Tool role 结果正文不触发 emitter，审计顺序为 call/result。
 2. 正文流第二个 chunk 返回错误时，output 保留第一个成功 emit 的 chunk。
 3. emitter 返回错误时，Runner 立即停止并返回已确认部分文本。
-4. 正文后混入 ToolCall 返回 `ErrMixedAssistantStream`。
+4. 多个正文 chunk 后出现 ToolCall、工具结果匹配并继续收到最终正文时，Run 成功，最终正文为前导与后续正文拼接。
 
 - [ ] **Step 7: 运行 Runner 包测试确认绿灯**
 

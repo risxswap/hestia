@@ -13,7 +13,6 @@ import (
 )
 
 var ErrAdviceRunnerUnavailable = errors.New("advice runner unavailable")
-var ErrMixedAssistantStream = errors.New("assistant stream mixed content and tool calls")
 var ErrNonStreamingAssistantMessage = errors.New("non-streaming assistant message is not allowed")
 var ErrUnexpectedToolResult = errors.New("unexpected tool result")
 var ErrUnexpectedMessageRole = errors.New("unexpected message role")
@@ -56,7 +55,7 @@ func NewEinoADKChatModelAdviceRunnerWithMetadata(ctx context.Context, chatModel 
 		Description: "通过对话创建和精修穿搭、发型、妆容建议草稿",
 		Instruction: strings.TrimSpace(`
 你是 Hestia 的个人 AI 形象顾问智能体。你需要判断用户意图，必要时通过 ADK 工具调用创建、读取、更新或废弃建议草稿。
-需要写入草稿时必须真实调用相应工具。调用工具时不要同时输出给用户的正文，等待工具结果后再回复。
+需要写入草稿时必须真实调用相应工具。工具调用前可以输出简短的用户可见说明，工具参数和结果不得写入回复；等待工具结果后再补充最终回复。
 最终回复使用自然语言或 Markdown，不输出 JSON、工具名称或内部执行步骤。
 建议内容要中性、具体、可执行，避免医疗诊断、羞辱式表达和确定性变美承诺。
 `),
@@ -173,11 +172,11 @@ func consumeAssistantStream(stream *schema.StreamReader[*schema.Message], emit A
 		return nil, ErrAdviceRunnerUnavailable
 	}
 	defer stream.Close()
-	var leading []*schema.Message
+	var chunks []*schema.Message
 	for {
 		chunk, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
-			return nil, nil
+			return auditAssistantChunks(chunks)
 		}
 		if err != nil {
 			return nil, err
@@ -188,62 +187,19 @@ func consumeAssistantStream(stream *schema.StreamReader[*schema.Message], emit A
 		if !validChunkRole(chunk.Role, schema.Assistant) {
 			return nil, ErrUnexpectedMessageRole
 		}
-		if len(chunk.ToolCalls) > 0 {
-			leading = append(leading, chunk)
-			return auditAssistantToolStream(stream, leading)
+		if chunk.Content != "" {
+			if err := emit(chunk.Content); err != nil {
+				return nil, err
+			}
+			*assistantText += chunk.Content
 		}
-		if chunk.Content == "" {
-			leading = append(leading, chunk)
-			continue
-		}
-		if err := emit(chunk.Content); err != nil {
-			return nil, err
-		}
-		*assistantText += chunk.Content
-		break
-	}
-	for {
-		chunk, err := stream.Recv()
-		if errors.Is(err, io.EOF) {
-			return nil, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		if chunk == nil {
-			continue
-		}
-		if !validChunkRole(chunk.Role, schema.Assistant) {
-			return nil, ErrUnexpectedMessageRole
-		}
-		if len(chunk.ToolCalls) > 0 {
-			return nil, ErrMixedAssistantStream
-		}
-		if chunk.Content == "" {
-			continue
-		}
-		if err := emit(chunk.Content); err != nil {
-			return nil, err
-		}
-		*assistantText += chunk.Content
+		chunks = append(chunks, chunk)
 	}
 }
 
-func auditAssistantToolStream(stream *schema.StreamReader[*schema.Message], chunks []*schema.Message) ([]AdviceRunAuditStep, error) {
-	for {
-		chunk, err := stream.Recv()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		if chunk != nil {
-			if !validChunkRole(chunk.Role, schema.Assistant) {
-				return nil, ErrUnexpectedMessageRole
-			}
-			chunks = append(chunks, chunk)
-		}
+func auditAssistantChunks(chunks []*schema.Message) ([]AdviceRunAuditStep, error) {
+	if len(chunks) == 0 {
+		return nil, nil
 	}
 	message, err := schema.ConcatMessages(chunks)
 	if err != nil {

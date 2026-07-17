@@ -77,7 +77,7 @@ func TestEinoADKAdviceRunnerStreamsAssistantTextInOrder(t *testing.T) {
 	}
 }
 
-func TestEinoADKAdviceRunnerAuditsToolEventsWithoutEmitting(t *testing.T) {
+func TestEinoADKAdviceRunnerEmitsPublicContentButNotToolPayloads(t *testing.T) {
 	toolCalls := []schema.ToolCall{{
 		ID: "call_create_1",
 		Function: schema.FunctionCall{
@@ -87,7 +87,7 @@ func TestEinoADKAdviceRunnerAuditsToolEventsWithoutEmitting(t *testing.T) {
 	}}
 	runner := newTestEinoAdviceRunner(
 		streamEvent(schema.Assistant, "", schema.StreamReaderFromArray([]*schema.Message{
-			{Role: schema.Assistant, Content: "这段不能发出", ToolCalls: toolCalls},
+			{Role: schema.Assistant, Content: "我先帮你创建草稿。", ToolCalls: toolCalls},
 			{Role: schema.Assistant, Extra: map[string]any{"usage": "metadata"}},
 		})),
 		&adk.AgentEvent{Output: &adk.AgentOutput{MessageOutput: &adk.MessageVariant{
@@ -110,7 +110,7 @@ func TestEinoADKAdviceRunnerAuditsToolEventsWithoutEmitting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if !reflect.DeepEqual(deltas, []string{"草稿已经创建。"}) {
+	if !reflect.DeepEqual(deltas, []string{"我先帮你创建草稿。", "草稿已经创建。"}) {
 		t.Fatalf("unexpected emitted deltas: %#v", deltas)
 	}
 	if len(output.AuditSteps) != 2 {
@@ -175,19 +175,53 @@ func TestEinoADKAdviceRunnerStopsAtEmitterError(t *testing.T) {
 	}
 }
 
-func TestEinoADKAdviceRunnerRejectsToolCallAfterAssistantText(t *testing.T) {
-	runner := newTestEinoAdviceRunner(streamEvent(schema.Assistant, "", schema.StreamReaderFromArray([]*schema.Message{
-		schema.AssistantMessage("正文已发出", nil),
-		{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "late", Function: schema.FunctionCall{Name: AdviceToolUpdateDraft}}}},
-	})))
-
-	output, err := runner.Run(context.Background(), AdviceRunInput{}, func(string) error { return nil })
-
-	if !errors.Is(err, ErrMixedAssistantStream) {
-		t.Fatalf("expected mixed stream error, got %v", err)
+func TestEinoADKAdviceRunnerContinuesAfterVisibleContentAndToolCallShareStream(t *testing.T) {
+	toolCall := schema.ToolCall{
+		ID: "call_update_1",
+		Function: schema.FunctionCall{
+			Name:      AdviceToolUpdateDraft,
+			Arguments: `{"private":"must not be emitted"}`,
+		},
 	}
-	if output.AssistantText != "正文已发出" {
-		t.Fatalf("expected confirmed partial text, got %#v", output)
+	runner := newTestEinoAdviceRunner(
+		streamEvent(schema.Assistant, "", schema.StreamReaderFromArray([]*schema.Message{
+			schema.AssistantMessage("你好，我先了解", nil),
+			schema.AssistantMessage("一下你的档案。", nil),
+			{Role: schema.Assistant, Content: "现在帮你更新。", ToolCalls: []schema.ToolCall{toolCall}},
+		})),
+		nonStreamingToolResultEvent(AdviceToolUpdateDraft, "call_update_1"),
+		streamEvent(schema.Assistant, "", schema.StreamReaderFromArray([]*schema.Message{
+			schema.AssistantMessage("已经按你的反馈调整好了。", nil),
+		})),
+	)
+	var deltas []string
+
+	output, err := runner.Run(context.Background(), AdviceRunInput{}, func(delta string) error {
+		deltas = append(deltas, delta)
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	wantDeltas := []string{"你好，我先了解", "一下你的档案。", "现在帮你更新。", "已经按你的反馈调整好了。"}
+	if !reflect.DeepEqual(deltas, wantDeltas) {
+		t.Fatalf("unexpected emitted deltas: got %#v want %#v", deltas, wantDeltas)
+	}
+	if output.AssistantText != strings.Join(wantDeltas, "") {
+		t.Fatalf("unexpected assistant text: %#v", output)
+	}
+	if len(output.AuditSteps) != 2 {
+		t.Fatalf("unexpected audit steps: %#v", output.AuditSteps)
+	}
+	call, result := output.AuditSteps[0], output.AuditSteps[1]
+	if call.StepType != AgentStepTypeToolCall || result.StepType != AgentStepTypeToolResult ||
+		call.ToolName != AdviceToolUpdateDraft || result.ToolName != AdviceToolUpdateDraft ||
+		call.ToolCallID != "call_update_1" || result.ToolCallID != "call_update_1" {
+		t.Fatalf("unexpected audit order or identity: %#v", output.AuditSteps)
+	}
+	if strings.Contains(strings.Join(deltas, ""), "private") || strings.Contains(strings.Join(deltas, ""), "ok") {
+		t.Fatalf("tool payload leaked to deltas: %#v", deltas)
 	}
 }
 

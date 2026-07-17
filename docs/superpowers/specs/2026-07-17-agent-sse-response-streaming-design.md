@@ -21,7 +21,7 @@
 - 不按 token 或 SSE 增量频繁写数据库。
 - 不增加 SSE 自动重连或断点续传。
 - 不兼容旧版 `message` 正文事件或非流式 Runner 接口。
-- 不把中间工具参数、工具结果正文或模型隐藏推理发送给用户。
+- 不把 `ToolCalls` 结构及 arguments、Tool role 的工具结果正文或模型隐藏推理发送给用户；同流或同 chunk 的 Assistant `Content` 仍是用户可见正文。
 - 不为流式回复新增独立消息表。
 
 ## 方案选择
@@ -53,9 +53,10 @@ Agent 最终输出改为面向用户的自然文本，不再要求包含 `assist
 
 - 工具调用继续通过 Eino Tool Calling 消息执行。
 - 工具调用与结果审计从 ADK 原生事件采集。
-- 最终自然文本只承担用户回复职责。
+- Assistant `Content` 字段均视为用户可见正文；工具调用前的说明和工具完成后的最终回复按事件顺序共同组成完整回复。
 - Markdown 可以跨 chunk 分割，小程序按原始顺序拼接。
-- 中间模型决策中的工具调用消息和工具结果不得作为 `delta` 发送；只有最终 assistant 文本进入正文流。
+- Assistant `Content` 可以与 `ToolCalls` 出现在同一条流、甚至同一 chunk；正文照常作为 `delta` 发送，`ToolCalls` 仅用于执行和审计。
+- 工具参数、Tool role 的工具结果正文和模型隐藏推理不得作为 `delta` 发送；工具完成后的后续 assistant 正文继续追加。
 
 ## Runner 接口
 
@@ -65,7 +66,7 @@ Agent 最终输出改为面向用户的自然文本，不再要求包含 `assist
 
 1. 遍历 ADK AgentEvent。
 2. 识别 `MessageOutput.IsStreaming`。
-3. 逐个读取 `MessageStream`，只转发最终 assistant 回复的文本 chunk。
+3. 逐个读取 `MessageStream`，转发所有 assistant `Content` chunk，同时隔离工具参数和工具结果正文。
 4. 聚合 chunk 得到完整回复。
 5. 从真实工具消息生成审计步骤。
 6. 正常结束时返回完整输出；异常或取消时同时返回已经聚合的部分输出和错误。
@@ -149,8 +150,8 @@ Advisor 页面为当前请求维护内存增量缓冲：
 
 ## 错误与隐私边界
 
-- SSE `delta` 只包含模型面向用户的最终回复文本。
-- 不发送 system prompt、工具参数、工具结果正文、模型隐藏推理或原始异常。
+- SSE `delta` 只包含模型 assistant `Content` 中面向用户的公开文本，包括工具调用前的说明和工具完成后的最终回复。
+- 不发送 system prompt、`ToolCalls` 结构及 arguments、Tool role 的工具结果正文、模型隐藏推理或原始异常；Assistant `Content` 无论是否与 `ToolCalls` 同流或同 chunk，均作为用户可见 `delta`。
 - 失败事件继续使用用户安全文案。
 - 日志只记录字符数、耗时和脱敏摘要，不逐 chunk 记录正文。
 - 停止持久化失败必须记录结构化错误，但不能覆盖原始 Agent 错误。
@@ -161,7 +162,7 @@ Advisor 页面为当前请求维护内存增量缓冲：
 
 - 流式 MessageStream 的多个 chunk 按顺序回调并正确聚合。
 - UTF-8 中文、Markdown 和跨 chunk 内容不丢失、不重复。
-- 中间工具调用消息不作为正文增量发送。
+- `ToolCalls` 结构及 arguments 和 Tool role 的工具结果正文不作为 `delta`；Assistant `Content` 无论是否与 `ToolCalls` 同流或同 chunk，均作为用户可见 `delta`。
 - 单个完整模型 chunk 仍通过 `delta` 输出。
 - Handler 按顺序输出 `delta`、可选 `draft` 和 `done`，不再输出 `message`。
 - 用户取消后保存部分正文并标记 `stopped`。
