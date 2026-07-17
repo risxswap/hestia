@@ -100,100 +100,6 @@ func TestServiceLogsStructuredRunnerFailureDiagnostics(t *testing.T) {
 	}
 }
 
-func TestServiceChatPersistsMessagesStepsAndUpdatesCurrentDraft(t *testing.T) {
-	repo := &spyAgentRepo{currentDraft: Draft{
-		ID:                10,
-		PublicID:          "drf_test",
-		UserID:            12,
-		Status:            DraftStatusDraft,
-		CurrentRevisionNo: 1,
-		Sections: []DraftSection{{
-			ID:                   20,
-			PublicID:             "ads_outfit",
-			SectionType:          SectionTypeOutfit,
-			ContentSchemaVersion: "v1",
-			ContentJSON:          defaultAdviceContent("旧穿搭", "旧摘要"),
-		}},
-	}}
-	service := NewServiceWithRunner(repo, nil, RuleBasedAdviceRunner{})
-
-	result, err := service.Chat(context.Background(), 12, "鞋子换舒服点")
-	if err != nil {
-		t.Fatalf("chat: %v", err)
-	}
-
-	if len(repo.createdMessages) != 2 {
-		t.Fatalf("expected user and assistant messages, got %#v", repo.createdMessages)
-	}
-	if repo.createdMessages[0].Role != ChatRoleUser || repo.createdMessages[1].Role != ChatRoleAssistant {
-		t.Fatalf("unexpected message roles: %#v", repo.createdMessages)
-	}
-	if repo.createdMessages[1].SourceMsgID != repo.createdMessages[0].ID {
-		t.Fatalf("assistant message should point to user message, got %#v", repo.createdMessages)
-	}
-	if len(repo.steps) != 4 {
-		t.Fatalf("expected model, tool and final steps, got %#v", repo.steps)
-	}
-	if repo.steps[1].StepType != AgentStepTypeToolCall || repo.steps[2].StepType != AgentStepTypeToolResult {
-		t.Fatalf("expected tool call/result steps, got %#v", repo.steps)
-	}
-	if !repo.updatedDraft {
-		t.Fatalf("expected existing draft to be updated")
-	}
-	if repo.lastUpdate.SourceMsgID != repo.createdMessages[0].ID {
-		t.Fatalf("expected draft update source msg id, got %#v", repo.lastUpdate)
-	}
-	if result.Draft == nil || result.Draft.RevisionNo != 2 {
-		t.Fatalf("expected updated draft card, got %#v", result.Draft)
-	}
-}
-
-func TestServiceChatUsesAdviceRunnerToolCalls(t *testing.T) {
-	repo := &spyAgentRepo{}
-	runner := &spyAdviceRunner{
-		output: AdviceRunOutput{
-			AssistantText: "已按你的反馈改成更稳的鞋子。",
-			DecisionLabel: "update_outfit",
-			ToolCalls: []AdviceToolCall{{
-				Name:         AdviceToolCreateDraft,
-				InputSummary: "创建建议",
-				CreateDraftInput: &CreateDraftInput{
-					Sections: []DraftSectionInput{{
-						SectionType:          SectionTypeOutfit,
-						ContentSchemaVersion: "v1",
-						ContentJSON:          defaultAdviceContent("穿搭", "更稳的鞋子"),
-					}},
-				},
-			}},
-		},
-	}
-	service := NewServiceWithRunner(repo, nil, runner)
-
-	result, err := service.Chat(context.Background(), 12, "鞋子换稳一点")
-	if err != nil {
-		t.Fatalf("chat: %v", err)
-	}
-
-	if runner.input.UserID != 12 || runner.input.Text != "鞋子换稳一点" || runner.input.SourceMsgID == 0 {
-		t.Fatalf("unexpected runner input: %#v", runner.input)
-	}
-	if runner.input.CurrentDraft != nil {
-		t.Fatalf("expected no current draft, got %#v", runner.input.CurrentDraft)
-	}
-	if !repo.createdDraft {
-		t.Fatalf("expected create draft tool to run")
-	}
-	if result.Message.Text != "已按你的反馈改成更稳的鞋子。" {
-		t.Fatalf("unexpected assistant text: %#v", result.Message)
-	}
-	if repo.steps[0].DecisionLabel != "update_outfit" {
-		t.Fatalf("expected runner decision label to be recorded, got %#v", repo.steps)
-	}
-	if repo.steps[1].DecisionLabel != AdviceToolCreateDraft || repo.steps[2].RelatedPublicID != "drf_test" {
-		t.Fatalf("expected tool execution steps, got %#v", repo.steps)
-	}
-}
-
 func TestServiceChatFallsBackWhenAdviceRunnerFails(t *testing.T) {
 	repo := &spyAgentRepo{}
 	runner := &spyAdviceRunner{err: errors.New("adk request failed")}
@@ -300,17 +206,6 @@ func TestServiceChatPassesAssetRefsToUserMessageAndRunner(t *testing.T) {
 		output: AdviceRunOutput{
 			AssistantText: "已根据照片生成建议。",
 			DecisionLabel: "create_draft",
-			ToolCalls: []AdviceToolCall{{
-				Name:         AdviceToolCreateDraft,
-				InputSummary: "根据照片创建建议",
-				CreateDraftInput: &CreateDraftInput{
-					Sections: []DraftSectionInput{{
-						SectionType:          SectionTypeOutfit,
-						ContentSchemaVersion: "v1",
-						ContentJSON:          defaultAdviceContent("照片穿搭", "根据照片调整搭配"),
-					}},
-				},
-			}},
 		},
 	}
 	service := NewServiceWithRunner(repo, nil, runner)
@@ -335,7 +230,7 @@ func TestServiceChatPassesAssetRefsToUserMessageAndRunner(t *testing.T) {
 }
 
 func TestServiceChatRecordsRunnerMetadataAndToolStepDetails(t *testing.T) {
-	repo := &spyAgentRepo{}
+	repo := &spyAgentRepo{currentDraft: routeLikeDraft(12)}
 	runner := &spyAdviceRunner{
 		output: AdviceRunOutput{
 			AssistantText: "已创建一版适合通勤的草稿。",
@@ -347,18 +242,10 @@ func TestServiceChatRecordsRunnerMetadataAndToolStepDetails(t *testing.T) {
 				PromptVersion: "v1",
 				MaxIterations: 8,
 			},
-			ToolCalls: []AdviceToolCall{{
-				Name:         AdviceToolCreateDraft,
-				ToolCallID:   "call_create_1",
-				InputSummary: "创建通勤建议",
-				CreateDraftInput: &CreateDraftInput{
-					Sections: []DraftSectionInput{{
-						SectionType:          SectionTypeOutfit,
-						ContentSchemaVersion: "v1",
-						ContentJSON:          defaultAdviceContent("通勤穿搭", "清爽利落"),
-					}},
-				},
-			}},
+			AuditSteps: []AdviceRunAuditStep{
+				{StepType: AgentStepTypeToolCall, Status: AgentStepStatusSucceeded, ToolName: AdviceToolCreateDraft, ToolCallID: "call_create_1", InputSummary: "工具调用参数已接收"},
+				{StepType: AgentStepTypeToolResult, Status: AgentStepStatusSucceeded, ToolName: AdviceToolCreateDraft, ToolCallID: "call_create_1", OutputSummary: "工具执行结果已接收"},
+			},
 		},
 	}
 	service := NewServiceWithRunner(repo, nil, runner)
@@ -436,11 +323,11 @@ func TestServiceChatRecordsRunnerAuditStepsWithoutExecutingTools(t *testing.T) {
 	}
 }
 
-func TestServiceChatFallsBackWhenRunnerReturnsNoToolCallsForFirstDraft(t *testing.T) {
+func TestServiceChatDoesNotImplicitlyCreateDraftWithoutCompletedDraftAudit(t *testing.T) {
 	repo := &spyAgentRepo{}
 	runner := &spyAdviceRunner{
 		output: AdviceRunOutput{
-			AssistantText: "自然语言回复，没有工具调用。",
+			AssistantText: "明天见客户可以穿米白衬衫搭配直筒裤。",
 			DecisionLabel: "final_response",
 		},
 	}
@@ -452,49 +339,15 @@ func TestServiceChatFallsBackWhenRunnerReturnsNoToolCallsForFirstDraft(t *testin
 	}
 
 	if repo.createdDraft || result.Draft != nil {
-		t.Fatalf("expected no draft without an explicit tool call, got %#v", result)
+		t.Fatalf("expected no implicit draft without completed draft audit, got %#v", result)
 	}
-	if result.Message.Text != "自然语言回复，没有工具调用。" || repo.steps[0].DecisionLabel != "final_response" {
+	for _, step := range repo.steps {
+		if step.StepType == AgentStepTypeToolResult && step.RelatedType == "advice_draft" {
+			t.Fatalf("expected no completed draft audit, got %#v", repo.steps)
+		}
+	}
+	if result.Message.Text != "明天见客户可以穿米白衬衫搭配直筒裤。" || repo.steps[0].DecisionLabel != "final_response" {
 		t.Fatalf("expected runner text decision to be retained, got %#v", result)
-	}
-}
-
-func TestServiceChatRecordsFailedToolResult(t *testing.T) {
-	expected := errors.New("draft update failed")
-	repo := &spyAgentRepo{
-		currentDraft: routeLikeDraft(12),
-		updateErr:    expected,
-	}
-	runner := &spyAdviceRunner{
-		output: AdviceRunOutput{
-			AssistantText: "准备更新草稿。",
-			DecisionLabel: "update_draft",
-			ToolCalls: []AdviceToolCall{{
-				Name:         AdviceToolUpdateDraft,
-				InputSummary: "更新草稿",
-				UpdateDraftInput: &UpdateDraftInput{
-					PublicID: "drf_test",
-					Sections: []DraftSectionInput{{
-						SectionType:          SectionTypeOutfit,
-						ContentSchemaVersion: "v1",
-						ContentJSON:          defaultAdviceContent("穿搭", "更新"),
-					}},
-				},
-			}},
-		},
-	}
-	service := NewServiceWithRunner(repo, nil, runner)
-
-	_, err := service.Chat(context.Background(), 12, "鞋子换舒服点")
-	if !errors.Is(err, expected) {
-		t.Fatalf("expected update error, got %v", err)
-	}
-	if len(repo.steps) != 3 {
-		t.Fatalf("expected model, tool call and failed tool result steps, got %#v", repo.steps)
-	}
-	failed := repo.steps[2]
-	if failed.StepType != AgentStepTypeToolResult || failed.Status != AgentStepStatusFailed || failed.ErrorMessage != expected.Error() {
-		t.Fatalf("unexpected failed step: %#v", failed)
 	}
 }
 
@@ -677,7 +530,7 @@ type metadataSpyAdviceRunner struct {
 
 func (r *metadataSpyAdviceRunner) Metadata() AdviceRunMetadata { return r.metadata }
 
-func (r *metadataSpyAdviceRunner) Run(context.Context, AdviceRunInput) (AdviceRunOutput, error) {
+func (r *metadataSpyAdviceRunner) Run(context.Context, AdviceRunInput, AdviceTextDeltaEmitter) (AdviceRunOutput, error) {
 	return AdviceRunOutput{}, r.err
 }
 
@@ -685,17 +538,22 @@ type contextDeadlineRunner struct {
 	deadline time.Time
 }
 
-func (r *contextDeadlineRunner) Run(ctx context.Context, _ AdviceRunInput) (AdviceRunOutput, error) {
+func (r *contextDeadlineRunner) Run(ctx context.Context, _ AdviceRunInput, _ AdviceTextDeltaEmitter) (AdviceRunOutput, error) {
 	r.deadline, _ = ctx.Deadline()
 	<-ctx.Done()
 	return AdviceRunOutput{}, ctx.Err()
 }
 
-func (r *spyAdviceRunner) Run(ctx context.Context, input AdviceRunInput) (AdviceRunOutput, error) {
+func (r *spyAdviceRunner) Run(ctx context.Context, input AdviceRunInput, emit AdviceTextDeltaEmitter) (AdviceRunOutput, error) {
 	r.input = input
 	_, r.hasDeadline = ctx.Deadline()
 	if r.requireDeadline && !r.hasDeadline {
 		return AdviceRunOutput{}, errors.New("runner deadline missing")
+	}
+	if emit != nil && r.output.AssistantText != "" {
+		if err := emit(r.output.AssistantText); err != nil {
+			return AdviceRunOutput{}, err
+		}
 	}
 	return r.output, r.err
 }

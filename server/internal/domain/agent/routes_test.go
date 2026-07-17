@@ -81,34 +81,6 @@ func TestStreamStatusIncludesActiveClothesAdviceContext(t *testing.T) {
 	}
 }
 
-func TestChatRouteReturnsDraftEventWhenDraftExists(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
-		c.Next()
-	})
-	service := agent.NewServiceWithDependencies(newRouteAgentRepo(), nil)
-	service.SetAdviceRunner(agent.RuleBasedAdviceRunner{})
-	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
-	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{"text":"鞋子换舒服点"}`))
-	request.Header.Set("Accept", "text/event-stream")
-	recorder := httptest.NewRecorder()
-
-	router.ServeHTTP(recorder, request)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", recorder.Code, recorder.Body.String())
-	}
-	body := recorder.Body.String()
-	if !strings.Contains(body, "event: draft\n") {
-		t.Fatalf("expected draft event, got %q", body)
-	}
-	if !strings.Contains(body, `"draft_public_id":"drf_test"`) {
-		t.Fatalf("expected draft payload, got %q", body)
-	}
-}
-
 func TestChatRouteStreamsProcessEventsWithResponseTimes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -117,7 +89,6 @@ func TestChatRouteStreamsProcessEventsWithResponseTimes(t *testing.T) {
 		c.Next()
 	})
 	service := agent.NewServiceWithDependencies(newRouteAgentRepo(), nil)
-	service.SetAdviceRunner(agent.RuleBasedAdviceRunner{})
 	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
 	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{"text":"明天见客户"}`))
 	request.Header.Set("Accept", "text/event-stream")

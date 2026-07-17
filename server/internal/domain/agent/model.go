@@ -126,7 +126,6 @@ type AdviceRunOutput struct {
 	DecisionLabel string
 	Metadata      AdviceRunMetadata
 	AuditSteps    []AdviceRunAuditStep
-	ToolCalls     []AdviceToolCall
 }
 
 type AdviceRunMetadata struct {
@@ -138,14 +137,6 @@ type AdviceRunMetadata struct {
 	LLMTimeoutMS   int64
 	PromptVersion  string
 	MaxIterations  int
-}
-
-type AdviceToolCall struct {
-	Name             string
-	ToolCallID       string
-	InputSummary     string
-	CreateDraftInput *CreateDraftInput
-	UpdateDraftInput *UpdateDraftInput
 }
 
 type AdviceRunAuditStep struct {

@@ -374,7 +374,7 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		errorDiagnostics = diagnoseAgentError(ctx, runnerErr, runnerMetadata)
 	} else {
 		runnerCtx, cancelRunner := context.WithTimeout(ctx, s.runnerTimeout)
-		output, runnerErr = s.runner.Run(runnerCtx, runnerInput)
+		output, runnerErr = s.runner.Run(runnerCtx, runnerInput, nil)
 		if runnerErr != nil {
 			errorDiagnostics = diagnoseAgentError(runnerCtx, runnerErr, runnerMetadata)
 		}
@@ -496,91 +496,6 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 			ResponseStartedAt: result.ResponseStartedAt,
 			FinishedAt:        optionalTime(time.Now().UTC()),
 		})
-	}
-	for _, call := range output.ToolCalls {
-		stepNo++
-		toolStartedAt := time.Now().UTC()
-		summary, detail := safeProcessCopy(AgentStepTypeToolCall, call.Name, "running")
-		emitChatProcess(emit, ChatProcessEvent{
-			StepNo:            stepNo,
-			Status:            "running",
-			Summary:           summary,
-			Detail:            detail,
-			ResponseStartedAt: result.ResponseStartedAt,
-		})
-		if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
-			UserID:         userID,
-			SourceMsgID:    userMessage.ID,
-			AssistantMsgID: assistantMessage.ID,
-			StepNo:         stepNo,
-			StepType:       AgentStepTypeToolCall,
-			Status:         AgentStepStatusSucceeded,
-			ToolName:       call.Name,
-			ToolCallID:     call.ToolCallID,
-			DecisionLabel:  call.Name,
-			InputSummary:   call.InputSummary,
-			StartedAt:      toolStartedAt,
-		}); err != nil {
-			return result, err
-		}
-		draft, err = s.executeAdviceToolCall(ctx, userID, userMessage.ID, currentDraftPtr, call)
-		toolFinishedAt := time.Now().UTC()
-		if err != nil {
-			stepNo++
-			_ = s.recordFailedStep(ctx, AgentRunStepInput{
-				UserID:         userID,
-				SourceMsgID:    userMessage.ID,
-				AssistantMsgID: assistantMessage.ID,
-				StepNo:         stepNo,
-				StepType:       AgentStepTypeToolResult,
-				ToolName:       call.Name,
-				ToolCallID:     call.ToolCallID,
-				DecisionLabel:  call.Name,
-				InputSummary:   call.InputSummary,
-				StartedAt:      toolStartedAt,
-				FinishedAt:     toolFinishedAt,
-				DurationMS:     durationMS(toolStartedAt, toolFinishedAt),
-			}, err)
-			emitChatProcess(emit, failedChatProcessEvent(stepNo, result.ResponseStartedAt))
-			break
-		}
-		currentDraft = draft
-		currentDraftPtr = &currentDraft
-		draftUpdated = true
-		stepNo++
-		if err := s.repo.CreateAgentRunStep(ctx, AgentRunStepInput{
-			UserID:          userID,
-			SourceMsgID:     userMessage.ID,
-			AssistantMsgID:  assistantMessage.ID,
-			StepNo:          stepNo,
-			StepType:        AgentStepTypeToolResult,
-			Status:          AgentStepStatusSucceeded,
-			ToolName:        call.Name,
-			ToolCallID:      call.ToolCallID,
-			DecisionLabel:   call.Name,
-			OutputSummary:   "草稿已更新",
-			RelatedType:     "advice_draft",
-			RelatedID:       draft.ID,
-			RelatedPublicID: draft.PublicID,
-			StartedAt:       toolStartedAt,
-			FinishedAt:      toolFinishedAt,
-			DurationMS:      durationMS(toolStartedAt, toolFinishedAt),
-		}); err != nil {
-			return result, err
-		}
-		summary, detail = safeProcessCopy(AgentStepTypeToolResult, call.Name, AgentStepStatusSucceeded)
-		emitChatProcess(emit, ChatProcessEvent{
-			StepNo:            stepNo,
-			Status:            AgentStepStatusSucceeded,
-			Summary:           summary,
-			Detail:            detail,
-			ResponseStartedAt: result.ResponseStartedAt,
-			FinishedAt:        optionalTime(toolFinishedAt),
-		})
-	}
-	if err != nil {
-		_, _ = s.repo.UpdateChatMessage(ctx, UpdateChatMessageInput{ID: assistantMessage.ID, Status: ChatStatusFailed, MsgType: ChatMsgTypeError, ContentText: "智能体请求失败"})
-		return result, err
 	}
 	messageUpdate := UpdateChatMessageInput{
 		ID:          assistantMessage.ID,
@@ -726,32 +641,6 @@ func agentRunStepFromAudit(userID, sourceMsgID, assistantMsgID int64, stepNo int
 	}
 }
 
-func (s *Service) executeAdviceToolCall(ctx context.Context, userID, sourceMsgID int64, currentDraft *Draft, call AdviceToolCall) (Draft, error) {
-	switch call.Name {
-	case AdviceToolCreateDraft:
-		if call.CreateDraftInput == nil {
-			return Draft{}, ErrDraftNotFound
-		}
-		input := *call.CreateDraftInput
-		input.UserID = userID
-		input.SourceMsgID = sourceMsgID
-		return s.repo.CreateDraft(ctx, input)
-	case AdviceToolUpdateDraft:
-		if call.UpdateDraftInput == nil {
-			return Draft{}, ErrDraftNotFound
-		}
-		input := *call.UpdateDraftInput
-		input.UserID = userID
-		input.SourceMsgID = sourceMsgID
-		if input.PublicID == "" && currentDraft != nil {
-			input.PublicID = currentDraft.PublicID
-		}
-		return s.repo.UpdateDraftSections(ctx, input)
-	default:
-		return Draft{}, ErrDraftNotFound
-	}
-}
-
 func (s *Service) CurrentDraft(ctx context.Context, userID int64) (DraftCard, error) {
 	if s == nil || s.repo == nil {
 		return DraftCard{}, ErrRepositoryUnsupported
@@ -813,51 +702,6 @@ func normalizeChatAssetRefs(refs []ChatAssetRef) []ChatAssetRef {
 		}
 	}
 	return normalized
-}
-
-func defaultCreateDraftInput(userID int64, text string) CreateDraftInput {
-	return CreateDraftInput{
-		UserID:          userID,
-		SceneLabel:      text,
-		UserIntent:      text,
-		RevisionSummary: "创建初版建议草稿",
-		Sections: []DraftSectionInput{
-			{
-				SectionType:          SectionTypeOutfit,
-				ContentSchemaVersion: "v1",
-				ContentJSON:          defaultAdviceContent("穿搭建议", "先给你一版可继续调整的穿搭方向。"),
-				RevisionSummary:      "创建穿搭建议",
-			},
-			{
-				SectionType:          SectionTypeHair,
-				ContentSchemaVersion: "v1",
-				ContentJSON:          defaultAdviceContent("发型建议", "先保持易执行、适合场景的发型方向。"),
-				RevisionSummary:      "创建发型建议",
-			},
-			{
-				SectionType:          SectionTypeMakeup,
-				ContentSchemaVersion: "v1",
-				ContentJSON:          defaultAdviceContent("妆容建议", "先给出低风险、可调整的妆容方向。"),
-				RevisionSummary:      "创建妆容建议",
-			},
-		},
-	}
-}
-
-func defaultUpdateDraftInput(userID int64, publicID string, sourceMsgID int64, text string) UpdateDraftInput {
-	return UpdateDraftInput{
-		UserID:          userID,
-		PublicID:        publicID,
-		SourceMsgID:     sourceMsgID,
-		UserIntent:      text,
-		RevisionSummary: "根据用户反馈精修草稿",
-		Sections: []DraftSectionInput{{
-			SectionType:          SectionTypeOutfit,
-			ContentSchemaVersion: "v1",
-			ContentJSON:          defaultAdviceContent("穿搭建议调整", text),
-			RevisionSummary:      "更新穿搭建议",
-		}},
-	}
 }
 
 func defaultAdviceContent(title string, summary string) map[string]any {

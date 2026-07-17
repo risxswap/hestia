@@ -4,14 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
-	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
 var ErrAdviceRunnerUnavailable = errors.New("advice runner unavailable")
+var ErrMixedAssistantStream = errors.New("assistant stream mixed content and tool calls")
+var ErrNonStreamingAssistantMessage = errors.New("non-streaming assistant message is not allowed")
+var ErrUnexpectedToolResult = errors.New("unexpected tool result")
+var ErrUnexpectedMessageRole = errors.New("unexpected message role")
+var ErrUnexpectedToolCall = errors.New("unexpected tool call")
+var ErrUnmatchedToolCalls = errors.New("unmatched tool calls")
 
 const einoADKMaxIterations = 8
 
@@ -48,9 +55,9 @@ func NewEinoADKChatModelAdviceRunnerWithMetadata(ctx context.Context, chatModel 
 		Name:        "style_advice_agent",
 		Description: "通过对话创建和精修穿搭、发型、妆容建议草稿",
 		Instruction: strings.TrimSpace(`
-	你是 Hestia 的个人 AI 形象顾问智能体。你需要判断用户意图，必要时通过 ADK 工具调用创建、读取、更新或废弃建议草稿。
-	最终回答必须是 JSON，字段为 assistant_text、decision_label、tool_calls。tool_calls 只用于总结本轮已经完成的工具动作，不会再次执行。
-	需要写入草稿时必须先真实调用 create_advice_draft、update_advice_draft 或 discard_advice_draft 工具，不得只在最终 JSON 里声明。
+你是 Hestia 的个人 AI 形象顾问智能体。你需要判断用户意图，必要时通过 ADK 工具调用创建、读取、更新或废弃建议草稿。
+需要写入草稿时必须真实调用相应工具。调用工具时不要同时输出给用户的正文，等待工具结果后再回复。
+最终回复使用自然语言或 Markdown，不输出 JSON、工具名称或内部执行步骤。
 建议内容要中性、具体、可执行，避免医疗诊断、羞辱式表达和确定性变美承诺。
 `),
 		Model:         chatModel,
@@ -60,19 +67,25 @@ func NewEinoADKChatModelAdviceRunnerWithMetadata(ctx context.Context, chatModel 
 	if err != nil {
 		return nil, err
 	}
-	return &EinoADKAdviceRunner{runner: adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent}), metadata: metadata}, nil
+	return &EinoADKAdviceRunner{runner: adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent, EnableStreaming: true}), metadata: metadata}, nil
 }
 
-func (r *EinoADKAdviceRunner) Run(ctx context.Context, input AdviceRunInput) (AdviceRunOutput, error) {
+func (r *EinoADKAdviceRunner) Run(ctx context.Context, input AdviceRunInput, emit AdviceTextDeltaEmitter) (AdviceRunOutput, error) {
+	output := AdviceRunOutput{DecisionLabel: "final_response"}
 	if r == nil || r.runner == nil {
-		return AdviceRunOutput{}, ErrAdviceRunnerUnavailable
+		return output, ErrAdviceRunnerUnavailable
+	}
+	output.Metadata = r.metadata
+	if emit == nil {
+		emit = func(string) error { return nil }
 	}
 	ctx = contextWithAdviceToolSession(ctx, input.UserID, input.SourceMsgID)
 	iterator := r.runner.Query(ctx, adkRunnerQuery(input), adk.WithSessionValues(map[string]any{
 		adviceToolSessionUserID:      input.UserID,
 		adviceToolSessionSourceMsgID: input.SourceMsgID,
 	}))
-	var finalText string
+	pendingToolCalls := make(map[string]string)
+	seenToolCallIDs := make(map[string]struct{})
 	for {
 		event, ok := iterator.Next()
 		if !ok {
@@ -82,30 +95,226 @@ func (r *EinoADKAdviceRunner) Run(ctx context.Context, input AdviceRunInput) (Ad
 			continue
 		}
 		if event.Err != nil {
-			return AdviceRunOutput{}, event.Err
+			return output, event.Err
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
 			continue
 		}
-		message, err := event.Output.MessageOutput.GetMessage()
+		variant := event.Output.MessageOutput
+		if variant.Role == schema.Assistant && !variant.IsStreaming {
+			return output, ErrNonStreamingAssistantMessage
+		}
+		if variant.Role == schema.Tool {
+			steps, err := auditToolResult(variant)
+			if err != nil {
+				return output, err
+			}
+			for _, step := range steps {
+				pendingName, ok := pendingToolCalls[step.ToolCallID]
+				if !ok || pendingName != step.ToolName {
+					output.AuditSteps = withoutToolResultAudits(output.AuditSteps)
+					return output, ErrUnexpectedToolResult
+				}
+				delete(pendingToolCalls, step.ToolCallID)
+				output.AuditSteps = append(output.AuditSteps, step)
+			}
+			continue
+		}
+		if variant.Role != schema.Assistant {
+			closeMessageVariantStream(variant)
+			return output, ErrUnexpectedMessageRole
+		}
+		steps, err := consumeAssistantStream(variant.MessageStream, emit, &output.AssistantText)
 		if err != nil {
-			return AdviceRunOutput{}, err
+			return output, err
 		}
-		if message != nil && strings.TrimSpace(message.Content) != "" {
-			finalText = strings.TrimSpace(message.Content)
+		for _, step := range steps {
+			callID := strings.TrimSpace(step.ToolCallID)
+			toolName := strings.TrimSpace(step.ToolName)
+			if callID == "" || toolName == "" {
+				return output, ErrUnexpectedToolCall
+			}
+			if _, exists := seenToolCallIDs[callID]; exists {
+				return output, ErrUnexpectedToolCall
+			}
+			seenToolCallIDs[callID] = struct{}{}
+			pendingToolCalls[callID] = toolName
+			output.AuditSteps = append(output.AuditSteps, step)
 		}
 	}
-	if finalText == "" {
-		return AdviceRunOutput{}, ErrAdviceRunnerUnavailable
+	if len(pendingToolCalls) > 0 {
+		return output, ErrUnmatchedToolCalls
 	}
-	output, err := parseAdviceRunOutputJSON(finalText)
-	if err != nil {
-		return AdviceRunOutput{AssistantText: finalText, DecisionLabel: "final_response", Metadata: r.metadata}, nil
-	}
-	output.Metadata = r.metadata
-	output.AuditSteps = adviceRunAuditStepsFromToolCalls(output.ToolCalls)
-	output.ToolCalls = nil
 	return output, nil
+}
+
+func closeMessageVariantStream(variant *adk.MessageVariant) {
+	if variant != nil && variant.MessageStream != nil {
+		variant.MessageStream.Close()
+	}
+}
+
+func withoutToolResultAudits(steps []AdviceRunAuditStep) []AdviceRunAuditStep {
+	filtered := steps[:0]
+	for _, step := range steps {
+		if step.StepType != AgentStepTypeToolResult {
+			filtered = append(filtered, step)
+		}
+	}
+	return filtered
+}
+
+func validChunkRole(actual, expected schema.RoleType) bool {
+	return actual == "" || actual == expected
+}
+
+func consumeAssistantStream(stream *schema.StreamReader[*schema.Message], emit AdviceTextDeltaEmitter, assistantText *string) ([]AdviceRunAuditStep, error) {
+	if stream == nil {
+		return nil, ErrAdviceRunnerUnavailable
+	}
+	defer stream.Close()
+	var leading []*schema.Message
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if chunk == nil {
+			continue
+		}
+		if !validChunkRole(chunk.Role, schema.Assistant) {
+			return nil, ErrUnexpectedMessageRole
+		}
+		if len(chunk.ToolCalls) > 0 {
+			leading = append(leading, chunk)
+			return auditAssistantToolStream(stream, leading)
+		}
+		if chunk.Content == "" {
+			leading = append(leading, chunk)
+			continue
+		}
+		if err := emit(chunk.Content); err != nil {
+			return nil, err
+		}
+		*assistantText += chunk.Content
+		break
+	}
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if chunk == nil {
+			continue
+		}
+		if !validChunkRole(chunk.Role, schema.Assistant) {
+			return nil, ErrUnexpectedMessageRole
+		}
+		if len(chunk.ToolCalls) > 0 {
+			return nil, ErrMixedAssistantStream
+		}
+		if chunk.Content == "" {
+			continue
+		}
+		if err := emit(chunk.Content); err != nil {
+			return nil, err
+		}
+		*assistantText += chunk.Content
+	}
+}
+
+func auditAssistantToolStream(stream *schema.StreamReader[*schema.Message], chunks []*schema.Message) ([]AdviceRunAuditStep, error) {
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if chunk != nil {
+			if !validChunkRole(chunk.Role, schema.Assistant) {
+				return nil, ErrUnexpectedMessageRole
+			}
+			chunks = append(chunks, chunk)
+		}
+	}
+	message, err := schema.ConcatMessages(chunks)
+	if err != nil {
+		return nil, err
+	}
+	steps := make([]AdviceRunAuditStep, 0, len(message.ToolCalls))
+	for _, call := range message.ToolCalls {
+		steps = append(steps, AdviceRunAuditStep{
+			StepType:      AgentStepTypeToolCall,
+			Status:        AgentStepStatusSucceeded,
+			ToolName:      strings.TrimSpace(call.Function.Name),
+			ToolCallID:    strings.TrimSpace(call.ID),
+			DecisionLabel: strings.TrimSpace(call.Function.Name),
+			InputSummary:  "工具调用参数已接收",
+		})
+	}
+	return steps, nil
+}
+
+func auditToolResult(variant *adk.MessageVariant) ([]AdviceRunAuditStep, error) {
+	var message *schema.Message
+	if variant.IsStreaming {
+		if variant.MessageStream == nil {
+			return nil, ErrAdviceRunnerUnavailable
+		}
+		defer variant.MessageStream.Close()
+		var chunks []*schema.Message
+		for {
+			chunk, err := variant.MessageStream.Recv()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return nil, err
+			}
+			if chunk != nil {
+				if !validChunkRole(chunk.Role, schema.Tool) {
+					return nil, ErrUnexpectedMessageRole
+				}
+				chunks = append(chunks, chunk)
+			}
+		}
+		if len(chunks) == 0 {
+			return nil, nil
+		}
+		var err error
+		message, err = schema.ConcatMessages(chunks)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		message = variant.Message
+	}
+	if message == nil {
+		return nil, nil
+	}
+	if !validChunkRole(message.Role, schema.Tool) {
+		return nil, ErrUnexpectedMessageRole
+	}
+	toolName := strings.TrimSpace(variant.ToolName)
+	if toolName == "" {
+		toolName = strings.TrimSpace(message.ToolName)
+	}
+	return []AdviceRunAuditStep{{
+		StepType:      AgentStepTypeToolResult,
+		Status:        AgentStepStatusSucceeded,
+		ToolName:      toolName,
+		ToolCallID:    strings.TrimSpace(message.ToolCallID),
+		DecisionLabel: toolName,
+		OutputSummary: "工具执行结果已接收",
+	}}, nil
 }
 
 func adkRunnerQuery(input AdviceRunInput) string {
@@ -186,177 +395,9 @@ func draftPromptSummary(draft Draft) string {
 	return string(raw)
 }
 
-func parseAdviceRunOutputJSON(raw string) (AdviceRunOutput, error) {
-	var payload adviceRunOutputPayload
-	if err := json.Unmarshal([]byte(stripJSONFence(raw)), &payload); err != nil {
-		return AdviceRunOutput{}, err
-	}
-	output := AdviceRunOutput{
-		AssistantText: payload.AssistantText,
-		DecisionLabel: payload.DecisionLabel,
-		ToolCalls:     make([]AdviceToolCall, 0, len(payload.ToolCalls)),
-	}
-	for _, call := range payload.ToolCalls {
-		output.ToolCalls = append(output.ToolCalls, AdviceToolCall{
-			Name:             strings.TrimSpace(call.Name),
-			ToolCallID:       strings.TrimSpace(call.ToolCallID),
-			InputSummary:     call.InputSummary,
-			CreateDraftInput: call.CreateDraftInput.domainInput(),
-			UpdateDraftInput: call.UpdateDraftInput.domainInput(),
-		})
-	}
-	return output, nil
-}
-
-func stripJSONFence(raw string) string {
-	text := strings.TrimSpace(raw)
-	if fenceStart := strings.Index(text, "```"); fenceStart >= 0 {
-		fenced := text[fenceStart+len("```"):]
-		if lineEnd := strings.IndexByte(fenced, '\n'); lineEnd >= 0 {
-			fenced = fenced[lineEnd+1:]
-		}
-		if fenceEnd := strings.Index(fenced, "```"); fenceEnd >= 0 {
-			text = fenced[:fenceEnd]
-		} else {
-			text = fenced
-		}
-	}
-	if objectStart := strings.IndexByte(text, '{'); objectStart >= 0 {
-		text = text[objectStart:]
-	}
-	return strings.TrimSpace(text)
-}
-
-type adviceRunOutputPayload struct {
-	AssistantText string                  `json:"assistant_text"`
-	DecisionLabel string                  `json:"decision_label"`
-	ToolCalls     []adviceToolCallPayload `json:"tool_calls"`
-}
-
-type adviceToolCallPayload struct {
-	Name             string                   `json:"name"`
-	ToolCallID       string                   `json:"tool_call_id"`
-	InputSummary     string                   `json:"input_summary"`
-	CreateDraftInput *createDraftInputPayload `json:"create_draft_input"`
-	UpdateDraftInput *updateDraftInputPayload `json:"update_draft_input"`
-}
-
 func normalizeAdviceRunMetadata(metadata AdviceRunMetadata) AdviceRunMetadata {
 	if metadata.MaxIterations <= 0 {
 		metadata.MaxIterations = einoADKMaxIterations
 	}
 	return metadata
-}
-
-func adviceRunAuditStepsFromToolCalls(calls []AdviceToolCall) []AdviceRunAuditStep {
-	steps := make([]AdviceRunAuditStep, 0, len(calls)*2)
-	for _, call := range calls {
-		if strings.TrimSpace(call.Name) == "" {
-			continue
-		}
-		steps = append(steps, AdviceRunAuditStep{
-			StepType:      AgentStepTypeToolCall,
-			Status:        AgentStepStatusSucceeded,
-			ToolName:      call.Name,
-			ToolCallID:    call.ToolCallID,
-			DecisionLabel: call.Name,
-			InputSummary:  call.InputSummary,
-		})
-		steps = append(steps, AdviceRunAuditStep{
-			StepType:      AgentStepTypeToolResult,
-			Status:        AgentStepStatusSucceeded,
-			ToolName:      call.Name,
-			ToolCallID:    call.ToolCallID,
-			DecisionLabel: call.Name,
-			OutputSummary: "ADK 工具已执行",
-		})
-	}
-	return steps
-}
-
-type createDraftInputPayload struct {
-	TargetDate      string                     `json:"target_date"`
-	SceneKey        string                     `json:"scene_key"`
-	SceneLabel      string                     `json:"scene_label"`
-	Occasion        string                     `json:"occasion"`
-	WeatherText     string                     `json:"weather_text"`
-	MoodText        string                     `json:"mood_text"`
-	StyleGoal       string                     `json:"style_goal"`
-	AvoidGoal       string                     `json:"avoid_goal"`
-	Sections        []draftSectionInputPayload `json:"sections"`
-	UserIntent      string                     `json:"user_intent"`
-	RevisionSummary string                     `json:"revision_summary"`
-}
-
-func (p *createDraftInputPayload) domainInput() *CreateDraftInput {
-	if p == nil {
-		return nil
-	}
-	targetDate := parsePayloadDate(p.TargetDate)
-	return &CreateDraftInput{
-		TargetDate:      targetDate,
-		SceneKey:        p.SceneKey,
-		SceneLabel:      p.SceneLabel,
-		Occasion:        p.Occasion,
-		WeatherText:     p.WeatherText,
-		MoodText:        p.MoodText,
-		StyleGoal:       p.StyleGoal,
-		AvoidGoal:       p.AvoidGoal,
-		Sections:        draftSectionPayloads(p.Sections).domainInputs(),
-		UserIntent:      p.UserIntent,
-		RevisionSummary: p.RevisionSummary,
-	}
-}
-
-func parsePayloadDate(value string) *time.Time {
-	text := strings.TrimSpace(value)
-	if text == "" {
-		return nil
-	}
-	parsed, err := time.Parse("2006-01-02", text)
-	if err != nil {
-		return nil
-	}
-	return &parsed
-}
-
-type updateDraftInputPayload struct {
-	PublicID        string                     `json:"public_id"`
-	Sections        []draftSectionInputPayload `json:"sections"`
-	UserIntent      string                     `json:"user_intent"`
-	RevisionSummary string                     `json:"revision_summary"`
-}
-
-func (p *updateDraftInputPayload) domainInput() *UpdateDraftInput {
-	if p == nil {
-		return nil
-	}
-	return &UpdateDraftInput{
-		PublicID:        p.PublicID,
-		Sections:        draftSectionPayloads(p.Sections).domainInputs(),
-		UserIntent:      p.UserIntent,
-		RevisionSummary: p.RevisionSummary,
-	}
-}
-
-type draftSectionInputPayload struct {
-	SectionType          string         `json:"section_type"`
-	ContentSchemaVersion string         `json:"content_schema_version"`
-	ContentJSON          map[string]any `json:"content_json"`
-	RevisionSummary      string         `json:"revision_summary"`
-}
-
-type draftSectionPayloads []draftSectionInputPayload
-
-func (items draftSectionPayloads) domainInputs() []DraftSectionInput {
-	result := make([]DraftSectionInput, 0, len(items))
-	for _, item := range items {
-		result = append(result, DraftSectionInput{
-			SectionType:          item.SectionType,
-			ContentSchemaVersion: item.ContentSchemaVersion,
-			ContentJSON:          item.ContentJSON,
-			RevisionSummary:      item.RevisionSummary,
-		})
-	}
-	return result
 }
