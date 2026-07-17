@@ -134,12 +134,13 @@ func TestDiagnoseAgentErrorExtractsNodePathAfterLongErrorPrefix(t *testing.T) {
 }
 
 func TestDiagnoseAgentErrorRedactsAdditionalCredentialForms(t *testing.T) {
-	err := errors.New("provider rejected API key: complete-secret sk-abcdefghijklmnopqrstuvwxyz JWT eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature")
+	err := errors.New(`provider rejected API key: complete-secret "api_key":"quoted-secret" sk-abcdefghijklmnopqrstuvwxyz JWT eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature`)
 
 	got := diagnoseAgentError(context.Background(), err, AdviceRunMetadata{})
 	joined := strings.Join(got.ErrorChain, " ")
 	for _, leaked := range []string{
 		"complete-secret",
+		"quoted-secret",
 		"sk-abcdefghijklmnopqrstuvwxyz",
 		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature",
 	} {
@@ -159,6 +160,48 @@ func TestAgentErrorSummaryRedactsCredentialAcrossTruncationBoundary(t *testing.T
 	diagnostics := diagnoseAgentError(context.Background(), err, AdviceRunMetadata{})
 	if joined := strings.Join(diagnostics.ErrorChain, " "); strings.Contains(joined, "sk-") {
 		t.Fatalf("error_chain leaked credential prefix: %q", joined)
+	}
+}
+
+func TestAgentErrorSummaryStripsNestedJSONRequestBodies(t *testing.T) {
+	inner := errors.New(`upstream response [{"content":"用户敏感提示词"}]`)
+	err := fmt.Errorf(`provider rejected request body={"api_key":"complete-secret","messages":[{"content":"用户敏感提示词"}]}: %w`, inner)
+
+	topLevel := safeAgentErrorSummary(err)
+	if !strings.Contains(topLevel, "provider rejected request body=[JSON]") {
+		t.Fatalf("top-level error should preserve diagnostic prefix and replace JSON: %q", topLevel)
+	}
+	diagnostics := diagnoseAgentError(context.Background(), err, AdviceRunMetadata{})
+	joined := strings.Join(diagnostics.ErrorChain, " ")
+	for _, output := range []string{topLevel, joined} {
+		for _, leaked := range []string{"complete-secret", "用户敏感提示词", `"messages"`, `"content"`} {
+			if strings.Contains(output, leaked) {
+				t.Fatalf("leaked JSON request content %q in %q", leaked, output)
+			}
+		}
+	}
+}
+
+func TestAgentErrorSummaryStripsGoQuotedJSONRequestBodies(t *testing.T) {
+	body := `{"api_key":"quoted-body-secret","messages":[{"content":"用户敏感提示词"}]}`
+	inner := fmt.Errorf("upstream message=%q request body=%q", "normal diagnostic", body)
+	err := fmt.Errorf("provider request failed: %w", inner)
+
+	topLevel := safeAgentErrorSummary(err)
+	if !strings.Contains(topLevel, "request body=[JSON]") {
+		t.Fatalf("top-level error should replace Go-quoted JSON: %q", topLevel)
+	}
+	if !strings.Contains(topLevel, `message="normal diagnostic"`) {
+		t.Fatalf("top-level error should preserve ordinary quoted text: %q", topLevel)
+	}
+	diagnostics := diagnoseAgentError(context.Background(), err, AdviceRunMetadata{})
+	joined := strings.Join(diagnostics.ErrorChain, " ")
+	for _, output := range []string{topLevel, joined} {
+		for _, leaked := range []string{"quoted-body-secret", "用户敏感提示词", `\"messages\"`, `\"content\"`} {
+			if strings.Contains(output, leaked) {
+				t.Fatalf("leaked Go-quoted JSON content %q in %q", leaked, output)
+			}
+		}
 	}
 }
 

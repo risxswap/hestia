@@ -2,11 +2,13 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +26,7 @@ var agentCredentialRedactors = []struct {
 	pattern     *regexp.Regexp
 	replacement string
 }{
-	{regexp.MustCompile(`(?i)\bapi[\s_-]?key\s*[:=]\s*[^\s,;]+`), "API key=[REDACTED]"},
+	{regexp.MustCompile(`(?i)["']?api[\s_-]?key["']?\s*[:=]\s*["']?[^"'\s,;}]+["']?`), "API key=[REDACTED]"},
 	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}\b`), "[REDACTED]"},
 	{regexp.MustCompile(`\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b`), "[REDACTED]"},
 }
@@ -124,10 +126,119 @@ func safeAgentErrorSummary(err error) string {
 }
 
 func sanitizeAgentErrorText(value string) string {
+	value = stripAgentErrorGoQuotedJSON(value)
+	value = stripAgentErrorJSONBodies(value)
 	for _, redactor := range agentCredentialRedactors {
 		value = redactor.pattern.ReplaceAllString(value, redactor.replacement)
 	}
 	return serverlogger.SanitizeSummary(value)
+}
+
+func stripAgentErrorGoQuotedJSON(value string) string {
+	var builder strings.Builder
+	for offset := 0; offset < len(value); {
+		if value[offset] != '"' {
+			builder.WriteByte(value[offset])
+			offset++
+			continue
+		}
+		end := goQuotedStringEnd(value, offset)
+		if end <= offset {
+			builder.WriteByte(value[offset])
+			offset++
+			continue
+		}
+		literal := value[offset:end]
+		unquoted, err := strconv.Unquote(literal)
+		trimmed := strings.TrimSpace(unquoted)
+		if err == nil && len(trimmed) > 1 && (trimmed[0] == '{' || trimmed[0] == '[') && json.Valid([]byte(trimmed)) {
+			builder.WriteString("[JSON]")
+		} else {
+			builder.WriteString(literal)
+		}
+		offset = end
+	}
+	return builder.String()
+}
+
+func goQuotedStringEnd(value string, start int) int {
+	escaped := false
+	for i := start + 1; i < len(value); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if value[i] == '\\' {
+			escaped = true
+			continue
+		}
+		if value[i] == '"' {
+			return i + 1
+		}
+	}
+	return -1
+}
+
+func stripAgentErrorJSONBodies(value string) string {
+	var builder strings.Builder
+	for offset := 0; offset < len(value); {
+		if value[offset] != '{' && value[offset] != '[' {
+			builder.WriteByte(value[offset])
+			offset++
+			continue
+		}
+		end := balancedJSONEnd(value, offset)
+		if end <= offset || !json.Valid([]byte(value[offset:end])) {
+			builder.WriteByte(value[offset])
+			offset++
+			continue
+		}
+		builder.WriteString("[JSON]")
+		offset = end
+	}
+	return builder.String()
+}
+
+func balancedJSONEnd(value string, start int) int {
+	stack := make([]byte, 0, 4)
+	inString := false
+	escaped := false
+	for i := start; i < len(value); i++ {
+		character := value[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if character == '\\' {
+				escaped = true
+				continue
+			}
+			if character == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch character {
+		case '"':
+			inString = true
+		case '{', '[':
+			stack = append(stack, character)
+		case '}', ']':
+			if len(stack) == 0 || !matchingJSONBrackets(stack[len(stack)-1], character) {
+				return -1
+			}
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
+}
+
+func matchingJSONBrackets(open, close byte) bool {
+	return open == '{' && close == '}' || open == '[' && close == ']'
 }
 
 func contextErrorCode(ctx context.Context) string {
