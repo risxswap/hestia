@@ -1,6 +1,8 @@
 package response_test
 
 import (
+	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -21,4 +23,18 @@ func TestWriteSSEWritesNamedEvent(t *testing.T) {
 	if !strings.Contains(got, `data: {"text":"处理中"}`+"\n\n") {
 		t.Fatalf("expected json data, got %q", got)
 	}
+}
+
+func TestWriteSSEReturnsShortWrite(t *testing.T) {
+	err := response.WriteSSE(shortWriter{}, "delta", map[string]string{"text": "部分建议"})
+
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("expected io.ErrShortWrite, got %v", err)
+	}
+}
+
+type shortWriter struct{}
+
+func (shortWriter) Write(p []byte) (int, error) {
+	return len(p) / 2, nil
 }

@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"hestia/server/internal/common/auth"
 	"hestia/server/internal/common/response"
@@ -33,29 +36,56 @@ func (h *Handler) Chat(c *gin.Context) {
 	_ = c.ShouldBindJSON(&request)
 	response.StreamHeaders(c)
 	c.Status(http.StatusOK)
-	_ = response.WriteSSE(c.Writer, "status", h.service.StreamStatus(c.Request.Context(), user.UserID))
-	c.Writer.Flush()
-	result, err := h.service.ChatStream(c.Request.Context(), user.UserID, request.Text, func(event ChatProcessEvent) {
-		_ = response.WriteSSE(c.Writer, "process", event)
+	var streamMu sync.Mutex
+	streamFailed := false
+	writeEvent := func(event string, data any) error {
+		streamMu.Lock()
+		defer streamMu.Unlock()
+		if streamFailed {
+			return ErrStreamClosed
+		}
+		if err := response.WriteSSE(c.Writer, event, data); err != nil {
+			streamFailed = true
+			return fmt.Errorf("write %s: %w: %v", event, ErrStreamClosed, err)
+		}
 		c.Writer.Flush()
-	}, func(StreamDelta) error { return nil }, request.AssetRefs...)
-	if err != nil {
-		_ = response.WriteSSE(c.Writer, "error", gin.H{"message": "智能体请求失败"})
-		c.Writer.Flush()
+		return nil
+	}
+	hasStreamFailed := func() bool {
+		streamMu.Lock()
+		defer streamMu.Unlock()
+		return streamFailed
+	}
+	if err := writeEvent("status", h.service.StreamStatus(c.Request.Context(), user.UserID)); err != nil {
 		return
 	}
-	_ = response.WriteSSE(c.Writer, "message", result.Message)
+	result, err := h.service.ChatStream(c.Request.Context(), user.UserID, request.Text, func(event ChatProcessEvent) {
+		_ = writeEvent("process", event)
+	}, func(delta StreamDelta) error {
+		return writeEvent("delta", delta)
+	}, request.AssetRefs...)
+	if hasStreamFailed() {
+		return
+	}
+	if err != nil {
+		if errors.Is(err, ErrChatStopped) || errors.Is(err, context.Canceled) || c.Request.Context().Err() != nil {
+			return
+		}
+		_ = writeEvent("error", gin.H{"message": "智能体请求失败"})
+		return
+	}
 	done := StreamDone{
 		MessagePublicID:   result.AssistantMessagePublicID,
 		ResponseStartedAt: result.ResponseStartedAt,
 		FinishedAt:        optionalTime(result.FinishedAt),
 	}
 	if result.Draft != nil {
-		_ = response.WriteSSE(c.Writer, "draft", result.Draft)
+		if err := writeEvent("draft", result.Draft); err != nil {
+			return
+		}
 		done.DraftPublicID = result.Draft.DraftPublicID
 	}
-	_ = response.WriteSSE(c.Writer, "done", done)
-	c.Writer.Flush()
+	_ = writeEvent("done", done)
 }
 
 func (h *Handler) Messages(c *gin.Context) {

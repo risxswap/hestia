@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -97,6 +98,17 @@ func TestChatRouteStreamsProcessEventsWithResponseTimes(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	body := recorder.Body.String()
+	events := sseEventNames(body)
+	wantEvents := []string{"status", "process", "delta", "delta", "process", "process", "done"}
+	if strings.Join(events, ",") != strings.Join(wantEvents, ",") {
+		t.Fatalf("unexpected SSE event order: got %v want %v body=%q", events, wantEvents, body)
+	}
+	if strings.Contains(body, "event: message\n") {
+		t.Fatalf("delta-only protocol must not send message event, got %q", body)
+	}
+	if !strings.Contains(body, `data: {"text":"已整理"}`) || !strings.Contains(body, `data: {"text":"好建议。"}`) {
+		t.Fatalf("expected two delta payloads, got %q", body)
+	}
 	if !strings.Contains(body, "event: process\n") {
 		t.Fatalf("expected process event, got %q", body)
 	}
@@ -107,8 +119,148 @@ func TestChatRouteStreamsProcessEventsWithResponseTimes(t *testing.T) {
 	if strings.Contains(firstProcess, `"finished_at"`) {
 		t.Fatalf("expected running process to omit finished_at, got %q", firstProcess)
 	}
-	if !strings.Contains(body, "event: done\n") || !strings.Contains(body, `"finished_at"`) {
+	if !strings.Contains(body, "event: done\n") || !strings.Contains(body, `"message_public_id":"msg_test"`) ||
+		!strings.Contains(body, `"response_started_at"`) || !strings.Contains(body, `"finished_at"`) {
 		t.Fatalf("expected done payload with finish time, got %q", body)
+	}
+}
+
+func TestChatRouteSendsErrorAfterPartialDeltaWithoutDone(t *testing.T) {
+	runnerErr := errors.New("provider included sensitive details")
+	repo := newRouteAgentRepo()
+	router := newAgentChatRouter(agent.NewServiceWithRunner(repo, nil, routeAdviceRunner{
+		deltas: []string{"部分建议"}, output: agent.AdviceRunOutput{AssistantText: "部分建议"}, err: runnerErr,
+	}))
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, newAgentChatRequest())
+
+	body := recorder.Body.String()
+	events := sseEventNames(body)
+	if !containsOrdered(events, "delta", "error") || strings.Contains(body, "event: done\n") {
+		t.Fatalf("expected delta then error without done, events=%v body=%q", events, body)
+	}
+	if !strings.Contains(body, `data: {"message":"智能体请求失败"}`) || strings.Contains(body, runnerErr.Error()) {
+		t.Fatalf("expected safe error payload, got %q", body)
+	}
+}
+
+func TestChatRouteSendsErrorWithoutDeltaOrDone(t *testing.T) {
+	runnerErr := errors.New("provider included sensitive details")
+	router := newAgentChatRouter(agent.NewServiceWithRunner(newRouteAgentRepo(), nil, routeAdviceRunner{err: runnerErr}))
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, newAgentChatRequest())
+
+	body := recorder.Body.String()
+	events := sseEventNames(body)
+	if !containsOrdered(events, "status", "process", "error") || strings.Contains(body, "event: delta\n") || strings.Contains(body, "event: done\n") {
+		t.Fatalf("expected error without delta or done, events=%v body=%q", events, body)
+	}
+	if !strings.Contains(body, `data: {"message":"智能体请求失败"}`) || strings.Contains(body, runnerErr.Error()) {
+		t.Fatalf("expected safe error payload, got %q", body)
+	}
+}
+
+func TestChatRouteStoppedDoesNotWriteErrorOrDone(t *testing.T) {
+	router := newAgentChatRouter(agent.NewServiceWithRunner(newRouteAgentRepo(), nil, routeAdviceRunner{
+		deltas: []string{"部分建议"}, output: agent.AdviceRunOutput{AssistantText: "部分建议"}, err: agent.ErrStreamClosed,
+	}))
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, newAgentChatRequest())
+
+	body := recorder.Body.String()
+	if strings.Contains(body, "event: error\n") || strings.Contains(body, "event: done\n") {
+		t.Fatalf("stopped stream must end silently, got %q", body)
+	}
+}
+
+func TestChatRouteStreamsDraftAfterDeltaBeforeDone(t *testing.T) {
+	repo := newRouteAgentRepo()
+	runner := routeAdviceRunner{
+		deltas: []string{"先给你建议"},
+		output: agent.AdviceRunOutput{AssistantText: "先给你建议", AuditSteps: []agent.AdviceRunAuditStep{{
+			StepType: agent.AgentStepTypeToolResult, Status: agent.AgentStepStatusSucceeded, ToolName: agent.AdviceToolUpdateDraft,
+		}}},
+	}
+	router := newAgentChatRouter(agent.NewServiceWithRunner(repo, nil, runner))
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, newAgentChatRequest())
+
+	events := sseEventNames(recorder.Body.String())
+	if !containsOrdered(events, "delta", "draft", "done") {
+		t.Fatalf("expected delta, draft, done order, got %v body=%q", events, recorder.Body.String())
+	}
+}
+
+func TestChatRouteDeltaWriteFailureStopsPersistedMessage(t *testing.T) {
+	repo := newRouteAgentRepo()
+	router := newAgentChatRouter(agent.NewServiceWithRunner(repo, nil, routeAdviceRunner{
+		deltas: []string{"第一段", "第二段"}, output: agent.AdviceRunOutput{AssistantText: "第一段第二段"},
+	}))
+	writer := &failDeltaResponseWriter{header: make(http.Header), failEvent: "delta"}
+
+	router.ServeHTTP(writer, newAgentChatRequest())
+
+	if len(repo.updates) != 1 || repo.updates[0].Status != agent.ChatStatusStopped {
+		t.Fatalf("expected stopped assistant after write failure, got %#v", repo.updates)
+	}
+	if strings.Contains(writer.body.String(), "event: error\n") || strings.Contains(writer.body.String(), "event: done\n") {
+		t.Fatalf("write failure must not continue stream, got %q", writer.body.String())
+	}
+}
+
+func TestChatRouteDeltaShortWriteStopsPersistedMessage(t *testing.T) {
+	repo := newRouteAgentRepo()
+	router := newAgentChatRouter(agent.NewServiceWithRunner(repo, nil, routeAdviceRunner{
+		deltas: []string{"第一段", "第二段"}, output: agent.AdviceRunOutput{AssistantText: "第一段第二段"},
+	}))
+	writer := &failSSEEventResponseWriter{header: make(http.Header), failEvent: "delta", short: true}
+
+	router.ServeHTTP(writer, newAgentChatRequest())
+
+	if len(repo.updates) != 1 || repo.updates[0].Status != agent.ChatStatusStopped {
+		t.Fatalf("expected stopped assistant after short write, got %#v", repo.updates)
+	}
+	if strings.Contains(writer.body.String(), "event: error\n") || strings.Contains(writer.body.String(), "event: done\n") {
+		t.Fatalf("short write must not continue stream, got %q", writer.body.String())
+	}
+	if writer.writesAfterFailure != 0 || writer.body.Len() != writer.bodyLenAtFailure {
+		t.Fatalf("expected no writes after first failure, writes_after=%d body_len=%d failed_len=%d", writer.writesAfterFailure, writer.body.Len(), writer.bodyLenAtFailure)
+	}
+}
+
+func TestChatRouteProcessWriteFailureStopsBeforeDelta(t *testing.T) {
+	repo := newRouteAgentRepo()
+	router := newAgentChatRouter(agent.NewServiceWithRunner(repo, nil, routeAdviceRunner{
+		deltas: []string{"不应发送"}, output: agent.AdviceRunOutput{AssistantText: "不应发送"},
+	}))
+	writer := &failSSEEventResponseWriter{header: make(http.Header), failEvent: "process"}
+
+	router.ServeHTTP(writer, newAgentChatRequest())
+
+	if len(repo.updates) != 1 || repo.updates[0].Status != agent.ChatStatusStopped {
+		t.Fatalf("expected process failure to stop assistant, got %#v", repo.updates)
+	}
+	if strings.Contains(writer.body.String(), "event: delta\n") || writer.writesAfterFailure != 0 {
+		t.Fatalf("expected no event writes after process failure, writes_after=%d body=%q", writer.writesAfterFailure, writer.body.String())
+	}
+}
+
+func TestChatRouteStatusWriteFailureDoesNotStartRunner(t *testing.T) {
+	runner := &countingRouteRunner{}
+	router := newAgentChatRouter(agent.NewServiceWithRunner(newRouteAgentRepo(), nil, runner))
+	writer := &failSSEEventResponseWriter{header: make(http.Header), failEvent: "status"}
+
+	router.ServeHTTP(writer, newAgentChatRequest())
+
+	if runner.calls != 0 {
+		t.Fatalf("expected status failure to stop before runner, got %d calls", runner.calls)
+	}
+	if writer.writesAfterFailure != 0 {
+		t.Fatalf("expected no writes after status failure, got %d", writer.writesAfterFailure)
 	}
 }
 
@@ -279,6 +431,7 @@ type routeAgentRepo struct {
 	createdMessages []agent.ChatMessage
 	history         []agent.ChatMessage
 	historySteps    []agent.AgentRunStep
+	updates         []agent.UpdateChatMessageInput
 }
 
 func newRouteAgentRepo() *routeAgentRepo {
@@ -307,6 +460,7 @@ func (r *routeAgentRepo) CreateChatMessage(_ context.Context, input agent.Create
 }
 
 func (r *routeAgentRepo) UpdateChatMessage(_ context.Context, input agent.UpdateChatMessageInput) (agent.ChatMessage, error) {
+	r.updates = append(r.updates, input)
 	return agent.ChatMessage{ID: input.ID, PublicID: "msg_assistant", Status: input.Status, MsgType: input.MsgType, ContentText: input.ContentText}, nil
 }
 
@@ -403,14 +557,104 @@ type routeClothesRepo struct {
 	items []clothes.Item
 }
 
-type routeAdviceRunner struct{}
+type routeAdviceRunner struct {
+	deltas []string
+	output agent.AdviceRunOutput
+	err    error
+}
 
-func (routeAdviceRunner) Run(_ context.Context, _ agent.AdviceRunInput, emit agent.AdviceTextDeltaEmitter) (agent.AdviceRunOutput, error) {
-	const text = "已整理好建议。"
-	if err := emit(text); err != nil {
-		return agent.AdviceRunOutput{}, err
+func (r routeAdviceRunner) Run(_ context.Context, _ agent.AdviceRunInput, emit agent.AdviceTextDeltaEmitter) (agent.AdviceRunOutput, error) {
+	if len(r.deltas) == 0 && r.output.AssistantText == "" && r.err == nil {
+		r.deltas = []string{"已整理", "好建议。"}
+		r.output = agent.AdviceRunOutput{AssistantText: "已整理好建议。", DecisionLabel: "chat_response"}
 	}
-	return agent.AdviceRunOutput{AssistantText: text, DecisionLabel: "chat_response"}, nil
+	output := r.output
+	for _, delta := range r.deltas {
+		if err := emit(delta); err != nil {
+			return output, err
+		}
+	}
+	return output, r.err
+}
+
+func newAgentChatRouter(service *agent.Service) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		auth.SetUserContext(c, auth.User{UserID: 12, UserPublicID: "usr_test", Surface: "user"})
+		c.Next()
+	})
+	agent.RegisterUserRoutesWithService(router.Group("/api/user/agent"), service)
+	return router
+}
+
+func newAgentChatRequest() *http.Request {
+	request := httptest.NewRequest(http.MethodPost, "/api/user/agent/chat", strings.NewReader(`{"text":"明天见客户"}`))
+	request.Header.Set("Accept", "text/event-stream")
+	return request
+}
+
+func sseEventNames(body string) []string {
+	var events []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "event: ") {
+			events = append(events, strings.TrimPrefix(line, "event: "))
+		}
+	}
+	return events
+}
+
+func containsOrdered(events []string, want ...string) bool {
+	next := 0
+	for _, event := range events {
+		if next < len(want) && event == want[next] {
+			next++
+		}
+	}
+	return next == len(want)
+}
+
+type failDeltaResponseWriter = failSSEEventResponseWriter
+
+type failSSEEventResponseWriter struct {
+	header             http.Header
+	body               strings.Builder
+	status             int
+	failEvent          string
+	short              bool
+	failed             bool
+	writesAfterFailure int
+	bodyLenAtFailure   int
+}
+
+func (w *failSSEEventResponseWriter) Header() http.Header    { return w.header }
+func (w *failSSEEventResponseWriter) WriteHeader(status int) { w.status = status }
+func (w *failSSEEventResponseWriter) Flush()                 {}
+func (w *failSSEEventResponseWriter) Write(p []byte) (int, error) {
+	if w.failed {
+		w.writesAfterFailure++
+	}
+	if !w.failed && strings.Contains(string(p), "event: "+w.failEvent+"\n") {
+		w.failed = true
+		if w.short {
+			n := len(p) / 2
+			_, _ = w.body.Write(p[:n])
+			w.bodyLenAtFailure = w.body.Len()
+			return n, nil
+		}
+		w.bodyLenAtFailure = w.body.Len()
+		return 0, errors.New("client disconnected")
+	}
+	return w.body.Write(p)
+}
+
+type countingRouteRunner struct {
+	calls int
+}
+
+func (r *countingRouteRunner) Run(_ context.Context, _ agent.AdviceRunInput, _ agent.AdviceTextDeltaEmitter) (agent.AdviceRunOutput, error) {
+	r.calls++
+	return agent.AdviceRunOutput{AssistantText: "不应运行"}, nil
 }
 
 func (r *routeClothesRepo) CreateCoreItems(_ context.Context, items []clothes.Item) ([]clothes.Item, error) {

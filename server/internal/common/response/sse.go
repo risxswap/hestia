@@ -2,7 +2,6 @@ package response
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +19,18 @@ func WriteSSE(w io.Writer, event string, data any) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, payload)
-	return err
+	message := make([]byte, 0, len(event)+len(payload)+16)
+	message = append(message, "event: "...)
+	message = append(message, event...)
+	message = append(message, "\ndata: "...)
+	message = append(message, payload...)
+	message = append(message, '\n', '\n')
+	n, err := w.Write(message)
+	if err != nil {
+		return err
+	}
+	if n < len(message) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
