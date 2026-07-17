@@ -1,7 +1,9 @@
 package user
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +12,22 @@ import (
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/infra/config"
 )
+
+func TestRouterRegistersRequestLogging(t *testing.T) {
+	var logs bytes.Buffer
+	request := httptest.NewRequest(http.MethodGet, "/api/user/health", nil)
+	request.Header.Set("X-Request-ID", "req_router_test")
+	response := httptest.NewRecorder()
+
+	NewRouter(&baseapp.Deps{Logger: slog.New(slog.NewTextHandler(&logs, nil))}).ServeHTTP(response, request)
+
+	if got := response.Header().Get("X-Request-ID"); got != "req_router_test" {
+		t.Fatalf("expected request id response header, got %q", got)
+	}
+	if !strings.Contains(logs.String(), "request_id=req_router_test") {
+		t.Fatalf("expected request log, got %s", logs.String())
+	}
+}
 
 func TestHealth(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/user/health", nil)

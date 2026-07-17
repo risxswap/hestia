@@ -1,6 +1,8 @@
 package user
 
 import (
+	"log/slog"
+
 	baseapp "hestia/server/internal/app"
 	"hestia/server/internal/common/auth"
 	"hestia/server/internal/common/response"
@@ -17,6 +19,7 @@ import (
 	"hestia/server/internal/domain/onboarding"
 	"hestia/server/internal/domain/profile"
 	"hestia/server/internal/domain/report"
+	serverlogger "hestia/server/internal/infra/logger"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,6 +27,11 @@ import (
 func NewRouter(deps *baseapp.Deps) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	var log *slog.Logger
+	if deps != nil {
+		log = deps.Logger
+	}
+	router.Use(serverlogger.RequestLogging(log))
 	api := router.Group("/api/user")
 	api.GET("/health", health)
 	account.RegisterUserRoutes(api, deps)
