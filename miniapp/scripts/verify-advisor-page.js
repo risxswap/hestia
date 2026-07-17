@@ -31,6 +31,8 @@ try {
   assert(advisorWXML.includes('class="agent-process__summary"'), "advisor markup should render an agent process summary control");
   assert(advisorWXML.includes('bind:tap="handleToggleProcess"'), "agent process summary should be expandable");
   assert(!advisorWXML.includes("正在处理"), "agent process UI should show a stage summary instead of a generic processing label");
+  assert(!advisorWXML.includes("'你' : 'Hestia'"), "chat messages should not render sender names");
+  assert(!advisorWXML.includes('class="chat-message__meta"'), "chat messages should not render sender metadata");
   assert(advisorJSON.includes('"t-chat-markdown"'), "advisor page should register TDesign markdown rendering");
   assert(advisorWXML.includes("<t-chat-markdown"), "advisor markup should render assistant content with markdown support");
 

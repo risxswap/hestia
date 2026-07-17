@@ -11,7 +11,6 @@
         wx:key="id"
         class="chat-message chat-message--{{item.role}} {{item.status === 'error' ? 'chat-message--error' : ''}}"
       >
-        <view class="chat-message__meta">{{item.role === 'user' ? '你' : 'Hestia'}}</view>
         <view wx:if="{{item.role === 'assistant' && item.process}}" class="agent-process">
           <view
             class="agent-process__summary"
