@@ -60,11 +60,14 @@ func RegisterUserRoutes(group *gin.RouterGroup, deps *baseapp.Deps) {
 					},
 				}
 				metadata := AdviceRunMetadata{
-					UsageKey:      resolvedUsage.Usage.Key,
-					ProviderCode:  resolvedUsage.Provider.Code,
-					ModelCode:     resolvedUsage.Model.ModelCode,
-					PromptVersion: resolvedUsage.Usage.PromptVersion,
-					MaxIterations: einoADKMaxIterations,
+					UsageKey:       resolvedUsage.Usage.Key,
+					ProviderCode:   resolvedUsage.Provider.Code,
+					ModelCode:      resolvedUsage.Model.ModelCode,
+					ProviderHost:   providerHostFromURL(resolvedUsage.Provider.APIBaseURL),
+					AgentTimeoutMS: service.runnerTimeout.Milliseconds(),
+					LLMTimeoutMS:   llmTimeout.Milliseconds(),
+					PromptVersion:  resolvedUsage.Usage.PromptVersion,
+					MaxIterations:  einoADKMaxIterations,
 				}
 				if runner, err := NewEinoADKChatModelAdviceRunnerWithMetadata(context.Background(), chatModel, toolsConfig, metadata); err == nil {
 					service.SetAdviceRunner(runner)

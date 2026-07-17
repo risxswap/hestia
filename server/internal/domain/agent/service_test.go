@@ -57,6 +57,49 @@ func TestServiceLogsAdviceRunnerLifecycle(t *testing.T) {
 	}
 }
 
+func TestServiceLogsStructuredRunnerFailureDiagnostics(t *testing.T) {
+	var logs bytes.Buffer
+	runner := &metadataSpyAdviceRunner{
+		metadata: AdviceRunMetadata{
+			UsageKey:       "agent_chat",
+			ProviderCode:   "qwen",
+			ModelCode:      "qwen-plus",
+			ProviderHost:   "api.example.com",
+			AgentTimeoutMS: 75000,
+			LLMTimeoutMS:   60000,
+		},
+		err: errors.New("node path: [node_1, ChatModel] https://api.example.com/v1?q=secret Bearer secret-token API key: complete-secret sk-abcdefghijklmnopqrstuvwxyz eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature"),
+	}
+	service := NewServiceWithRunner(&spyAgentRepo{}, nil, runner)
+	service.SetLogger(slog.New(slog.NewJSONHandler(&logs, nil)))
+
+	if _, err := service.Chat(context.Background(), 12, "明天通勤怎么穿"); err != nil {
+		t.Fatalf("chat should use fallback: %v", err)
+	}
+	output := logs.String()
+	for _, expected := range []string{
+		`"provider_code":"qwen"`, `"model_code":"qwen-plus"`, `"provider_host":"api.example.com"`,
+		`"agent_timeout_ms":75000`, `"llm_timeout_ms":60000`, `"context_deadline":`,
+		`"context_error":"none"`, `"error_type":`, `"error_chain":`,
+		`"node_path":"node_1, ChatModel"`, `"timeout_source":"unknown"`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected %q in %s", expected, output)
+		}
+	}
+	for _, leaked := range []string{
+		"https://api.example.com/v1?q=secret",
+		"secret-token",
+		"complete-secret",
+		"sk-abcdefghijklmnopqrstuvwxyz",
+		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature",
+	} {
+		if strings.Contains(output, leaked) {
+			t.Fatalf("leaked %q in %s", leaked, output)
+		}
+	}
+}
+
 func TestServiceChatPersistsMessagesStepsAndUpdatesCurrentDraft(t *testing.T) {
 	repo := &spyAgentRepo{currentDraft: Draft{
 		ID:                10,
@@ -625,6 +668,17 @@ type spyAdviceRunner struct {
 	err             error
 	requireDeadline bool
 	hasDeadline     bool
+}
+
+type metadataSpyAdviceRunner struct {
+	metadata AdviceRunMetadata
+	err      error
+}
+
+func (r *metadataSpyAdviceRunner) Metadata() AdviceRunMetadata { return r.metadata }
+
+func (r *metadataSpyAdviceRunner) Run(context.Context, AdviceRunInput) (AdviceRunOutput, error) {
+	return AdviceRunOutput{}, r.err
 }
 
 type contextDeadlineRunner struct {

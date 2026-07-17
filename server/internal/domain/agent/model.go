@@ -130,11 +130,14 @@ type AdviceRunOutput struct {
 }
 
 type AdviceRunMetadata struct {
-	UsageKey      string
-	ProviderCode  string
-	ModelCode     string
-	PromptVersion string
-	MaxIterations int
+	UsageKey       string
+	ProviderCode   string
+	ModelCode      string
+	ProviderHost   string
+	AgentTimeoutMS int64
+	LLMTimeoutMS   int64
+	PromptVersion  string
+	MaxIterations  int
 }
 
 type AdviceToolCall struct {

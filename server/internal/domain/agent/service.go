@@ -361,11 +361,23 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 	}
 	output := AdviceRunOutput{}
 	var runnerErr error
+	runnerMetadata := AdviceRunMetadata{AgentTimeoutMS: s.runnerTimeout.Milliseconds()}
+	if provider, ok := s.runner.(interface{ Metadata() AdviceRunMetadata }); ok {
+		runnerMetadata = provider.Metadata()
+		if runnerMetadata.AgentTimeoutMS <= 0 {
+			runnerMetadata.AgentTimeoutMS = s.runnerTimeout.Milliseconds()
+		}
+	}
+	var errorDiagnostics agentErrorDiagnostics
 	if s.runner == nil {
 		runnerErr = ErrAdviceRunnerUnavailable
+		errorDiagnostics = diagnoseAgentError(ctx, runnerErr, runnerMetadata)
 	} else {
 		runnerCtx, cancelRunner := context.WithTimeout(ctx, s.runnerTimeout)
 		output, runnerErr = s.runner.Run(runnerCtx, runnerInput)
+		if runnerErr != nil {
+			errorDiagnostics = diagnoseAgentError(runnerCtx, runnerErr, runnerMetadata)
+		}
 		cancelRunner()
 	}
 	runnerFinishedAt := time.Now().UTC()
@@ -376,8 +388,9 @@ func (s *Service) chat(ctx context.Context, userID int64, text string, emit func
 		errorAttrs = append(errorAttrs,
 			"duration_ms", runnerDuration,
 			"error_stage", "agent_run",
-			"error", serverlogger.ErrorSummary(runnerErr),
+			"error", safeAgentErrorSummary(runnerErr),
 		)
+		errorAttrs = append(errorAttrs, errorDiagnostics.logAttrs()...)
 		runnerLog.ErrorContext(ctx, "agent llm call failed", errorAttrs...)
 		_ = s.recordFailedStep(ctx, AgentRunStepInput{
 			UserID:         userID,

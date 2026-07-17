@@ -28,6 +28,13 @@ func NewEinoADKAdviceRunnerWithMetadata(runner *adk.Runner, metadata AdviceRunMe
 	return &EinoADKAdviceRunner{runner: runner, metadata: normalizeAdviceRunMetadata(metadata)}
 }
 
+func (r *EinoADKAdviceRunner) Metadata() AdviceRunMetadata {
+	if r == nil {
+		return AdviceRunMetadata{}
+	}
+	return r.metadata
+}
+
 func NewEinoADKChatModelAdviceRunner(ctx context.Context, chatModel model.ToolCallingChatModel, tools adk.ToolsConfig) (*EinoADKAdviceRunner, error) {
 	return NewEinoADKChatModelAdviceRunnerWithMetadata(ctx, chatModel, tools, AdviceRunMetadata{})
 }
